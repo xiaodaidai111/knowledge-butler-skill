@@ -1,0 +1,8 @@
+interface:
+  display_name: "Knowledge Butler"
+  short_description: "Turn messy material into linked local knowledge notes."
+  brand_color: "#5B6CFF"
+  default_prompt: "Use $knowledge-butler to organize this material into my local knowledge base."
+
+policy:
+  allow_implicit_invocation: true
