@@ -5697,7 +5697,9 @@ const cloneAssistantFileForSearch = (file) => ({
 })
 const inferSearchScene = (text = '', files = []) => {
   const content = `${text || ''} ${files.map((file) => file.name || '').join(' ')}`.toLowerCase()
-  if (/摩托|cg-?125|发动机异响|发动机|气门|怠速|正时链条|张紧器|火花塞|化油器|凸轮轴|摇臂/.test(content) && !/车淹|泡水|涉水|积水|淹水|水淹/.test(content)) {
+  const hasWaterIntent = /车淹|泡水|涉水|积水|淹水|水淹|进水/.test(content)
+  const hasMotorcycleEngineIntent = /摩托|cg-?125|发动机异响|发动机|气门|怠速|正时链条|张紧器|火花塞|化油器|凸轮轴|摇臂/.test(content)
+  if (hasMotorcycleEngineIntent && !hasWaterIntent) {
     return {
       type: 'motorcycle_engine',
       deviceName: '摩托车发动机总成',
@@ -5708,7 +5710,7 @@ const inferSearchScene = (text = '', files = []) => {
       query: '基于本次输入和图片检索摩托车发动机异响；只根据当前图片、文字和本轮检索依据回答，不混入历史检索。重点检查气门间隙、正时链条/张紧器、摇臂/凸轮轴、机油润滑、火花塞、化油器怠速油路、进气漏气和曲轴连杆轴承。'
     }
   }
-  if (/车淹|泡水|涉水|积水|淹水|水淹|雨水|轮毂|车门|轿车|汽车|车辆/.test(content)) {
+  if (hasWaterIntent) {
     return {
       type: 'vehicle_water',
       deviceName: '涉水车辆',
@@ -5925,6 +5927,26 @@ const buildLocalSearchResult = () => {
 }
 const runSearch = async () => {
   const startedAt = Date.now()
+  const currentScene = inferSearchScene(searchForm.query, searchFiles.value)
+  const currentInputText = `${searchForm.query || ''} ${searchFiles.value.map((file) => file.name || '').join(' ')}`
+  if (currentScene) {
+    Object.assign(searchForm, {
+      deviceName: '',
+      deviceModel: '',
+      faultCode: '',
+      category: '',
+      faultType: ''
+    })
+    applySearchScene(currentScene)
+  } else if (!/车淹|泡水|涉水|积水|淹水|水淹|进水/.test(currentInputText) && /泡水|涉水|水淹|积水|进水/.test(`${searchForm.deviceName}${searchForm.category}${searchForm.faultType}`)) {
+    Object.assign(searchForm, {
+      deviceName: '',
+      deviceModel: '',
+      faultCode: '',
+      category: '',
+      faultType: ''
+    })
+  }
   loading.search = true
   searchPanel.value = 'results'
   try {
@@ -6181,7 +6203,7 @@ const createRunContextSnapshot = (prompt = '', attachments = []) => {
     (!text && activePage.value === 'search') ||
     (activePage.value === 'search' && /当前|这个|本次|检索|研判|报告|总结|生成|导出/.test(text))
   )
-  const currentSearchResult = promptLooksLikeCurrentSearch ? searchResult.value : null
+  const currentSearchResult = promptLooksLikeCurrentSearch && !scene && !files.length ? searchResult.value : null
   return {
     prompt: text,
     files: files.map((file) => ({ name: file.name, type: file.type, id: file.id || file.localId || '' })),
@@ -6555,6 +6577,19 @@ const longTaskReplyText = (data) => {
 
 const firstTruthy = (...values) => values.find((value) => value !== undefined && value !== null && String(value).trim() !== '') || ''
 const compactList = (items = []) => [...new Set(items.map((item) => String(item || '').trim()).filter(Boolean))]
+const createLatestSearchRunContext = (prompt = '', baseContext = {}) => ({
+  ...baseContext,
+  prompt: String(prompt || baseContext.prompt || ''),
+  files: snapshotFiles(searchFiles.value).map((file) => ({ name: file.name, type: file.type, id: file.id || file.localId || '' })),
+  searchForm: {
+    deviceName: searchForm.deviceName,
+    deviceModel: searchForm.deviceModel,
+    faultType: searchForm.faultType,
+    category: searchForm.category,
+    query: searchForm.query
+  },
+  searchResult: searchResult.value
+})
 
 const buildReportContext = (data = {}, uiSteps = []) => {
   const focus = data.focus || data.task || {}
@@ -6574,13 +6609,27 @@ const buildReportContext = (data = {}, uiSteps = []) => {
     ].join(' '),
     runContext.files || []
   )
+  const sceneText = [
+    runContext.prompt,
+    data.goal,
+    contextSearchForm.query,
+    contextSearchResult?.query,
+    focus.fault_type,
+    focus.description,
+    ...(runContext.files || []).map((file) => file.name || '')
+  ].join(' ')
+  const hasMotorcycleEngineIntent = scene?.type === 'motorcycle_engine' || /摩托|cg-?125|发动机异响|气门|怠速|正时链条|张紧器|火花塞|化油器/.test(sceneText)
+  const hasWaterIntent = /车淹|泡水|涉水|积水|淹水|水淹|进水/.test(sceneText)
   const device = firstTruthy(contextSearchResult?.device?.name, contextSearchResult?.device_name, focus.equipment_name, focus.equipment, scene?.deviceName, contextSearchForm.deviceName, '待确认设备')
   const model = firstTruthy(contextSearchResult?.device?.model, contextSearchResult?.device_model, focus.equipment_model, focus.model, scene?.deviceModel, contextSearchForm.deviceModel)
   const fault = firstTruthy(contextSearchResult?.fault?.type, contextSearchResult?.fault_type, focus.fault_type, scene?.faultType, contextSearchForm.faultType, focus.description, data.goal, '待确认故障')
   const risk = firstTruthy(contextSearchResult?.risk?.level, contextSearchResult?.risk, focus.severity, contextSearchResult?.riskLevel, '待评估')
-  const refs = Array.isArray(contextSearchResult?.references)
+  const rawRefs = Array.isArray(contextSearchResult?.references)
     ? contextSearchResult.references
     : (Array.isArray(contextSearchResult?.matched_manuals) ? contextSearchResult.matched_manuals : [])
+  const refs = hasMotorcycleEngineIntent && !hasWaterIntent
+    ? rawRefs.filter((item) => !/泡水|涉水|水淹|积水|进水/.test(`${item.title || ''}${item.category || ''}${item.summary || ''}${(item.tags || []).join('')}`))
+    : rawRefs
   const sop = Array.isArray(contextSearchResult?.suggestion?.steps)
     ? contextSearchResult.suggestion.steps
     : (Array.isArray(contextSearchResult?.recommended_sop) ? contextSearchResult.recommended_sop.map((item) => item.action || item.title || item.detail).filter(Boolean) : [])
@@ -6598,8 +6647,8 @@ const buildReportContext = (data = {}, uiSteps = []) => {
     sop,
     agents,
     sceneType: scene?.type || '',
-    isMotorcycleEngine: scene?.type === 'motorcycle_engine' || /摩托|cg-?125|发动机|气门|怠速|正时链条|张紧器|火花塞|化油器/.test(`${device} ${model} ${fault} ${data.goal || ''}`),
-    isVehicleWater: scene?.type === 'vehicle_water' || (/车|车辆|汽车|泡水|涉水|积水|水淹/.test(`${device} ${fault} ${data.goal || ''}`) && !/摩托|cg-?125|发动机异响|气门|怠速|正时链条/.test(`${device} ${model} ${fault} ${data.goal || ''}`)),
+    isMotorcycleEngine: hasMotorcycleEngineIntent || /摩托|cg-?125|发动机异响|气门|怠速|正时链条|张紧器|火花塞|化油器/.test(`${device} ${model} ${fault}`),
+    isVehicleWater: !hasMotorcycleEngineIntent && (scene?.type === 'vehicle_water' || hasWaterIntent || /泡水|涉水|积水|水淹|进水/.test(`${device} ${fault}`)),
     highlights: compactList([
       ...digest.slice(0, 5).map((step) => step.content || step.expected_output || step.title),
       contextSearchResult?.diagnosis,
@@ -6779,10 +6828,14 @@ const buildReportRecommendations = (ctx = {}) => {
       ['知识库', '待审核', '经验复用']
     )
   )
-  return base.slice(0, ctx.isVehicleWater || ctx.isMotorcycleEngine ? 5 : 4)
+  const scoped = ctx.isMotorcycleEngine && !ctx.isVehicleWater
+    ? base.filter((item) => !/泡水|涉水|水淹|积水|进水/.test(`${item.title}${item.reason}${item.sections.join('')}${item.tags.join('')}`))
+    : base
+  return scoped.slice(0, ctx.isVehicleWater || ctx.isMotorcycleEngine ? 5 : 4)
 }
 
 const buildTaskReportRecommendations = (task = {}) => {
+  const taskText = `${task?.equipment_name || ''}${task?.equipment || ''}${task?.equipment_model || ''}${task?.model || ''}${task?.description || ''}${task?.title || ''}${task?.fault_type || ''}`
   const ctx = {
     device: task?.equipment_name || task?.equipment || '待确认设备',
     model: task?.equipment_model || task?.model || '',
@@ -6791,7 +6844,8 @@ const buildTaskReportRecommendations = (task = {}) => {
     refs: [],
     sop: Array.isArray(task?.sop) ? task.sop.map(stepTitle) : [],
     highlights: [task?.description, task?.recheck?.comment],
-    isVehicleWater: /车|车辆|汽车|泡水|涉水|积水|水淹/.test(`${task?.equipment_name || ''}${task?.description || ''}${task?.title || ''}`)
+    isMotorcycleEngine: /摩托|cg-?125|发动机异响|气门|怠速|正时链条|张紧器|火花塞|化油器/.test(taskText),
+    isVehicleWater: !/摩托|cg-?125|发动机异响|气门|怠速|正时链条|张紧器|火花塞|化油器/.test(taskText) && /泡水|涉水|积水|水淹|进水/.test(taskText)
   }
   return buildReportRecommendations(ctx).slice(0, 4)
 }
@@ -6957,6 +7011,9 @@ const runTiangongLongTask = async (value, sourcePage, options = {}) => {
     if (transferAttachments.length) {
       assistantFiles.value = []
     }
+    finalMsg.report = buildAiosReport({ ...data, context: createLatestSearchRunContext(value, runContext), goal: value }, uiSteps)
+    const latestIdx = operatorMessages.value.findIndex((m) => m.id === finalMsg.id)
+    if (latestIdx >= 0) operatorMessages.value.splice(latestIdx, 1, { ...finalMsg })
   } else {
     tgRunUi.statusText = '规划失败'
     tgRunUi.outputText = '后端未返回可执行步骤，请换一条更明确的业务指令。'
@@ -7487,9 +7544,17 @@ const tgTransferAttachmentsToSearch = async (attachments = [], step = {}) => {
   searchPanel.value = 'multimodal'
   selectedAgentId.value = 'guanwei'
   searchResult.value = null
+  selectedAiosReport.value = null
   const keyword = step.input?.keyword || step.text || operatorInput.value || ''
   const scene = inferSearchScene(keyword, attachments)
   if (scene) {
+    Object.assign(searchForm, {
+      deviceName: '',
+      deviceModel: '',
+      faultCode: '',
+      category: '',
+      faultType: ''
+    })
     applySearchScene(scene)
     searchForm.query = `${scene.query} 已知用户指令：${keyword || '仅上传了现场图片'}`
   } else {
