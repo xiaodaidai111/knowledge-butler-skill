@@ -5715,12 +5715,12 @@ const inferSearchScene = (text = '', files = []) => {
   if (hasWaterIntent) {
     return {
       type: 'vehicle_water',
-      deviceName: '涉水车辆',
+      deviceName: '',
       deviceModel: '',
       faultCode: '',
-      category: '汽车涉水检修',
-      faultType: '泡水/涉水风险',
-      query: '基于现场图片分析车辆泡水/涉水风险；只根据图片和已知描述判断，不确定的车型、型号、受损程度请留空或标注待确认。重点检查发动机进气、机油乳化、变速箱油、电气线束、制动系统、底盘、车内地毯和安全启动风险。'
+      category: '',
+      faultType: '',
+      query: '基于本次输入和图片进行检索；只根据当前图片、文字和本轮检索依据回答，不套用旧案例。若现场确认为泡水/涉水，再检查发动机进气、机油乳化、变速箱油、电气线束、制动系统、底盘和安全启动风险。'
     }
   }
   return null
@@ -5865,7 +5865,7 @@ const buildLocalSearchResult = () => {
   if (scene?.type === 'motorcycle_engine') {
     const subject = [scene.deviceModel || searchForm.deviceModel, scene.deviceName || searchForm.deviceName].filter(Boolean).join(' ') || '摩托车发动机'
     return {
-      phenomenonSummary: `${subject}出现发动机异响/怠速不稳线索；车型、里程、冷车/热车差异和检测数值均待确认。本次只按当前图片与输入重新检索，不引用旧涉水车辆结果。`,
+      phenomenonSummary: `${subject}出现发动机异响/怠速不稳线索；车型、里程、冷车/热车差异和检测数值均待确认。本次只按当前图片与输入重新检索，不引用旧检索结果。`,
       risk: 'medium',
       confidence: searchFiles.value.length ? 87 : 82,
       stopAdvice: '先停机冷却并确认机油液位；异响明显、敲击加重或润滑异常时不要继续高转速试车。',
