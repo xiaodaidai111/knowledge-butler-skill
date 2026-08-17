@@ -1,0 +1,15 @@
+.git
+.claude
+tmp
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.venv
+**/venv
+deploy-package-*.tar.gz
+frontend
+deploy/mp-weixin
+deploy/mp-weixin.bak-*
+deploy/uniapp-native-shell
+*.log
+*.tmp

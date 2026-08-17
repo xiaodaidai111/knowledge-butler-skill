@@ -19,3 +19,4 @@ cryptography
 lightrag-hku
 openai
 tiktoken
+gunicorn

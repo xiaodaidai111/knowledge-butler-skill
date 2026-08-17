@@ -755,10 +755,10 @@ input:focus, textarea:focus, select:focus {
 }
 
 /* ===== 登录页与弹窗 ===== */
-.auth-visual { background: linear-gradient(145deg, #0b4b49 0%, #146b66 55%, #257e77 100%); }
-.auth-grid { opacity: .12; background-size: 64px 64px; }
+.auth-visual { background: linear-gradient(145deg, #e9f8ff 0%, #bfe6ff 46%, #7fc6ef 100%); color: #17364a; }
+.auth-grid { opacity: .42; background-size: 54px 54px; }
 .auth-capabilities article { border-radius: 12px; backdrop-filter: blur(8px); }
-.auth-card { border-radius: 20px; box-shadow: 0 24px 64px rgba(30,68,72,.12); }
+.auth-card { border-radius: 20px; box-shadow: 0 24px 64px rgba(56,118,153,.14); }
 
 .modal { backdrop-filter: blur(5px); }
 .modal-card { border-radius: 18px; box-shadow: 0 24px 70px rgba(18,49,55,.2); }

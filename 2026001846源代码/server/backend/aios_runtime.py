@@ -7,6 +7,73 @@ from datetime import datetime
 from typing import Any
 
 
+AIOS_TECH_STACK: dict[str, dict[str, str]] = {
+    "orchestration": {
+        "name": "LangGraph",
+        "role": "多智能体编排与状态图",
+        "effect": "把用户目标拆成可追踪节点，管理依赖、分支、重试、恢复和人工审批。",
+    },
+    "tools": {
+        "name": "MCP",
+        "role": "统一工具协议",
+        "effect": "把任务、知识库、文件、图谱、联系人、审批、报告等系统能力暴露给 Agent 调用。",
+    },
+    "sandbox": {
+        "name": "E2B",
+        "role": "安全执行沙箱",
+        "effect": "用于文件解析、脚本验证、临时计算和高风险工具调用隔离，避免影响业务主环境。",
+    },
+    "memory": {
+        "name": "Postgres + pgvector",
+        "role": "长期记忆与向量检索",
+        "effect": "保存会话、用户偏好、设备状态、检修经验、知识切片和跨模态向量索引。",
+    },
+    "entry": {
+        "name": "FastAPI",
+        "role": "AIOS 统一入口",
+        "effect": "承载 Agent、Workflow、Trace、Memory、RAG、MCP 和多渠道 API。",
+    },
+    "observability": {
+        "name": "LangSmith",
+        "role": "运行观测与 Trace",
+        "effect": "记录模型调用、工具调用、智能体协作链路、耗时、错误和人工审批节点。",
+    },
+}
+
+
+TIANGONG_OPERATION_PROMPT = """
+你是“天工”，一修设备检修系统的 AIOS 总控智能体。你运行在 LangGraph（编排）+ MCP（工具）+ E2B（沙箱）+ Postgres/pgvector（记忆）+ FastAPI（入口）+ LangSmith（观测）的智能体技术栈上。
+
+你的目标不是只回答问题，而是像系统里的执行代理一样，根据用户自然语言指令，规划并操作一修 Web 工作台的所有页面：首页、智能检索、检修任务、知识库、个人中心，以及各页面中的弹窗、抽屉、筛选、上传、详情、审核、复检、联系人交流和悬浮智能体。
+
+收到复杂任务时，必须先给出不少于 10 步的可视化执行计划。每一步都要包含：步骤编号、目标页面、负责智能体、要调用的工具或页面动作、输入数据、预期结果、是否需要人工确认。计划必须按可执行顺序组织，并标明依赖关系。
+
+多智能体分工规则：
+1. 天工负责理解目标、拆解步骤、选择页面、调度其他智能体、汇总结果。
+2. 观微负责多模态检索、图片/文档/型号/故障码分析、RAG 资料召回。
+3. 执矩负责检修任务、SOP、作业步骤、安全确认、工单流转。
+4. 博闻负责知识库、文件管理、知识图谱、知识沉淀、版本和审核。
+5. 和鸣负责联系人交流、任务群聊、专家支援、消息总结和协作纪要。
+6. 明鉴负责复检评估、质量评分、风险核查、报告验收和闭环确认。
+
+执行策略：
+- 先感知系统状态，再规划；先读数据，再写数据。
+- 优先调用 MCP 工具读取真实任务、文件、知识、联系人、审批和 Trace。
+- 需要文件解析、代码计算、批量整理或不可信输入处理时，先放入 E2B 沙箱。
+- 需要上下文延续时，读取 Postgres/pgvector 中的会话记忆、设备记忆和知识向量。
+- 需要观察运行过程时，向 LangSmith Trace 写入模型调用、工具调用、Agent 调用、审批和错误。
+- 涉及创建任务、更新知识库、提交复检、删除文件、生成正式报告等高风险动作时，必须触发 Human-in-the-loop：展示“拒绝 / 批准”，批准后再继续。
+- 如果用户要求“让我看到过程”，输出可视化 UI_PLAN，让前端显示页面跳转、输入、点击、筛选、打开详情、等待结果、调用智能体和完成状态。
+- 如果某一步失败，说明失败原因，给出补救步骤，并允许从失败步骤继续执行。
+
+可视化 UI_PLAN 输出要求：
+在需要操作页面时，回复末尾输出 [UI_PLAN] JSON。JSON 至少包含 10 个 steps，每个 step 包含 action、page、agent、target、input、reason、expected、requiresApproval。动作可使用 navigate、search、filter、openPanel、upload、preview、invokeAgent、createTask、openKnowledgeGraph、openChat、summarize、approve、report、finish。
+
+回答风格：
+面向检修人员，不展示密钥、端口、接口路径、数据库连接串或开发日志。用清晰自然的中文说明“我准备做什么、正在做什么、做成了什么、还需要你确认什么”。
+""".strip()
+
+
 AGENT_OUTPUT_SCHEMAS: dict[str, dict[str, str]] = {
     "tiangong": {"summary": "string", "plan": "object", "next_action": "object"},
     "guanwei": {"summary": "string", "references": "array", "suggestion": "string"},
@@ -18,7 +85,7 @@ AGENT_OUTPUT_SCHEMAS: dict[str, dict[str, str]] = {
 
 
 AGENT_PROMPTS: dict[str, str] = {
-    "tiangong": "你是 AIOS 总控，只做任务拆解、依赖判断、风险优先级和跨智能体调度。",
+    "tiangong": TIANGONG_OPERATION_PROMPT,
     "guanwei": "你是检索智能体，只输出证据、引用、相似案例和不确定性，不直接修改业务数据。",
     "zhiju": "你是作业智能体，只输出 SOP、工具备件、安全确认和工单状态建议。",
     "bowen": "你是知识智能体，只生成待审核知识候选，不绕过人工审核入库。",
@@ -28,7 +95,11 @@ AGENT_PROMPTS: dict[str, str] = {
 
 
 AGENT_TOOL_ALLOWLISTS: dict[str, list[str]] = {
-    "tiangong": ["aios_plan", "aios_execute", "agent_dispatch", "system_overview"],
+    "tiangong": [
+        "aios_platform", "aios_plan", "aios_execute", "aios_inspect", "aios_approval",
+        "agent_dispatch", "agent_status", "agent_invoke", "system_overview",
+        "maintenance_task", "knowledge_search", "knowledge_graph", "database_status",
+    ],
     "guanwei": ["knowledge_search", "rag_query", "file_parse", "vision_analyze"],
     "zhiju": ["sop_generate", "safety_check", "task_update"],
     "bowen": ["knowledge_link", "knowledge_candidate_create", "version_read"],
@@ -104,7 +175,7 @@ AIOS_ACTION_REGISTRY: dict[str, dict[str, Any]] = {
 
 
 FINAL_STATES = {"done", "failed", "compensated", "skipped"}
-EXECUTABLE_STATES = {"pending", "retrying"}
+EXECUTABLE_STATES = {"pending", "retrying", "blocked", "waiting_approval"}
 
 
 @dataclass(frozen=True)
@@ -308,3 +379,26 @@ def _workflow_state(nodes: list[dict[str, Any]]) -> str:
     if "blocked" in states:
         return "blocked"
     return "planned"
+
+
+# ---------------------------------------------------------------------------
+# LangGraph Supervisor 委托入口
+# 新架构（aios_arch.langgraph_supervisor）按 StateGraph + conditional edges 编排，
+# 经 MCP Gateway 调用工具、OPA Guard 拦截 write、Memory Layer 沉淀记忆、Trace 全链路。
+# 本函数对外保持稳定契约：返回 {run_id, trace_id, plan, artifacts, decisions, final_report}。
+# ---------------------------------------------------------------------------
+def supervisor_execute(goal: str, mode: str = "auto", task_id: str = "",
+                       execute_all: bool = True, approve_all: bool = True,
+                       actor: dict[str, Any] | None = None,
+                       session_id: str = "") -> dict[str, Any]:
+    """天工 Supervisor 长任务闭环入口（不破坏老状态机语义）。"""
+    try:
+        from aios_arch.langgraph_supervisor import run_supervisor
+    except Exception as exc:  # noqa: BLE001
+        return {"run_id": "", "trace_id": "", "error": f"supervisor_unavailable: {exc}",
+                "artifacts": {}, "decisions": [], "final_report": {}}
+    return run_supervisor(
+        goal=goal, mode=mode, task_id=task_id,
+        execute_all=execute_all, approve_all=approve_all,
+        actor=actor, session_id=session_id,
+    )

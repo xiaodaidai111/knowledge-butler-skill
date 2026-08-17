@@ -206,6 +206,71 @@ def insert_text(text: str) -> bool:
     return _run_async(_ainsert_text(text))
 
 
+def insert_chunks(chunks: list, source: str = "") -> dict:
+    """批量插入切片文本，返回成功/失败计数。"""
+    if not chunks:
+        return {"success": True, "total": 0, "inserted": 0, "failed": 0}
+    inserted = 0
+    failed_items = []
+    for idx, chunk in enumerate(chunks):
+        text = str(chunk or "").strip()
+        if not text:
+            continue
+        # 给每块加上来源前缀，便于检索时回溯
+        full_text = f"[来源:{source or '未知'}]\n{text}" if source else text
+        try:
+            if _run_async(_ainsert_text(full_text)):
+                inserted += 1
+            else:
+                failed_items.append(idx)
+        except Exception as exc:
+            logger.error("切片 %d 插入失败: %s", idx, exc)
+            failed_items.append(idx)
+    return {
+        "success": len(failed_items) == 0,
+        "total": len(chunks),
+        "inserted": inserted,
+        "failed": len(failed_items),
+        "failed_indices": failed_items,
+    }
+
+
+def search_similar(query: str, limit: int = 5, mode: str = "hybrid") -> list:
+    """
+    向量相似度检索：调用 LightRAG 检索，返回 top 命中块。
+    若 LightRAG 未就绪，回退到知识库 JSON 关键词匹配。
+    """
+    if not query:
+        return []
+    # 优先用 LightRAG hybrid 检索
+    try:
+        rag = get_rag_instance()
+        if rag is not None:
+            from lightrag import QueryParam
+            result_text = _run_async(_aquery(query, mode=mode))
+            # 把整段结果按段落切片返回
+            if result_text and result_text != _fallback_rag_answer(query):
+                paragraphs = [p.strip() for p in result_text.split("\n\n") if p.strip()]
+                return [{"text": p, "score": 1.0, "source": "lightrag"} for p in paragraphs[:limit]]
+    except Exception as exc:
+        logger.warning("LightRAG 检索失败，回退到本地匹配: %s", exc)
+
+    # 回退：从本地 knowledge_base.json 关键词匹配
+    from services.knowledge_retriever import load_knowledge_base
+    kb = load_knowledge_base()
+    if not kb:
+        return []
+    query_lower = query.lower()
+    scored = []
+    for item in kb:
+        text = json.dumps(item, ensure_ascii=False).lower()
+        score = sum(1 for word in query_lower.split() if word and word in text)
+        if score > 0:
+            scored.append({"text": item.get("title", ""), "score": score, "source": "local", "raw": item})
+    scored.sort(key=lambda x: x.get("score", 0), reverse=True)
+    return scored[:limit]
+
+
 def insert_knowledge_base(kb_path: str) -> dict:
     """批量导入 knowledge_base.json"""
     if not os.path.exists(kb_path):

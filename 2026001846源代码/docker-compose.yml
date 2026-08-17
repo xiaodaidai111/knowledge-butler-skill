@@ -1,0 +1,57 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: device-maintenance-backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      FLASK_ENV: production
+      DATABASE_HOST: mysql
+      DATABASE_PORT: 3306
+      DATABASE_USER: root
+      DATABASE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change-me}
+      DATABASE_NAME: ${MYSQL_DATABASE:-health_diet_db}
+      SECRET_KEY: ${SECRET_KEY:-change-this-secret-key}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-this-jwt-secret-key}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      AMAP_API_KEY: ${AMAP_API_KEY:-}
+    volumes:
+      - backend_uploads:/app/server/uploads
+      - backend_data:/app/server/backend/data
+      - backend_lightrag:/app/server/backend/lightrag_storage
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.0
+    container_name: device-maintenance-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change-me}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-health_diet_db}
+    ports:
+      - "3306:3306"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./server/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./server/database/community_schema.sql:/docker-entrypoint-initdb.d/02-community.sql:ro
+      - ./server/database/equipment_maintenance_schema.sql:/docker-entrypoint-initdb.d/03-equipment.sql:ro
+      - ./server/database/init.sql:/docker-entrypoint-initdb.d/04-init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql_data:
+  backend_uploads:
+  backend_data:
+  backend_lightrag:

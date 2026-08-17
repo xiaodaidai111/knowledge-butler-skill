@@ -21,7 +21,7 @@ def _load_map_agent():
     os.environ['LANGCHAIN_ENDPOINT'] = ''
     
     import importlib.util
-    map_agent_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'frontend', 'map-agent')
+    map_agent_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'map-agent')
     map_agent_dir = os.path.abspath(map_agent_dir)
     main_file = os.path.join(map_agent_dir, 'main.py')
 

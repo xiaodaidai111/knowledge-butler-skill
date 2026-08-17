@@ -10,7 +10,6 @@ set -e  # 遇到错误立即退出
 APP_NAME="device-maintenance"
 APP_DIR="/opt/${APP_NAME}"
 BACKEND_DIR="${APP_DIR}/backend"
-FRONTEND_DIR="${APP_DIR}/frontend"
 UPLOADS_DIR="${BACKEND_DIR}/uploads"
 VENV_DIR="${BACKEND_DIR}/venv"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
@@ -102,7 +101,6 @@ create_directories() {
 
     sudo mkdir -p ${APP_DIR}
     sudo mkdir -p ${BACKEND_DIR}
-    sudo mkdir -p ${FRONTEND_DIR}
     sudo mkdir -p ${UPLOADS_DIR}
 
     # 设置权限
@@ -187,51 +185,7 @@ EOF
 }
 
 # ============================================================
-# 6. 部署前端代码
-# ============================================================
-deploy_frontend() {
-    print_info "部署前端代码..."
-
-    # 检查是否有编译好的 H5 文件
-    if [ -d "frontend/dist/build/h5" ]; then
-        cp -r frontend/dist/build/h5/* ${FRONTEND_DIR}/
-        print_info "前端代码部署完成"
-    elif [ -d "frontend/dist/h5" ]; then
-        cp -r frontend/dist/h5/* ${FRONTEND_DIR}/
-        print_info "前端代码部署完成"
-    else
-        print_warn "未找到编译好的前端文件"
-        print_warn "请在开发机上执行: npm run build:h5"
-        print_warn "然后将 dist/build/h5 目录内容复制到 ${FRONTEND_DIR}/"
-
-        # 创建一个简单的提示页面
-        cat > "${FRONTEND_DIR}/index.html" << 'EOF'
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>设备检修知识作业系统</title>
-    <style>
-        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f7fa; }
-        .container { text-align: center; padding: 40px; background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-        h1 { color: #1f2937; }
-        p { color: #6b7280; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🔧 设备检修知识作业系统</h1>
-        <p>前端文件尚未部署，请按照文档说明编译并上传前端代码</p>
-        <p>后端 API 地址: <a href="/api/health">/api/health</a></p>
-    </div>
-</body>
-</html>
-EOF
-    fi
-}
-
-# ============================================================
-# 7. 配置 Systemd 服务
+# 6. 配置 Systemd 服务
 # ============================================================
 setup_systemd() {
     print_info "配置 Systemd 服务..."
@@ -274,7 +228,7 @@ EOF
 }
 
 # ============================================================
-# 8. 配置 Nginx
+# 7. 配置 Nginx
 # ============================================================
 setup_nginx() {
     print_info "配置 Nginx..."
@@ -284,17 +238,17 @@ server {
     listen 80;
     server_name _;  # 修改为实际域名或 IP
 
-    # 前端静态文件
+    # 后端服务入口：本项目已移除 H5 / uni-app 前端，根路径直接转发到 Flask。
     location / {
-        root /opt/device-maintenance/frontend;
-        index index.html;
-        try_files $uri $uri/ /index.html;
-
-        # 缓存静态资源
-        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-            expires 1y;
-            add_header Cache-Control "public, immutable";
-        }
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 120s;
+        client_max_body_size 16M;
     }
 
     # 后端 API 代理
@@ -363,7 +317,7 @@ EOF
 }
 
 # ============================================================
-# 9. 启动服务
+# 8. 启动服务
 # ============================================================
 start_services() {
     print_info "启动服务..."
@@ -379,7 +333,7 @@ start_services() {
 }
 
 # ============================================================
-# 10. 验证部署
+# 9. 验证部署
 # ============================================================
 verify_deployment() {
     print_info "验证部署..."
@@ -454,7 +408,6 @@ main() {
     create_directories
     deploy_backend
     setup_environment
-    deploy_frontend
     setup_systemd
     setup_nginx
     start_services

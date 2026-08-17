@@ -961,7 +961,7 @@
                       <button v-if="message.card" class="message-card" type="button" @click="openMessageCard(message.card)">
                         <b>{{ message.card.title }}</b><small>{{ message.card.desc }}</small>
                       </button>
-                      <small>{{ message.time }}</small>
+                      <small>{{ message.time }}<em v-if="message.syncFailed"> · 发送失败</em></small>
                     </div>
                   </article>
                 </div>
@@ -1682,15 +1682,46 @@
           </div>
           <div v-for="message in currentOperatorMessages" :key="message.id" :class="['bubble', message.role, { loading: message.loading }]">
             <span v-if="message.loading" class="loading-dots"><i></i><i></i><i></i></span>
-            <details v-if="false && message.steps && message.steps.length" class="tiangong-trace" v-show="!message.loading">
-              <summary>天工执行过程 · {{ message.steps.length }} 步 · {{ message.toolCalls || 0 }} 次工具调用</summary>
+            <div v-if="message.attachments?.length" class="message-attachments">
+              <figure v-for="file in message.attachments" :key="file.localId || file.name" :class="{ image: file.type === '图片' }">
+                <img v-if="file.type === '图片' && file.url" :src="file.url" :alt="file.name" />
+                <span v-else>{{ file.type || '附件' }}</span>
+                <figcaption>
+                  <b>{{ file.name }}</b>
+                  <small>{{ file.sizeText || file.size || file.status || '已添加' }}</small>
+                </figcaption>
+              </figure>
+            </div>
+            <details v-if="message.steps && message.steps.length" class="tiangong-trace" v-show="!message.loading">
+              <summary>天工执行过程 · {{ message.steps.length }} 步</summary>
               <div v-for="(step, idx) in message.steps" :key="idx" class="trace-step">
                 <span class="trace-tag" :class="step.type">{{ stepLabel(step.type) }}</span>
-                <span v-if="step.tool" class="trace-tool">{{ step.tool }}<template v-if="step.args && Object.keys(step.args).length"> · {{ JSON.stringify(step.args) }}</template></span>
+                <span v-if="step.tool" class="trace-tool">{{ step.tool }}</span>
                 <span class="trace-text">{{ step.content || traceResult(step) }}</span>
               </div>
             </details>
-            {{ message.text }}
+            <details v-if="message.report" class="aios-result-report">
+              <summary>
+                <span>AIOS</span>
+                <div>
+                  <small>{{ message.report.subtitle }}</small>
+                  <b>{{ message.report.title }}</b>
+                </div>
+                <em>展开</em>
+              </summary>
+              <div class="aios-report-metrics">
+                <span v-for="metric in message.report.metrics" :key="metric.label">
+                  <small>{{ metric.label }}</small>
+                  <b>{{ metric.value }}</b>
+                </span>
+              </div>
+              <section class="aios-report-section">
+                <h4>执行结论</h4>
+                <p>{{ message.report.conclusion }}</p>
+              </section>
+              <button class="aios-report-open" type="button" @click="selectedAiosReport = message.report">查看完整报告</button>
+            </details>
+            <template v-else>{{ message.text }}</template>
           </div>
           <button class="quick-card" type="button" @click="runOperatorPrimary">
             <span>
@@ -1781,6 +1812,16 @@
           </div>
           <div v-for="message in currentOperatorMessages" :key="message.id" :class="['bubble', message.role, { loading: message.loading }]">
             <span v-if="message.loading" class="loading-dots"><i></i><i></i><i></i></span>
+            <div v-if="message.attachments?.length" class="message-attachments compact">
+              <figure v-for="file in message.attachments" :key="file.localId || file.name" :class="{ image: file.type === '图片' }">
+                <img v-if="file.type === '图片' && file.url" :src="file.url" :alt="file.name" />
+                <span v-else>{{ file.type || '附件' }}</span>
+                <figcaption>
+                  <b>{{ file.name }}</b>
+                  <small>{{ file.sizeText || file.size || '已添加' }}</small>
+                </figcaption>
+              </figure>
+            </div>
             {{ message.text }}
           </div>
         </div>
@@ -1908,6 +1949,42 @@
         <section><h3>标准作业记录</h3><ol><li v-for="(step, index) in reportTask.sop || []" :key="index"><b>{{ stepTitle(step) }}</b><span>{{ isTaskStepCompleted(reportTask, index) ? '已确认完成' : '待补充记录' }}</span></li></ol></section>
         <section v-if="reportTask.recheck"><h3>复检结论</h3><p>{{ reportTask.recheck.result }} · {{ reportTask.recheck.comment || '未填写补充说明' }}</p></section>
         <div class="actions"><button type="button" @click="windowPrint">打印 / 导出 PDF</button><button class="primary" type="button" @click="reportTask = null">完成预览</button></div>
+      </article>
+    </div>
+
+    <div v-if="selectedAiosReport" class="modal" @click.self="selectedAiosReport = null">
+      <article class="modal-card aios-report-page">
+        <button class="close" type="button" @click="selectedAiosReport = null">×</button>
+        <header>
+          <span>AIOS</span>
+          <div>
+            <p class="eyebrow">天工执行结果</p>
+            <h2>{{ selectedAiosReport.title }}</h2>
+            <small>{{ selectedAiosReport.subtitle }}</small>
+          </div>
+        </header>
+        <div class="aios-page-metrics">
+          <span v-for="metric in selectedAiosReport.metrics" :key="metric.label">
+            <small>{{ metric.label }}</small>
+            <b>{{ metric.value }}</b>
+          </span>
+        </div>
+        <section class="aios-page-conclusion">
+          <h3>执行结论</h3>
+          <p>{{ selectedAiosReport.conclusion }}</p>
+        </section>
+        <section class="aios-page-blocks">
+          <article v-for="block in selectedAiosReport.blocks" :key="block.title">
+            <h3>{{ block.title }}</h3>
+            <ul>
+              <li v-for="item in block.items" :key="item">{{ item }}</li>
+            </ul>
+          </article>
+        </section>
+        <footer>
+          <span v-for="tag in selectedAiosReport.tags" :key="tag">{{ tag }}</span>
+          <button class="primary" type="button" @click="selectedAiosReport = null">完成查看</button>
+        </footer>
       </article>
     </div>
 
@@ -2208,15 +2285,38 @@
     <section v-if="tgRunUi.visible" class="tg-run-overlay" aria-label="天工执行过程">
       <div class="tg-run-card">
         <header>
-          <span class="tg-run-mark">天工</span>
+          <span class="tg-run-mark">
+            <img src="/static/agents/tiangong.png" alt="天工" @error="handleAgentAvatarError" />
+            <i></i>
+          </span>
           <div>
-            <small>长任务执行中</small>
+            <small>{{ tgRunUi.statusText }}</small>
             <b>{{ tgRunUi.title }}</b>
           </div>
           <em>{{ tgRunUi.current }}/{{ tgRunUi.total }}</em>
         </header>
         <div class="tg-run-progress"><span :style="{ width: tgRunUi.progress + '%' }"></span></div>
-        <p>{{ tgRunUi.detail }}</p>
+        <p class="tg-run-detail">{{ tgRunUi.detail }}</p>
+        <div class="tg-run-io">
+          <span><small>负责智能体</small><b>{{ tgRunUi.agentName }}</b></span>
+          <span><small>目标页面</small><b>{{ tgRunUi.page }}</b></span>
+          <span><small>调用动作</small><b>{{ tgRunUi.tool }}</b></span>
+        </div>
+        <div class="tg-run-exchange">
+          <section>
+            <small>输入</small>
+            <p>{{ tgRunUi.inputText }}</p>
+          </section>
+          <section>
+            <small>输出</small>
+            <p>{{ tgRunUi.outputText }}</p>
+          </section>
+        </div>
+        <div class="tg-run-cognition">
+          <span><small>感知</small><b>{{ tgRunUi.observation }}</b></span>
+          <span><small>决策</small><b>{{ tgRunUi.decision }}</b></span>
+          <span><small>校验</small><b>{{ tgRunUi.check }}</b></span>
+        </div>
         <div class="tg-run-steps">
           <span
             v-for="step in tgRunUi.steps"
@@ -2409,6 +2509,7 @@ const selectedTask = ref(null)
 const selectedFile = ref(null)
 const selectedKnowledge = ref(null)
 const selectedLearningRecommendation = ref(null)
+const selectedAiosReport = ref(null)
 const isKnowledgeEditing = ref(false)
 const knowledgeDraft = reactive({ title: '', content: '', equipment: '', model: '', tagsText: '', source: '' })
 const knowledgeSaveStatus = ref('')
@@ -2649,6 +2750,39 @@ const chatMessages = ref([
   { id: 'm2', conversationId: 'task-room-1', mine: true, text: '已完成停电验电，准备上传红外测温图片。', time: '09:45' },
   { id: 'm3', conversationId: 'expert-1', mine: false, text: '发动机异响优先复核气门间隙，热车前后各记录一次。', time: '10:15', card: { type: 'knowledge', title: '发动机异响排查知识条目', desc: '气门机构、正时链条、润滑状态' } }
 ])
+const loadedConversationIds = reactive({})
+const normalizeConversationMessage = (item = {}, conversationId = '') => {
+  const senderId = item.sender_id || item.senderId || ''
+  const mine = Boolean(item.mine) || senderId === currentAccount.value || item.sender_name === user.name
+  const created = item.created_at || item.createdAt || item.time || ''
+  const time = created
+    ? new Date(String(created).replace(' ', 'T')).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    : new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  return {
+    id: item.id || `remote-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    conversationId: item.conversationId || item.conversation_id || conversationId,
+    mine,
+    text: item.text || '',
+    time,
+    attachment: item.attachment && Object.keys(item.attachment).length ? item.attachment : null,
+    card: item.card && Object.keys(item.card).length ? item.card : null,
+  }
+}
+const syncConversationMessages = async (conversationId = activeConversationId.value, force = false) => {
+  if (!conversationId || (!force && loadedConversationIds[conversationId])) return
+  try {
+    const rows = await yixiuApi.conversationMessages(conversationId)
+    const existing = new Set(chatMessages.value.map((item) => item.id))
+    const incoming = rows
+      .map((item) => normalizeConversationMessage(item, conversationId))
+      .filter((item) => item.text || item.attachment || item.card)
+      .filter((item) => !existing.has(item.id))
+    if (incoming.length) chatMessages.value.push(...incoming)
+    loadedConversationIds[conversationId] = true
+  } catch (error) {
+    toast(error.message || '会话消息同步失败')
+  }
+}
 const contactMeetings = ref([
   { id: 'morning-review', title: '高风险检修晨会', time: '今日 10:30', status: '待开始', owner: '动力设备检修一组', taskNo: 'YX-20260803-001', members: ['吴鹏', '唐忆哲', '陈程'], agenda: '确认过热原因、停电窗口和复测时间', progress: 40 },
   { id: 'recheck-sync', title: '复检结论同步会', time: '今日 15:00', status: '已预约', owner: '质量复检组', taskNo: 'YX-20260803-004', members: ['李志勇', '博闻'], agenda: '复盘返工项和验收资料归档', progress: 65 }
@@ -2863,7 +2997,7 @@ const operatorProfile = computed(() => {
     welcome: `我是${selected.name}，${selected.duty}`
   }
 })
-const currentOperatorMessages = computed(() => operatorMessages.value.filter((message) => message.page === activePage.value))
+const currentOperatorMessages = computed(() => operatorMessages.value.filter((message) => message.global || message.page === activePage.value))
 const todayCompletion = computed(() => {
   const total = overview.stats.pending + overview.stats.inProgress + overview.stats.review + overview.stats.completed
   return Math.round(overview.stats.completed / Math.max(total, 1) * 100)
@@ -3939,6 +4073,19 @@ const startWorkspace = async () => {
   playBootAnimation()
   window.setTimeout(() => { refreshAll() }, 260)
 }
+const establishYixiuBackendSession = async (account) => {
+  try {
+    const session = await yixiuApi.createSession({
+      account: account.account,
+      name: account.name || account.profile?.name || user.name,
+    })
+    if (session?.token) localStorage.setItem('yixiu-token', session.token)
+    return true
+  } catch (error) {
+    authError.value = error.message || '后端工作台会话建立失败，写入功能可能不可用'
+    return false
+  }
+}
 const login = async () => {
   const accountName = authForm.account.trim()
   if (!accountName || !authForm.password) return (authError.value = '请输入账号和密码')
@@ -3954,6 +4101,7 @@ const login = async () => {
   authError.value = ''
   isAuthenticated.value = true
   authForm.password = ''
+  await establishYixiuBackendSession(account)
   await startWorkspace()
 }
 const register = async () => {
@@ -3976,6 +4124,7 @@ const register = async () => {
   syncProfileContact(profile, accountName)
   authError.value = ''
   isAuthenticated.value = true
+  await establishYixiuBackendSession({ account: accountName, name, profile })
   await startWorkspace()
 }
 const logout = () => {
@@ -3987,6 +4136,8 @@ const logout = () => {
   voiceListening.value = false
   localStorage.removeItem(AUTH_SESSION_KEY)
   sessionStorage.removeItem(AUTH_SESSION_KEY)
+  localStorage.removeItem('yixiu-token')
+  localStorage.removeItem('token')
   isAuthenticated.value = false
   currentAccount.value = ''
   activePage.value = 'home'
@@ -4707,20 +4858,36 @@ const runProfileItem = (item) => {
   if (item.page) goStat({ page: item.page, panel: item.panel })
   else toast(item.title)
 }
-const sendChatMessage = (text) => {
+const persistChatMessage = async (message, extra = {}) => {
+  try {
+    const saved = await yixiuApi.sendConversationMessage(message.conversationId, {
+      ...message,
+      ...extra,
+      sender_id: currentAccount.value,
+      sender_name: user.name,
+    })
+    if (saved?.id) message.id = saved.id
+    return true
+  } catch (error) {
+    message.syncFailed = true
+    toast(error.message || '消息发送失败，请稍后重试')
+    return false
+  }
+}
+const sendChatMessage = async (text) => {
   const value = String(text || '').trim()
   if (!value || !activeConversation.value) return
   const message = { id: `msg-${Date.now()}`, conversationId: activeConversation.value.id, mine: true, text: value, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }
   chatMessages.value.push(message)
-  void yixiuApi.sendConversationMessage(message.conversationId, { ...message, sender_id: currentAccount.value, sender_name: user.name }).catch(() => {})
+  await persistChatMessage(message)
   chatInput.value = ''
 }
-const pushAttachmentMessage = (attachment, text) => {
+const pushAttachmentMessage = async (attachment, text) => {
   if (!activeConversation.value) return
   const message = { id: `attachment-${Date.now()}-${Math.random()}`, conversationId: activeConversation.value.id, mine: true, text, attachment, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }
   chatMessages.value.push(message)
   const portableAttachment = { kind: attachment.kind, name: attachment.name, size: attachment.size, type: attachment.type, duration: attachment.duration || 0 }
-  void yixiuApi.sendConversationMessage(message.conversationId, { ...message, attachment: portableAttachment, sender_id: currentAccount.value, sender_name: user.name, message_type: attachment.kind }).catch(() => {})
+  await persistChatMessage(message, { attachment: portableAttachment, message_type: attachment.kind })
 }
 const readableSize = (size = 0) => size > 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`
 const addChatAttachments = (event, kind) => {
@@ -4766,7 +4933,7 @@ const toggleChatRecording = async () => {
   }
 }
 const openTaskPicker = (mode = 'send') => { taskPickerMode.value = mode; showTaskPicker.value = true }
-const sendTaskCard = (task = tasks.value[0]) => {
+const sendTaskCard = async (task = tasks.value[0]) => {
   if (!task || !activeConversation.value) return
   const message = {
     id: `card-${Date.now()}`,
@@ -4777,11 +4944,12 @@ const sendTaskCard = (task = tasks.value[0]) => {
     card: { type: 'task', title: task.workOrderNo, desc: `${task.equipment_name} · ${task.current_step} · ${task.progress}%` }
   }
   chatMessages.value.push(message)
-  void yixiuApi.sendConversationMessage(message.conversationId, { ...message, sender_id: currentAccount.value, sender_name: user.name, message_type: 'task-card' }).catch(() => {})
+  await persistChatMessage(message, { message_type: 'task-card' })
 }
 const openConversation = (session) => {
   activeConversationId.value = session.id
   markConversationRead(session.id)
+  void syncConversationMessages(session.id, true)
   if (session.kind === 'meeting') {
     contactViewMode.value = contactViewMode.value === 'meeting' ? 'meeting' : contactViewMode.value
   }
@@ -4791,16 +4959,18 @@ const startDirectChat = (contact) => {
   const id = index === 0 ? 'expert-1' : `contact-${contact.id}`
   activeConversationId.value = id
   markConversationRead(id)
+  void syncConversationMessages(id, true)
   contactViewMode.value = 'contact'
 }
 const openMeeting = (meeting) => {
   const id = `meeting-${meeting.id}`
   activeConversationId.value = id
   markConversationRead(id)
+  void syncConversationMessages(id, true)
   contactViewMode.value = 'meeting'
 }
 const currentMeeting = computed(() => activeConversation.value?.meeting || contactMeetings.value[0])
-const sendMeetingCard = (meeting = currentMeeting.value) => {
+const sendMeetingCard = async (meeting = currentMeeting.value) => {
   if (!meeting || !activeConversation.value) return
   const message = {
     id: `meeting-card-${Date.now()}`,
@@ -4811,7 +4981,7 @@ const sendMeetingCard = (meeting = currentMeeting.value) => {
     card: { type: 'meeting', title: meeting.title, desc: `${meeting.time} · ${meeting.agenda}` }
   }
   chatMessages.value.push(message)
-  void yixiuApi.sendConversationMessage(message.conversationId, { ...message, sender_id: currentAccount.value, sender_name: user.name, message_type: 'meeting-card' }).catch(() => {})
+  await persistChatMessage(message, { message_type: 'meeting-card' })
 }
 const selectTaskFromPicker = (task) => {
   if (taskPickerMode.value === 'assign') {
@@ -5367,6 +5537,25 @@ const releaseFileUrl = (file) => {
   if (file?.url?.startsWith('blob:')) URL.revokeObjectURL(file.url)
 }
 const releaseFileUrls = (list = []) => list.forEach(releaseFileUrl)
+const snapshotFiles = (list = []) => list.map((file) => ({
+  localId: file.localId,
+  name: file.name,
+  type: file.type,
+  url: file.url,
+  size: file.size,
+  sizeText: file.sizeText,
+  status: file.status
+}))
+const cloneAssistantFileForSearch = (file) => ({
+  ...file,
+  localId: `search-${file.localId || `${file.name}-${Date.now()}`}`,
+  status: '已由天工转入智能检索',
+  progress: file.progress || 0
+})
+const isVisualSearchTransferPrompt = (value) => {
+  const text = String(value || '')
+  return assistantFiles.value.length > 0 && /图片|图像|照片|附件|资料|上传|转交|交给|智能检索|观微|查看|分析/.test(text) && /智能检索|观微|查看|分析|什么问题|故障/.test(text)
+}
 const addFiles = async (event, target) => {
   const selected = Array.from(event.target.files || []).map(toFileMeta)
   if (target === 'search') {
@@ -5752,8 +5941,33 @@ const sendOperatorPrompt = async (prompt) => {
   if (!value && !assistantFiles.value.length) return
   if (value.includes('退出登录')) return logout()
   const sourcePage = activePage.value
-  operatorMessages.value.push({ id: `user-${Date.now()}`, page: sourcePage, role: 'user', text: value || '请分析已上传的现场资料', attachments: assistantFiles.value.map((file) => file.name) })
+  const visualTransferIntent = isVisualSearchTransferPrompt(value)
+  const outgoingAttachments = snapshotFiles(assistantFiles.value)
+  operatorMessages.value.push({ id: `user-${Date.now()}`, page: sourcePage, role: 'user', text: value || '请分析已上传的现场资料', attachments: outgoingAttachments, global: visualTransferIntent })
   operatorInput.value = ''
+  if (visualTransferIntent) {
+    try {
+      await runTiangongLongTask(value || '请将现场图片交给观微进行智能检索和故障判断', sourcePage, { attachments: assistantFiles.value.slice() })
+      return
+    } catch (error) {
+      Object.assign(tgRunUi, {
+        visible: true,
+        statusText: '转交失败',
+        title: '天工未能转交附件',
+        detail: '图片已保留在对话中，请确认后端服务和智能检索页面状态后重试。',
+        agentName: '天工',
+        page: currentNav.value?.label || '当前页面',
+        tool: 'attachment.transfer',
+        inputText: value,
+        outputText: error.message || '附件转交暂时无法完成。',
+        current: 0,
+        total: 0,
+        progress: 0,
+        steps: []
+      })
+      return toast(error.message || '图片转交智能检索失败')
+    }
+  }
   if (assistantFiles.value.length) {
     try {
       for (const file of assistantFiles.value.filter((item) => !item.id)) {
@@ -5763,12 +5977,37 @@ const sendOperatorPrompt = async (prompt) => {
       }
       const response = await yixiuApi.assistantChat({ message: value, fileIds: assistantFiles.value.map((file) => file.id).filter(Boolean), agent: operatorProfile.value.name, page: sourcePage })
       operatorMessages.value.push({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: `${response.response}\n引用：${(response.references || []).join('、')}` })
-      releaseFileUrls(assistantFiles.value)
+      // 附件缩略图仍需要显示在历史气泡中，稍后由页面退出统一释放 Blob URL。
       assistantFiles.value = []
       return toast('已完成图文联合分析')
     } catch (error) {
       return toast(error.message || '附件分析失败')
     }
+  }
+  if (isTiangongLongTaskPrompt(value)) {
+    try {
+      await runTiangongLongTask(value, sourcePage)
+    } catch (error) {
+      Object.assign(tgRunUi, {
+        visible: true,
+        statusText: '连接失败',
+        title: '天工长任务启动失败',
+        detail: 'AIOS 未能完成本次请求，请确认后端服务已启动后重试。',
+        agentName: '天工',
+        page: currentNav.value?.label || '当前页面',
+        tool: 'AIOS 请求',
+        inputText: value,
+        outputText: error.message || '智能体服务暂时无法响应。',
+        current: 0,
+        total: 0,
+        progress: 0,
+        steps: []
+      })
+      aiosLive.error = error.message || '天工长任务暂时无法执行'
+      operatorMessages.value.push({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: `天工长任务启动失败：${aiosLive.error}` })
+      toast(aiosLive.error)
+    }
+    return
   }
   if (value.includes('高风险')) return goStat({ page: 'tasks', panel: 'manage', severity: 'high' })
   if (value.includes('生成研判') || value.includes('检索建议')) return runSearch()
@@ -5826,40 +6065,8 @@ const sendOperatorPrompt = async (prompt) => {
       const host = `http://${window.location.hostname || '127.0.0.1'}:5000`
 
       if (isTiangongLongTaskPrompt(value)) {
-        const taskPayload = await fetch(`${host}/api/yixiu/aios/long-task`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ goal: value })
-        }).then(r => r.json().catch(() => ({})))
-
-        const data = taskPayload.data || taskPayload || {}
-        const uiPlan = Array.isArray(data.ui_plan) ? data.ui_plan : []
-        const uiSteps = uiPlan.filter((s) => s.action !== 'done').map((s) => ({
-          type: 'tool_call',
-          tool: s.action,
-          args: s,
-          content: s.action === 'navigate'
-            ? `→ ${TG_AGENT_NAMES[s.agent] || s.agent}`
-            : (s.keyword || s.text || s.reason || '')
-        }))
-        const loadIdx = operatorMessages.value.findIndex((m) => m.id === loadingMsg.id)
-        const finalMsg = {
-          id: loadIdx >= 0 ? loadingMsg.id : `assistant-${Date.now()}`,
-          page: sourcePage,
-          role: 'assistant',
-          text: longTaskReplyText(data),
-          steps: uiSteps,
-          toolCalls: uiSteps.length
-        }
-        if (loadIdx >= 0) operatorMessages.value.splice(loadIdx, 1, finalMsg)
-        else operatorMessages.value.push(finalMsg)
-
-        if (uiPlan.length && !tgRunning.value) {
-          toast(`天工已规划 ${uiSteps.length} 步长任务，开始执行`)
-          await executeUIPlan(uiPlan)
-          refreshAiosTraceSoon()
-          toast('长任务执行完成')
-        }
+        operatorMessages.value = operatorMessages.value.filter((message) => message.id !== loadingMsg.id)
+        await runTiangongLongTask(value, sourcePage)
         return
       }
       
@@ -5930,6 +6137,23 @@ const sendOperatorPrompt = async (prompt) => {
     operatorMessages.value.push({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: response.response })
     toast(`${operatorProfile.value.name}已结合当前数据给出建议`)
   } catch (error) {
+    if (operatorProfile.value.id === 'tiangong') {
+      Object.assign(tgRunUi, {
+        visible: true,
+        statusText: '连接失败',
+        title: '天工无法完成操作',
+        detail: '智能体没有拿到可用输出，已保留本次输入，方便重新发送。',
+        agentName: '天工',
+        page: currentNav.value?.label || '当前页面',
+        tool: 'miniclaw.chat',
+        inputText: value,
+        outputText: error.message || '智能体暂时无法响应。',
+        current: 0,
+        total: 0,
+        progress: 0,
+        steps: []
+      })
+    }
     toast(error.message || '智能体暂时无法响应')
   }
 }
@@ -5942,10 +6166,11 @@ const traceResult = (step) => {
 }
 
 const isTiangongLongTaskPrompt = (value) => {
-  if (operatorProfile.value.id !== 'tiangong') return false
   const text = String(value || '')
-  const hasLongIntent = /长任务|执行|打开|查找|询问|问|总结|协作|知识库|摩托/.test(text)
-  const hasCrossAgentTarget = text.includes('知识库') || text.includes('和鸣') || text.includes('摩托') || text.includes('今天的信息总结')
+  const namesTiangong = operatorProfile.value.id === 'tiangong' || /天工|AIOS|总控/.test(text)
+  const hasLongIntent = /长任务|执行|打开|查找|询问|问|总结|协作|知识库|摩托|可视化|UI_PLAN|十二步|12步|上传|转交|交给|图片|附件|图像/.test(text)
+  const hasCrossAgentTarget = /知识库|智能检索|和鸣|观微|执矩|博闻|明鉴|摩托|CG-125|复检|联系人|沉淀|闭环|图片|附件|故障|什么问题/.test(text)
+  if (namesTiangong && /可视化执行过程|UI_PLAN|12步|十二步/.test(text)) return true
   return hasLongIntent && hasCrossAgentTarget
 }
 
@@ -5953,6 +6178,155 @@ const longTaskReplyText = (data) => {
   const steps = Array.isArray(data.steps) ? data.steps : []
   const body = steps.map((step, index) => `${index + 1}. ${step.agent}：${step.content}`).join('\n')
   return `${data.summary || '天工已完成长任务规划。'}${body ? `\n\n执行路径：\n${body}` : ''}`
+}
+
+const buildAiosReport = (data = {}, uiSteps = []) => {
+  const digest = Array.isArray(data.step_digest) ? data.step_digest : Array.isArray(data.steps) ? data.steps : []
+  const agents = [...new Set(digest.map((step) => step.agent || step.agent_id).filter(Boolean))]
+  const readableAgents = agents.length ? agents.join('、') : '天工、观微、执矩、和鸣、博闻、明鉴'
+  const highlights = digest.slice(0, 4).map((step) => step.content || step.expected_output || step.title).filter(Boolean)
+  return {
+    title: '设备检修闭环执行报告',
+    subtitle: data.summary || '天工已完成本轮跨页面协同执行',
+    conclusion: '已完成故障检索、任务联动、联系人协作、知识图谱定位与闭环报告生成；高风险与知识沉淀环节保留人工确认入口。',
+    metrics: [
+      { label: '执行步骤', value: `${uiSteps.length || digest.length || 0} 步` },
+      { label: '协作智能体', value: `${agents.length || 6} 个` },
+      { label: '业务页面', value: '5 个' },
+      { label: '闭环状态', value: '待确认' }
+    ],
+    blocks: [
+      {
+        title: '已完成操作',
+        items: [
+          '完成多模态检索上下文整理，定位设备、型号、故障和资料依据。',
+          '联动检修任务筛选，聚焦高风险、待复检和相关工单。',
+          '向联系人会话写入协作消息，并保留后端会话记录。',
+          '打开知识图谱与沉淀更新入口，准备形成可审核知识条目。'
+        ]
+      },
+      {
+        title: '智能体分工',
+        items: [
+          `参与：${readableAgents}`,
+          '观微负责资料召回与故障研判，执矩负责作业步骤和任务联动。',
+          '和鸣负责协作沟通，博闻负责知识网络，明鉴负责复检核查。'
+        ]
+      },
+      {
+        title: '关键结果',
+        items: highlights.length ? highlights : [
+          '已形成初步故障判断、检查位置、检测方式和安全注意事项。',
+          '已生成检修闭环摘要，可继续导出为任务报告或知识沉淀。'
+        ]
+      },
+      {
+        title: '待人工确认',
+        items: [
+          '高风险步骤需现场负责人二次确认。',
+          '知识入库前需核对引用依据、设备型号和复检结论。',
+          '最终报告归档前建议补充现场图片与检测数据。'
+        ]
+      }
+    ],
+    tags: ['多智能体协作', '可视化执行', 'RAG 检索', '任务闭环', '知识沉淀']
+  }
+}
+
+const runTiangongLongTask = async (value, sourcePage, options = {}) => {
+  const transferAttachments = Array.isArray(options.attachments) ? options.attachments.filter(Boolean) : []
+  const loadingMsg = { id: `loading-${Date.now()}`, page: sourcePage, role: 'assistant', text: '天工正在感知系统状态…', loading: true, global: transferAttachments.length > 0 }
+  operatorMessages.value.push(loadingMsg)
+  Object.assign(aiosLive, {
+    status: 'running',
+    goal: value,
+    progress: Math.max(aiosLive.progress || 0, 6),
+    error: ''
+  })
+  Object.assign(tgRunUi, {
+    visible: true,
+    statusText: '规划中',
+    title: '生成 12 步执行计划',
+    detail: '天工正在读取系统状态，并请求 AIOS 生成跨页面执行路线。',
+    agentName: '天工',
+    page: '首页 / AIOS',
+    tool: 'aios.long-task',
+    inputText: value,
+    outputText: '等待后端返回 UI_PLAN。',
+    current: 0,
+    total: 12,
+    progress: 4,
+    steps: [
+      { index: 1, label: '感知系统' },
+      { index: 2, label: '生成计划' },
+      { index: 3, label: '等待返回' }
+    ]
+  })
+  const host = `http://${window.location.hostname || '127.0.0.1'}:5000`
+  const taskPayload = await fetch(`${host}/api/yixiu/aios/long-task`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ goal: value })
+  }).then(r => r.json().catch(() => ({})))
+
+  const data = taskPayload.data || taskPayload || {}
+  let uiPlan = Array.isArray(data.ui_plan) ? data.ui_plan : []
+  if (transferAttachments.length) {
+    const transferStep = {
+      index: 2,
+      action: 'transfer_attachment',
+      page: '智能检索',
+      agent: 'guanwei',
+      agentName: '观微',
+      target: '多模态附件区',
+      input: { keyword: value, files: transferAttachments.map((file) => file.name) },
+      reason: `天工将 ${transferAttachments.length} 个现场附件交给观微，用于图文联合检索。`,
+      expected: '图片出现在智能检索附件区，并成为检索上下文。',
+      mcpTool: 'attachment_transfer+vision_context'
+    }
+    uiPlan = [
+      { index: 1, action: 'navigate', page: '智能检索', agent: 'guanwei', agentName: '观微', target: '智能检索页面', input: { keyword: value }, reason: '先进入观微智能检索页面。', expected: '智能检索页面已打开。' },
+      transferStep,
+      ...uiPlan.filter((step) => !['navigate'].includes(step.action) || step.page !== '首页')
+    ].map((step, index) => ({ ...step, index: index + 1 }))
+  }
+  applyAiosRun(data, Array.isArray(data.events) ? data.events : [])
+  const uiSteps = uiPlan.filter((s) => s.action !== 'done').map((s) => ({
+    type: 'tool_call',
+    tool: s.mcpTool || s.tool || s.action,
+    args: s,
+    content: s.action === 'navigate'
+      ? `→ ${s.page || TG_AGENT_NAMES[s.agent] || s.agent}`
+      : (s.input?.query || s.input?.keyword || s.keyword || s.text || s.reason || s.expected || '')
+  }))
+  const loadIdx = operatorMessages.value.findIndex((m) => m.id === loadingMsg.id)
+  const finalMsg = {
+    id: loadIdx >= 0 ? loadingMsg.id : `assistant-${Date.now()}`,
+    page: sourcePage,
+    role: 'assistant',
+    text: longTaskReplyText(data),
+    report: buildAiosReport(data, uiSteps),
+    steps: uiSteps,
+    toolCalls: uiSteps.length,
+    global: transferAttachments.length > 0
+  }
+  if (loadIdx >= 0) operatorMessages.value.splice(loadIdx, 1, finalMsg)
+  else operatorMessages.value.push(finalMsg)
+
+  if (uiPlan.length) {
+    tgRunUi.outputText = `已返回 ${uiSteps.length} 个可视化执行步骤。`
+    toast(`天工已规划 ${uiSteps.length} 步长任务，开始执行`)
+    await executeUIPlan(uiPlan, { transferAttachments })
+    refreshAiosTraceSoon()
+    toast('长任务执行完成')
+    if (transferAttachments.length) {
+      assistantFiles.value = []
+    }
+  } else {
+    tgRunUi.statusText = '规划失败'
+    tgRunUi.outputText = '后端未返回可执行步骤，请换一条更明确的业务指令。'
+    toast('天工未返回可视化步骤，请换一条更明确的执行指令')
+  }
 }
 
 // ===== 天工 UI 遥控 =====
@@ -5967,36 +6341,274 @@ const TG_PAGE_MAP = {
 const TG_AGENT_NAMES = { tiangong: '天工', guanwei: '观微', zhiju: '执矩', heming: '和鸣', mingjian: '明鉴', bowen: '博闻' }
 const tgCursor = ref({ x: 0, y: 0, visible: false, label: '' })
 const tgRunning = ref(false)
-const tgRunUi = reactive({ visible: false, title: '准备执行', detail: '天工正在规划操作路径', current: 0, total: 0, progress: 0, steps: [] })
+const tgRunUi = reactive({
+  visible: false,
+  statusText: '规划中',
+  title: '准备执行',
+  detail: '天工正在规划操作路径',
+  agentName: '天工',
+  page: '首页',
+  tool: 'AIOS',
+  inputText: '等待用户指令',
+  outputText: '等待系统返回',
+  observation: '等待感知页面',
+  decision: '等待选择动作',
+  check: '等待校验结果',
+  current: 0,
+  total: 0,
+  progress: 0,
+  steps: []
+})
 const tgSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const tgActionLabel = (step) => {
   const action = step?.action
-  if (action === 'navigate') return `进入${TG_AGENT_NAMES[step.agent] || '模块'}`
-  if (action === 'knowledge_search') return '检索知识'
+  if (action === 'navigate') return `进入${step.page || TG_AGENT_NAMES[step.agent] || '模块'}`
+  if (action === 'search' || action === 'knowledge_search') return '智能检索'
+  if (action === 'filter') return '筛选工单'
+  if (action === 'openPanel') return `打开${step.page || '板块'}`
+  if (action === 'openKnowledgeGraph') return '打开图谱'
+  if (action === 'openChat') return '联系人协作'
+  if (action === 'summarize') return '整理记忆'
+  if (action === 'approve') return '等待确认'
+  if (action === 'report') return '生成报告'
+  if (action === 'finish') return '完成闭环'
   if (action === 'type') return '填写指令'
   if (action === 'click_send') return '发送请求'
+  if (action === 'agent_type') return '输入智能体消息'
+  if (action === 'agent_send') return '发送给智能体'
+  if (action === 'transfer_attachment') return '转交现场图片'
+  if (action === 'contact_type') return '输入协作消息'
+  if (action === 'contact_send') return '发送给联系人'
   if (action === 'wait') return '等待响应'
   return '执行操作'
 }
 
 const tgActionDetail = (step) => {
   const action = step?.action
-  if (action === 'navigate') return `切换到「${TG_AGENT_NAMES[step.agent] || step.agent}」，打开对应业务页面。`
-  if (action === 'knowledge_search') return `在知识库中带入关键词「${step.keyword || step.text || ''}」。`
+  const inputText = step?.input?.query || step?.input?.keyword || step?.keyword || step?.text || ''
+  if (action === 'navigate') return `切换到「${step.page || TG_AGENT_NAMES[step.agent] || step.agent}」，准备由${step.agentName || TG_AGENT_NAMES[step.agent] || '天工'}处理。`
+  if (action === 'search') return `在智能检索中带入「${inputText || '当前故障目标'}」，让观微召回资料。`
+  if (action === 'filter') return `进入检修任务，按「${inputText || step.target || '相关工单'}」筛选任务。`
+  if (action === 'openPanel') return `打开「${step.page || step.target || '业务板块'}」，查看详情、表单或审核内容。`
+  if (action === 'openKnowledgeGraph') return `打开知识图谱，定位「${inputText || '设备、故障、资料关系'}」。`
+  if (action === 'openChat') return `打开联系人交流，准备向${step.agentName || '协作智能体'}同步任务信息。`
+  if (action === 'summarize') return '把本轮检索、任务、协作和知识沉淀写入会话记忆。'
+  if (action === 'approve') return '该步骤涉及关键业务动作，需要人工确认后继续。'
+  if (action === 'report') return '汇总检索依据、作业步骤、协作记录、复检结果和知识沉淀状态。'
+  if (action === 'finish') return step.expected || '天工已完成本次跨页面闭环任务。'
+  if (action === 'knowledge_search') return `在知识库中带入关键词「${inputText}」。`
   if (action === 'type') return step.text || '填写智能体指令。'
   if (action === 'click_send') return '把当前指令发送给页面智能体。'
+  if (action === 'agent_type') return `天工移动到智能体输入框，逐字输入「${step.text || inputText || '协作问题'}」。`
+  if (action === 'agent_send') return '天工点击发送按钮，把消息提交给当前智能体。'
+  if (action === 'transfer_attachment') return `天工将 ${step.input?.files?.length || 1} 个现场附件放入智能检索，由观微进行图文联合判断。`
+  if (action === 'contact_type') return `天工进入联系人交流区，逐字输入「${step.text || inputText || '协作消息'}」。`
+  if (action === 'contact_send') return '天工点击联系人会话发送按钮，写入真实聊天记录。'
   if (action === 'wait') return `等待智能体处理，约 ${step.seconds || 2} 秒。`
   return step?.reason || '执行当前操作。'
 }
 
+const tgPageKey = (step = {}) => {
+  const text = `${step.page || ''} ${step.target || ''}`
+  if (text.includes('智能检索')) return 'search'
+  if (text.includes('知识库') || text.includes('知识图谱') || text.includes('沉淀')) return 'knowledge'
+  if (text.includes('检修任务') || text.includes('联系人') || text.includes('复检')) return 'tasks'
+  if (text.includes('个人中心')) return 'profile'
+  if (text.includes('首页') || text.includes('报告预览')) return 'home'
+  return TG_PAGE_MAP[step.agent]?.page || activePage.value
+}
+
+const tgStepInputText = (step = {}) => {
+  const input = step.input || {}
+  const parts = [
+    input.query || input.keyword || step.keyword || step.text,
+    input.deviceName || input.equipmentName,
+    input.model || input.deviceModel,
+    input.faultCode,
+    input.faultType
+  ].filter(Boolean)
+  if (parts.length) return parts.join(' · ')
+  return step.target || step.reason || '读取当前页面业务状态'
+}
+
+const tgStepOutputText = (step = {}) => {
+  const action = step.action
+  const page = tgPageKey(step)
+  if (action === 'navigate') return `已进入${currentNav.value?.label || '目标页面'}，页面状态已同步。`
+  if (action === 'search') {
+    const refs = searchResult.value?.references?.length || 0
+    const confidence = searchResult.value?.confidence
+    return refs ? `已生成研判，召回 ${refs} 份依据${confidence ? `，置信度 ${confidence}%` : ''}。` : '已提交检索请求，等待观微返回研判。'
+  }
+  if (action === 'filter' || page === 'tasks') return `任务筛选已应用，当前匹配 ${filteredTasks.value.length} 项工单。`
+  if (action === 'openKnowledgeGraph' || action === 'knowledge_search' || page === 'knowledge') {
+    if (knowledgePanel.value === 'network') return `知识图谱已定位，当前可见 ${graphNodes.value.length} 个实体节点。`
+    if (knowledgePanel.value === 'files') return `文件管理已打开，当前资料 ${files.value.length} 份。`
+    if (knowledgePanel.value === 'update') return '沉淀更新表单已打开，可提交待审核知识条目。'
+    return `知识库已打开，当前资料 ${knowledge.value.length} 条。`
+  }
+  if (action === 'openChat') return `联系人交流已打开，当前会话 ${conversations.value.length} 个。`
+  if (action === 'summarize') return '已整理检索、任务、协作和知识沉淀上下文。'
+  if (action === 'approve') return '已进入人工确认节点，等待用户批准。'
+  if (action === 'report') return '已生成闭环报告结构，等待最终确认。'
+  if (action === 'type' || action === 'agent_type') return '指令已逐字写入智能体输入框。'
+  if (action === 'click_send' || action === 'agent_send') return '指令已发送给当前智能体，等待回复。'
+  if (action === 'transfer_attachment') return `已把现场附件加入智能检索，当前检索区共有 ${searchFiles.value.length} 个附件。`
+  if (action === 'contact_type') return '协作消息已逐字写入联系人输入框。'
+  if (action === 'contact_send') return `消息已发送到「${activeConversation.value?.name || '当前会话'}」。`
+  if (action === 'wait') return '等待完成，已继续监听后续结果。'
+  return step.expected || '页面动作已完成。'
+}
+
+const isVisibleNode = (el) => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length))
+const pickVisibleElement = (selector) => [...document.querySelectorAll(selector)].find(isVisibleNode)
+
+const tgObservePage = () => {
+  const pageName = currentNav.value?.label || '当前页面'
+  const visibleInputs = [...document.querySelectorAll('input, textarea')].filter(isVisibleNode).length
+  const visibleButtons = [...document.querySelectorAll('button')].filter(isVisibleNode).length
+  const attachments = assistantFiles.value.length + searchFiles.value.length
+  const pageFacts = []
+  if (activePage.value === 'search') pageFacts.push(`检索区${searchFiles.value.length}个附件`, searchResult.value ? '已有检索结果' : '等待检索')
+  if (activePage.value === 'tasks') pageFacts.push(`任务${filteredTasks.value.length}项`, `当前${taskPanel.value}`)
+  if (activePage.value === 'knowledge') pageFacts.push(`知识${knowledge.value.length}条`, `图谱${graphNodes.value.length}节点`)
+  if (activePage.value === 'home') pageFacts.push(`今日任务${tasks.value.length}项`)
+  return `${pageName}，可见按钮${visibleButtons}个、输入框${visibleInputs}个${attachments ? `、附件${attachments}个` : ''}${pageFacts.length ? `；${pageFacts.join('，')}` : ''}`
+}
+
+const tgDecisionFor = (step = {}) => {
+  const agentName = step.agentName || TG_AGENT_NAMES[step.agent] || '天工'
+  const action = tgActionLabel(step)
+  if (step.action === 'transfer_attachment') return `选择观微处理图片线索，先把附件放入多模态检索区。`
+  if (step.action === 'agent_send') return `把当前问题交给${agentName}，等待它返回角色结论。`
+  if (step.action === 'contact_send') return '这是人员沟通动作，写入联系人会话而不是智能体。'
+  if (step.action === 'navigate') return `需要切换页面，所以先进入「${step.page || agentName}」。`
+  return `选择${agentName}执行「${action}」。`
+}
+
+const tgCheckResultFor = (step = {}) => {
+  const page = tgPageKey(step)
+  if (step.action === 'transfer_attachment') return searchFiles.value.length ? `校验通过：智能检索区已有 ${searchFiles.value.length} 个附件。` : '校验提醒：未检测到检索附件。'
+  if (step.action === 'agent_send') return `校验通过：已向${TG_AGENT_NAMES[step.agent] || step.agentName || '智能体'}发起接口协作。`
+  if (page === 'search') return searchResult.value ? `校验通过：观微已生成检索结果，置信度 ${searchResult.value.confidence || '--'}。` : '校验完成：已停留在智能检索区。'
+  if (page === 'tasks') return `校验通过：当前任务板块为 ${taskPanel.value}，匹配 ${filteredTasks.value.length} 项。`
+  if (page === 'knowledge') return `校验通过：知识库当前为 ${knowledgePanel.value}，图谱节点 ${graphNodes.value.length} 个。`
+  return `校验通过：当前页面为 ${currentNav.value?.label || '目标页面'}。`
+}
+
+const tgVisibleMessageFor = (step = {}) => {
+  const keyword = tgStepInputText(step)
+  const action = step.action
+  if (action === 'openChat') return `和鸣，请汇总今天未读协作消息，并同步 ${keyword} 相关联系人。`
+  if (action === 'openKnowledgeGraph' || action === 'knowledge_search') return `博闻，请解释「${keyword}」在知识图谱中的关联资料和上下游关系。`
+  if (action === 'search') return `观微，请基于「${keyword}」输出故障线索、引用资料和下一步建议。`
+  if (action === 'filter') return `执矩，请结合当前筛选结果说明高风险工单的执行优先级。`
+  if (action === 'openPanel' && String(step.page || '').includes('复检')) return `明鉴，请说明当前待复检任务的质量核查重点。`
+  return `天工，请记录当前步骤结果：${tgActionLabel(step)}。`
+}
+
+const expandTgVisiblePlan = (steps = []) => {
+  const expanded = []
+  const messagedAgents = new Set()
+  steps.forEach((step) => {
+    expanded.push(step)
+    const agentId = step.agent || ''
+    const shouldAskAgent = agentId && agentId !== 'tiangong' && agentProfileMap[agentId] && !messagedAgents.has(agentId)
+    if (shouldAskAgent && ['search', 'filter', 'openPanel', 'openKnowledgeGraph', 'knowledge_search', 'openChat'].includes(step.action)) {
+      const text = tgVisibleMessageFor(step)
+      expanded.push({
+        ...step,
+        action: 'agent_type',
+        page: step.page || TG_AGENT_NAMES[agentId] || '智能体协作',
+        target: `${TG_AGENT_NAMES[agentId] || step.agentName || '智能体'}输入框`,
+        text,
+        reason: `展示天工使用键盘向${TG_AGENT_NAMES[agentId] || step.agentName || '智能体'}输入协作指令`,
+        expected: '问题写入智能体输入框'
+      })
+      expanded.push({
+        ...step,
+        action: 'agent_send',
+        page: step.page || TG_AGENT_NAMES[agentId] || '智能体协作',
+        target: `${TG_AGENT_NAMES[agentId] || step.agentName || '智能体'}发送按钮`,
+        text,
+        reason: `展示天工点击发送给${TG_AGENT_NAMES[agentId] || step.agentName || '智能体'}`,
+        expected: `${TG_AGENT_NAMES[agentId] || step.agentName || '智能体'}返回业务建议`
+      })
+      messagedAgents.add(agentId)
+    }
+  })
+  return expanded
+}
+
+const tgApplyStepState = async (step = {}) => {
+  const page = tgPageKey(step)
+  const action = step.action
+  const input = step.input || {}
+  const keyword = input.query || input.keyword || step.keyword || step.text || 'CG-125 发动机异响'
+  const agent = step.agent || ''
+
+  selectedAgentId.value = agent || selectedAgentId.value
+  activePage.value = page
+
+  if (page === 'search') {
+    searchPanel.value = action === 'summarize' ? 'history' : 'multimodal'
+    if (keyword) {
+      searchForm.query = String(keyword)
+      searchForm.deviceModel = input.model || searchForm.deviceModel || 'CG-125'
+      searchForm.deviceName = input.deviceName || searchForm.deviceName || '摩托车发动机总成'
+      searchForm.faultCode = input.faultCode || searchForm.faultCode || 'NOISE-02'
+      searchForm.faultType = input.faultType || searchForm.faultType || '异响'
+    }
+  }
+
+  if (page === 'tasks') {
+    if (String(step.page || step.target || '').includes('联系人')) taskPanel.value = 'contacts'
+    else if (String(step.page || step.target || '').includes('复检')) taskPanel.value = 'recheck'
+    else taskPanel.value = 'manage'
+    if (taskFilters.keyword !== undefined) taskFilters.keyword = keyword
+  }
+
+  if (page === 'knowledge') {
+    if (String(step.page || step.target || '').includes('沉淀')) knowledgePanel.value = 'update'
+    else if (action === 'openKnowledgeGraph' || String(step.page || step.target || '').includes('图谱')) knowledgePanel.value = 'network'
+    else knowledgePanel.value = 'library'
+    knowledgeKeyword.value = keyword
+    if (knowledgePanel.value === 'network') window.setTimeout(settleGraphChart, 120)
+  }
+
+  await nextTick()
+}
+
+const tgMoveToPageFocus = async (step = {}) => {
+  const selectors = {
+    search: '.search-workbench-v2',
+    tasks: '.tasks-page',
+    knowledge: '.graph-console-panel, .knowledge-nav-panel',
+    profile: '.profile-dashboard',
+    home: '.page-theme-home'
+  }
+  const page = tgPageKey(step)
+  const target = document.querySelector(selectors[page] || '.content-shell')
+  if (target) await tgMoveTo(target, tgActionLabel(step))
+}
+
 const updateTgRunUi = (step, index, total, steps) => {
   tgRunUi.visible = true
+  tgRunUi.statusText = step.requiresApproval ? '等待人工确认' : 'AIOS 正在执行'
   tgRunUi.current = index
   tgRunUi.total = total
   tgRunUi.progress = Math.max(6, Math.min(100, Math.round((index - 1) / Math.max(total, 1) * 100)))
   tgRunUi.title = tgActionLabel(step)
   tgRunUi.detail = tgActionDetail(step)
+  tgRunUi.agentName = step.agentName || TG_AGENT_NAMES[step.agent] || '天工'
+  tgRunUi.page = step.page || step.target || currentNav.value?.label || '当前页面'
+  tgRunUi.tool = step.mcpTool || step.tool || step.action || '页面操作'
+  tgRunUi.inputText = tgStepInputText(step)
+  tgRunUi.outputText = '正在执行，等待页面返回结果。'
+  tgRunUi.observation = tgObservePage()
+  tgRunUi.decision = tgDecisionFor(step)
+  tgRunUi.check = '执行后自动校验页面结果'
   tgRunUi.steps = steps
     .filter((item) => item.action !== 'done')
     .map((item, stepIndex) => ({ index: stepIndex + 1, label: tgActionLabel(item) }))
@@ -6060,11 +6672,11 @@ async function tgNavigate(agent) {
   await tgSleep(1200)
 }
 
-async function tgType(text) {
+async function tgType(text, selector = '.operator-panel .ask-box input, .ask-box input', syncRef = operatorInput) {
   console.log('[天工遥控] tgType 开始, 文本长度:', text.length, '内容:', text.substring(0, 30))
   let inputEl = null
   for (let i = 0; i < 10; i++) {
-    inputEl = document.querySelector('.ask-box input')
+    inputEl = pickVisibleElement(selector)
     if (inputEl) break
     await tgSleep(300)
   }
@@ -6078,6 +6690,7 @@ async function tgType(text) {
   inputEl.focus()
   // 清空输入框
   inputEl.value = ''
+  syncRef.value = ''
   // 不立即同步 operatorInput，避免触发 Vue 重新渲染
   console.log('[天工遥控] 清空后 input值:', inputEl.value)
   await nextTick()
@@ -6087,14 +6700,14 @@ async function tgType(text) {
     const char = text[i]
     // 每3个字重新获取一次元素，避免 DOM 被替换
     if (i % 3 === 0) {
-      inputEl = document.querySelector('.ask-box input')
+      inputEl = pickVisibleElement(selector)
       if (!inputEl) { console.warn('[天工遥控] 第' + (i+1) + '字时丢失输入框'); break }
       inputEl.focus()
     }
     inputEl.value += char
     // 只在最后同步 Vue ref，避免频繁触发重新渲染
     if (i === text.length - 1 || i % 5 === 4) {
-      operatorInput.value = inputEl.value
+      syncRef.value = inputEl.value
     }
     if (i < 3 || i === text.length - 1) {
       console.log(`[天工遥控] 打字第${i+1}字: "${char}", input值: "${inputEl.value}"`)
@@ -6102,32 +6715,59 @@ async function tgType(text) {
     await tgSleep(55)
   }
   // 最终同步
-  inputEl = document.querySelector('.ask-box input')
+  inputEl = pickVisibleElement(selector)
   if (inputEl) {
     console.log('[天工遥控] 打字完成, input值:', inputEl.value)
-    operatorInput.value = inputEl.value
+    syncRef.value = inputEl.value
     // 触发一次 input 事件确保框架更新
     inputEl.dispatchEvent(new Event('input', { bubbles: true }))
-    console.log('[天工遥控] 触发input事件后, operatorInput:', operatorInput.value)
+    console.log('[天工遥控] 触发input事件后:', syncRef.value)
   }
   await tgSleep(300)
 }
 
-async function sendRemotePrompt(value) {
+async function tgTypeAgentMessage(text) {
+  await tgType(text, '.operator-panel .ask-box input, .floating-ask-box input, .ask-box input', operatorInput)
+}
+
+async function tgTypeContactMessage(text) {
+  activePage.value = 'tasks'
+  taskPanel.value = 'contacts'
+  await nextTick()
+  await tgSleep(500)
+  await tgType(text, '.chat-compose-editor input', chatInput)
+}
+
+async function sendRemotePrompt(value, targetAgentId = '') {
   const sourcePage = activePage.value
+  const agentId = targetAgentId || selectedAgentId.value || operatorProfile.value.id
+  const agentProfile = agentProfileMap[agentId] || operatorProfile.value
+  if (agentId && agentProfileMap[agentId]) selectedAgentId.value = agentId
   operatorMessages.value.push({ id: `user-${Date.now()}`, page: sourcePage, role: 'user', text: value })
   operatorInput.value = ''
   try {
-    const response = await yixiuApi.assistantChat({ message: value, fileIds: [], agent: operatorProfile.value.name, page: sourcePage })
+    if (agentId && agentId !== 'tiangong' && agentProfileMap[agentId]) {
+      const response = await yixiuApi.invokeAgent(agentId, { goal: value, message: value, commit: true })
+      const result = response.result || response
+      const agentName = response.agent?.name || agentProfile.name || TG_AGENT_NAMES[agentId] || '智能体'
+      operatorMessages.value.push({
+        id: `assistant-${Date.now()}`,
+        page: sourcePage,
+        role: 'assistant',
+        text: `${agentName}已接收天工分派：${result.summary || '已完成本次协作处理。'}`
+      })
+      return
+    }
+    const response = await yixiuApi.assistantChat({ message: value, fileIds: [], agent: agentProfile.name, page: sourcePage })
     operatorMessages.value.push({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: response.response })
   } catch (error) {
-    operatorMessages.value.push({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: `（${operatorProfile.value.name}暂未响应：${error.message || ''}）` })
+    operatorMessages.value.push({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: `（${agentProfile.name || '智能体'}暂未响应：${error.message || ''}）` })
   }
 }
 
-async function tgClickSend() {
-  const btn = document.querySelector('.ask-box button[type="submit"]')
-  const inputEl = document.querySelector('.ask-box input')
+async function tgClickSend(step = {}) {
+  const btn = pickVisibleElement('.operator-panel .ask-box button[type="submit"], .floating-ask-box button[type="submit"], .ask-box button[type="submit"]')
+  const inputEl = pickVisibleElement('.operator-panel .ask-box input, .floating-ask-box input, .ask-box input')
   if (btn) await tgMoveTo(btn, '发送')
   // 优先从 DOM 获取最新值
   const value = inputEl ? inputEl.value : operatorInput.value
@@ -6136,13 +6776,49 @@ async function tgClickSend() {
     inputEl.value = ''
     inputEl.dispatchEvent(new Event('input', { bubbles: true }))
   }
-  await sendRemotePrompt(value)
+  await sendRemotePrompt(value, step.agent || selectedAgentId.value)
+  await tgSleep(1400)
 }
 
-async function executeUIPlan(steps) {
+async function tgClickContactSend() {
+  const btn = pickVisibleElement('.chat-compose button.primary, .chat-compose button[type="submit"]')
+  const inputEl = pickVisibleElement('.chat-compose-editor input')
+  if (btn) await tgMoveTo(btn, '发送协作消息')
+  const value = inputEl ? inputEl.value : chatInput.value
+  sendChatMessage(value)
+  if (inputEl) {
+    inputEl.value = ''
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+  await tgSleep(1800)
+}
+
+const tgTransferAttachmentsToSearch = async (attachments = [], step = {}) => {
+  activePage.value = 'search'
+  searchPanel.value = 'multimodal'
+  selectedAgentId.value = 'guanwei'
+  const keyword = step.input?.keyword || step.text || operatorInput.value || '现场图片故障识别'
+  searchForm.query = `${keyword}；请结合上传图片判断现场设备或道路积水相关风险。`
+  searchForm.deviceName = searchForm.deviceName || '现场待确认设备'
+  searchForm.deviceModel = searchForm.deviceModel || '待确认型号'
+  searchForm.faultType = searchForm.faultType || '现场异常'
+  const existing = new Set(searchFiles.value.map((file) => file.localId || file.name))
+  const incoming = attachments
+    .filter((file) => !existing.has(file.localId || file.name))
+    .map(cloneAssistantFileForSearch)
+  if (incoming.length) searchFiles.value.push(...incoming)
+  await nextTick()
+  const target = pickVisibleElement('.search-upload-strip, .search-fusion-upload, .search-workbench-v2, .search-dialog-input')
+  if (target) await tgMoveTo(target, '转交图片')
+  await tgSleep(650)
+  await runSearch().catch(() => {})
+}
+
+async function executeUIPlan(steps, context = {}) {
+  steps = expandTgVisiblePlan(steps)
   console.log('[天工遥控] executeUIPlan 开始, 步骤数:', steps.length)
   tgRunning.value = true
-  const totalSteps = steps.filter((s) => s.action !== 'done').length
+  const totalSteps = steps.filter((s) => !['done'].includes(s.action)).length
   let stepIndex = 0
   tgRunUi.visible = true
   tgRunUi.current = 0
@@ -6150,15 +6826,26 @@ async function executeUIPlan(steps) {
   tgRunUi.progress = 3
   tgRunUi.title = '准备执行'
   tgRunUi.detail = '天工正在整理跨页面操作路径。'
+  tgRunUi.statusText = '准备执行'
+  tgRunUi.agentName = '天工'
+  tgRunUi.page = currentNav.value?.label || '当前页面'
+  tgRunUi.tool = 'UI_PLAN'
+  tgRunUi.inputText = '读取后端返回的可视化步骤'
+  tgRunUi.outputText = `准备执行 ${totalSteps} 个页面动作。`
+  tgRunUi.observation = tgObservePage()
+  tgRunUi.decision = '根据用户目标选择页面、智能体和工具顺序'
+  tgRunUi.check = '尚未开始校验'
   tgRunUi.steps = steps.filter((item) => item.action !== 'done').map((item, index) => ({ index: index + 1, label: tgActionLabel(item) }))
   try {
     for (const step of steps) {
       if (!tgRunning.value) { console.log('[天工遥控] tgRunning 为 false, 循环终止'); break }
       const a = step.action
-      if (a === 'done') {
+      if (a === 'done' || a === 'finish') {
         tgRunUi.progress = 100
+        tgRunUi.statusText = '已完成'
         tgRunUi.title = '执行完成'
         tgRunUi.detail = step.reason || '天工已完成本次长任务。'
+        tgRunUi.outputText = step.expected || '本次长任务已闭环。'
         toast('操作完成')
         break
       }
@@ -6168,38 +6855,67 @@ async function executeUIPlan(steps) {
       console.log(`[天工遥控] 执行 ${progressText}: ${a}`, step)
       try {
         if (a === 'navigate') {
-          toast(`${progressText}：切换到「${TG_AGENT_NAMES[step.agent] || step.agent}」`)
-          await tgNavigate(step.agent)
+          toast(`${progressText}：切换到「${step.page || TG_AGENT_NAMES[step.agent] || step.agent}」`)
+          if (step.page) {
+            await tgApplyStepState(step)
+            await tgMoveToPageFocus(step)
+            await tgSleep(650)
+          } else {
+            await tgNavigate(step.agent)
+          }
           await tgSleep(800)
-        } else if (a === 'knowledge_search') {
-          const keyword = step.keyword || step.text || ''
-          toast(`${progressText}：检索知识库「${keyword}」`)
-          selectedAgentId.value = 'bowen'
-          activePage.value = 'knowledge'
-          knowledgePanel.value = step.panel || 'library'
-          knowledgeKeyword.value = keyword
-          await nextTick()
-          await loadKnowledge().catch(() => {})
-          await tgSleep(700)
-        } else if (a === 'type') {
+        } else if (a === 'transfer_attachment') {
+          toast(`${progressText}：转交现场图片给观微`)
+          await tgTransferAttachmentsToSearch(context.transferAttachments || assistantFiles.value, step)
+          await tgSleep(800)
+        } else if (['search', 'filter', 'openPanel', 'openKnowledgeGraph', 'openChat', 'summarize', 'approve', 'report', 'knowledge_search'].includes(a)) {
+          toast(`${progressText}：${tgActionLabel(step)}`)
+          await tgApplyStepState(step)
+          await tgMoveToPageFocus(step)
+          if (a === 'search') await runSearch().catch(() => {})
+          if (a === 'openKnowledgeGraph' || a === 'knowledge_search') await loadKnowledge().catch(() => {})
+          await tgSleep(1000)
+        } else if (a === 'type' || a === 'agent_type') {
           toast(`${progressText}：输入指令`)
-          await tgType(step.text || '')
+          await tgTypeAgentMessage(step.text || '')
           await tgSleep(500)
-        } else if (a === 'click_send') {
-          toast(`${progressText}：发送指令`)
-          await tgClickSend()
+        } else if (a === 'click_send' || a === 'agent_send') {
+          toast(`${progressText}：发送给${TG_AGENT_NAMES[step.agent] || step.agentName || '智能体'}`)
+          await tgClickSend(step)
+        } else if (a === 'contact_type') {
+          toast(`${progressText}：输入联系人消息`)
+          await tgTypeContactMessage(step.text || '')
+          await tgSleep(500)
+        } else if (a === 'contact_send') {
+          toast(`${progressText}：发送联系人消息`)
+          await tgClickContactSend()
         } else if (a === 'wait') {
           toast(`${progressText}：等待响应 ${step.seconds || 2}s`)
           await tgSleep((step.seconds || 2) * 1000)
         }
+        tgRunUi.outputText = tgStepOutputText(step)
+        tgRunUi.observation = tgObservePage()
+        tgRunUi.check = tgCheckResultFor(step)
+        await tgSleep(350)
       } catch (err) {
         console.warn('[天工遥控] 步骤失败:', a, err)
+        tgRunUi.statusText = '步骤异常'
+        tgRunUi.outputText = `当前步骤未完成：${err?.message || '页面动作异常'}。已继续下一步。`
+        tgRunUi.check = `校验失败：${err?.message || '页面动作异常'}，准备继续下一步。`
         toast(`步骤「${a}」失败，继续下一步`)
       }
     }
   } finally {
     tgRunUi.progress = 100
-    await tgSleep(1500)
+    tgRunUi.statusText = '已完成'
+    tgRunUi.current = totalSteps
+    tgRunUi.title = '执行完成'
+    tgRunUi.detail = '天工已完成跨页面可视化执行，右侧对话中可查看本次闭环摘要。'
+    tgRunUi.outputText = '已完成页面切换、检索、任务联动、知识库定位和闭环摘要。'
+    tgRunUi.observation = tgObservePage()
+    tgRunUi.decision = '本轮任务已闭环，保留报告供用户展开查看'
+    tgRunUi.check = '最终校验完成'
+    await tgSleep(4200)
     tgCursor.value = { ...tgCursor.value, visible: false }
     tgRunUi.visible = false
     tgRunning.value = false
@@ -6827,6 +7543,20 @@ pre { white-space: pre-wrap; padding: 12px; border-radius: 12px; background: #11
 .bubble { max-width: 88%; padding: 12px 14px; border-radius: 14px; color: #484336; background: #fbfaf8; font-size: 13px; line-height: 1.55; }
 .bubble.user { align-self: flex-end; background: #111110; color: #EEECEA; }
 .bubble.assistant { align-self: flex-start; }
+.message-attachments { display: grid; gap: 9px; margin: 0 0 10px; }
+.message-attachments figure { display: grid; grid-template-columns: 54px minmax(0, 1fr); align-items: center; gap: 10px; margin: 0; padding: 8px; border-radius: 13px; border: 1px solid rgba(255,255,255,.28); background: rgba(255,255,255,.16); }
+.message-attachments figure.image { grid-template-columns: 108px minmax(0, 1fr); }
+.message-attachments img { width: 108px; height: 76px; border-radius: 10px; object-fit: cover; background: rgba(255,255,255,.28); box-shadow: 0 8px 18px rgba(0,0,0,.12); }
+.message-attachments figure > span { width: 54px; height: 54px; display: grid; place-items: center; border-radius: 12px; background: rgba(255,255,255,.2); font-size: 11px; font-weight: 900; }
+.message-attachments figcaption { min-width: 0; display: grid; gap: 3px; }
+.message-attachments figcaption b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.message-attachments figcaption small { opacity: .76; font-size: 11px; }
+.bubble.assistant .message-attachments figure { border-color: #dce7e8; background: #f7fbfb; }
+.bubble.assistant .message-attachments figure > span { background: #e6f3f2; color: var(--teal-dark); }
+.bubble.assistant .message-attachments figcaption small { color: #6f8387; }
+.message-attachments.compact figure { grid-template-columns: 46px minmax(0, 1fr); padding: 7px; }
+.message-attachments.compact figure.image { grid-template-columns: 78px minmax(0, 1fr); }
+.message-attachments.compact img { width: 78px; height: 58px; border-radius: 9px; }
 .visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 .file-pills img { width: 34px; height: 34px; border-radius: 7px; object-fit: cover; vertical-align: middle; margin-right: 6px; }
 .modality-line { margin: 10px 0; }
@@ -8423,9 +9153,7 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .operator-panel .ask-box input:focus { outline: 0; }
 .operator-panel .assistant-input-tools button:hover, .operator-panel .assistant-input-tools button.active { border-color: var(--op-accent); background: var(--op-soft); color: var(--op-accent-dark); }
 .operator-panel .bubble.assistant { border-color: color-mix(in srgb, var(--op-accent) 6%, #dce7e8); }
-.aios-recorder,
-.tiangong-trace,
-.tg-run-overlay {
+.aios-recorder {
   display: none !important;
 }
 .aios-recorder { gap: 10px; padding: 13px; border: 1px solid color-mix(in srgb, var(--op-accent) 10%, #d8e2e1); border-radius: 18px; background: rgba(255,255,255,.72); box-shadow: 0 10px 24px rgba(31,67,70,.055); }
@@ -8463,6 +9191,44 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .chat-thread { gap: 13px; padding: 3px 6px 6px 1px; scrollbar-color: #9db0b3 transparent; }
 .bubble { max-width: 92%; padding: 13px 15px; border: 1px solid #dce7e8; border-radius: 16px 16px 16px 5px; color: #1e3439; background: #fff; font-size: 14.5px; font-weight: 500; line-height: 1.72; white-space: pre-wrap; box-shadow: 0 6px 15px rgba(28, 62, 68, .055); }
 .bubble.user { border-color: var(--teal-dark); border-radius: 16px 16px 5px 16px; background: var(--teal-dark); color: #fff; }
+.aios-result-report { display: grid; gap: 12px; min-width: min(430px, 100%); white-space: normal; }
+.aios-result-report summary { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 2px 0 10px; border-bottom: 1px solid #e5ede9; cursor: pointer; list-style: none; }
+.aios-result-report summary::-webkit-details-marker { display: none; }
+.aios-result-report summary > span { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; background: #205f61; color: #fff; font-size: 11px; font-weight: 900; box-shadow: 0 10px 18px rgba(32,95,97,.14); }
+.aios-result-report summary small { display: block; color: #718884; font-size: 11px; font-weight: 700; line-height: 1.4; }
+.aios-result-report summary b { display: block; margin-top: 2px; color: #17393b; font-size: 16px; }
+.aios-result-report summary em { padding: 5px 8px; border-radius: 999px; background: #fff8ec; color: #8a662d; font-size: 11px; font-style: normal; font-weight: 900; }
+.aios-result-report[open] summary em { background: #eaf3ef; color: #205f61; }
+.aios-report-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.aios-report-metrics span { min-width: 0; padding: 10px; border: 1px solid #e2ebe7; border-radius: 12px; background: #fbfdfa; }
+.aios-report-metrics small { display: block; color: #7a8b88; font-size: 10px; font-weight: 800; }
+.aios-report-metrics b { display: block; margin-top: 4px; color: #8a662d; font-size: 14px; }
+.aios-report-section { padding: 11px 12px; border: 1px solid #eadfc8; border-radius: 14px; background: #fffaf1; }
+.aios-result-report h4 { margin: 0 0 7px; color: #205f61; font-size: 13px; }
+.aios-result-report p { margin: 0; color: #405a5a; font-size: 12.5px; line-height: 1.65; }
+.aios-result-report footer { display: flex; flex-wrap: wrap; gap: 7px; }
+.aios-result-report footer span { padding: 5px 8px; border: 1px solid #dce8e3; border-radius: 999px; background: #f7faf7; color: #52706b; font-size: 11px; font-weight: 800; }
+.aios-report-open { width: 100%; min-height: 38px; border: 1px solid #d9c9a8; border-radius: 12px; background: #fff8ec; color: #7d5b25; font-weight: 900; }
+.aios-report-page { width: min(1080px, 96vw); max-height: 90vh; gap: 16px; padding: 0 24px 20px; border: 1px solid #ded8cf; border-radius: 18px; background: #fbfaf7; box-shadow: 0 28px 80px rgba(26,42,43,.22); }
+.aios-report-page > header { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: 62px minmax(0, 1fr); align-items: center; gap: 16px; margin: 0 -24px; padding: 22px 64px 20px 24px; border-bottom: 1px solid #e4ded4; border-radius: 18px 18px 0 0; background: #fffdf9; }
+.aios-report-page > header > span { width: 62px; height: 62px; display: grid; place-items: center; border-radius: 18px; background: #205f61; color: #fff; font-weight: 900; box-shadow: 0 14px 28px rgba(32,95,97,.16); }
+.aios-report-page h2 { margin: 4px 0; color: #172e31; font-size: 24px; }
+.aios-report-page header small { color: #6d7c78; }
+.aios-page-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.aios-page-metrics span { padding: 14px; border: 1px solid #e1e9e5; border-radius: 14px; background: #fff; }
+.aios-page-metrics small { display: block; color: #7b8a86; font-size: 11px; font-weight: 800; }
+.aios-page-metrics b { display: block; margin-top: 5px; color: #8a662d; font-size: 18px; }
+.aios-page-conclusion { padding: 16px; border-left: 4px solid #b88a44; border-radius: 0 14px 14px 0; background: #fff8ec; }
+.aios-report-page h3 { margin: 0 0 10px; color: #205f61; font-size: 16px; }
+.aios-page-conclusion p { color: #4f5e58; line-height: 1.8; }
+.aios-page-blocks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.aios-page-blocks article { padding: 16px; border: 1px solid #e1e9e5; border-radius: 14px; background: #fff; }
+.aios-page-blocks ul { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
+.aios-page-blocks li { position: relative; padding-left: 16px; color: #435956; line-height: 1.65; }
+.aios-page-blocks li::before { content: ""; position: absolute; left: 0; top: .7em; width: 6px; height: 6px; border-radius: 50%; background: #b88a44; }
+.aios-report-page footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px -24px -20px; padding: 14px 24px; border-top: 1px solid #e4ded4; background: #fffdf9; border-radius: 0 0 18px 18px; }
+.aios-report-page footer span { padding: 6px 9px; border: 1px solid #dce8e3; border-radius: 999px; background: #f7faf7; color: #52706b; font-size: 12px; font-weight: 800; }
+.aios-report-page footer button { margin-left: auto; }
 .quick-card { background: #fff; box-shadow: 0 5px 14px rgba(28, 62, 68, .04); }
 .operator-chips button { border-color: #cedbdc; color: #27464a; font-size: 12.5px; }
 .assistant-input-tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -8479,38 +9245,39 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .assistant-attachments span img { width: 30px; height: 30px; border-radius: 7px; object-fit: cover; }
 .assistant-attachments span i { padding: 2px 5px; border-radius: 5px; background: #e6f3f2; color: var(--teal); font-size: 9px; font-style: normal; font-weight: 900; }
 /* 登录与注册：独立门禁页面，不依赖业务接口，避免影响现有服务连接。 */
-.app-shell.auth-shell { display: block; min-width: 0; background: #f3f7f7; }
-.auth-gate { min-height: 100vh; display: grid; grid-template-columns: minmax(520px, 1.08fr) minmax(460px, .92fr); background: #f5f8f8; }
-.auth-visual { position: relative; min-height: 100vh; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; padding: 52px 64px 44px; background: linear-gradient(145deg, #0d4d4b 0%, #126c66 50%, #1b8278 100%); color: #fff; }
-.auth-visual::before { content: ""; position: absolute; width: 540px; height: 540px; right: -170px; bottom: -170px; border: 1px solid rgba(255,255,255,.2); border-radius: 50%; box-shadow: 0 0 0 72px rgba(255,255,255,.035), 0 0 0 144px rgba(255,255,255,.025); }
-.auth-grid { position: absolute; inset: 0; opacity: .2; background-image: linear-gradient(rgba(255,255,255,.18) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.18) 1px, transparent 1px); background-size: 52px 52px; mask-image: linear-gradient(135deg, #000, transparent 78%); }
+.app-shell.auth-shell { display: block; min-width: 0; background: #f2f8fc; }
+.auth-gate { min-height: 100vh; display: grid; grid-template-columns: minmax(520px, 1.08fr) minmax(460px, .92fr); background: #f6fbff; }
+.auth-visual { position: relative; min-height: 100vh; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; padding: 52px 64px 44px; background: linear-gradient(145deg, #e9f8ff 0%, #bfe6ff 46%, #7fc6ef 100%); color: #17364a; }
+.auth-visual::before { content: ""; position: absolute; width: 560px; height: 560px; right: -180px; bottom: -170px; border: 1px solid rgba(255,255,255,.74); border-radius: 50%; box-shadow: 0 0 0 74px rgba(255,255,255,.28), 0 0 0 148px rgba(77,164,219,.08); }
+.auth-visual::after { content: ""; position: absolute; width: 380px; height: 380px; left: -140px; top: 18%; border-radius: 50%; background: rgba(255,255,255,.34); filter: blur(2px); }
+.auth-grid { position: absolute; inset: 0; opacity: .42; background-image: linear-gradient(rgba(44,126,178,.16) 1px, transparent 1px), linear-gradient(90deg, rgba(44,126,178,.16) 1px, transparent 1px); background-size: 54px 54px; mask-image: linear-gradient(135deg, #000, transparent 82%); }
 .auth-brand, .auth-intro, .auth-footnote { position: relative; z-index: 1; }
-.auth-brand { display: flex; align-items: center; gap: 18px; font-size: 14px; letter-spacing: .08em; }
-.auth-brand img { width: 170px; height: 72px; padding: 6px 10px; object-fit: contain; border-radius: 14px; background: rgba(255,255,255,.94); }
+.auth-brand { display: flex; align-items: center; gap: 20px; width: fit-content; padding: 12px 18px 12px 14px; border: 1px solid rgba(255,255,255,.78); border-radius: 20px; background: rgba(255,255,255,.58); box-shadow: 0 18px 38px rgba(44,126,178,.14); backdrop-filter: blur(10px); color: #285a73; font-size: 14px; letter-spacing: .08em; }
+.auth-brand img { width: 190px; height: 82px; padding: 0; object-fit: contain; border-radius: 14px; background: transparent; filter: drop-shadow(0 12px 18px rgba(37,95,130,.12)); }
 .auth-intro { max-width: 650px; margin: auto 0; }
-.auth-intro > p { margin-bottom: 18px; color: #bce7e1; font-size: 14px; font-weight: 800; letter-spacing: .12em; }
-.auth-intro h1 { margin: 0; color: #fff; font-size: clamp(42px, 4vw, 68px); line-height: 1.24; letter-spacing: -.04em; }
+.auth-intro > p { margin-bottom: 18px; color: #236d91; font-size: 14px; font-weight: 800; letter-spacing: .12em; }
+.auth-intro h1 { margin: 0; color: #183c54; font-size: clamp(42px, 4vw, 68px); line-height: 1.24; letter-spacing: -.04em; text-shadow: 0 1px 0 rgba(255,255,255,.72); }
 .auth-capabilities { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 48px; }
-.auth-capabilities span { display: grid; gap: 10px; padding: 18px; border: 1px solid rgba(255,255,255,.18); border-radius: 14px; background: rgba(255,255,255,.08); backdrop-filter: blur(8px); font-size: 13px; }
-.auth-capabilities b { color: #9fe0d8; font-size: 11px; letter-spacing: .12em; }
-.auth-footnote { color: rgba(255,255,255,.65); font-size: 12px; }
-.auth-form-side { display: grid; place-items: center; padding: 48px; background: radial-gradient(circle at 85% 12%, rgba(26,130,120,.1), transparent 28%), #f5f8f8; }
-.auth-card { width: min(460px, 100%); display: grid; gap: 22px; padding: 38px; border: 1px solid #d8e4e4; border-radius: 24px; background: rgba(255,255,255,.94); box-shadow: 0 28px 70px rgba(30,68,72,.13); }
-.auth-card-head p { color: var(--teal); font-size: 13px; font-weight: 900; letter-spacing: .1em; }
-.auth-card-head h2 { margin: 8px 0; color: #17363a; font-size: 28px; }
-.auth-card-head span { color: #71858a; font-size: 13px; }
-.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; border-radius: 12px; background: #edf3f3; }
-.auth-tabs button { min-height: 42px; border: 0; background: transparent; color: #6e8286; font-weight: 800; }
-.auth-tabs button.active { background: #fff; color: var(--teal-dark); box-shadow: 0 5px 14px rgba(35,74,78,.09); }
+.auth-capabilities span { display: grid; gap: 10px; padding: 18px; border: 1px solid rgba(255,255,255,.68); border-radius: 14px; background: rgba(255,255,255,.45); backdrop-filter: blur(8px); color: #2c6179; font-size: 13px; box-shadow: 0 10px 28px rgba(68,142,186,.08); }
+.auth-capabilities b { color: #237eaf; font-size: 11px; letter-spacing: .12em; }
+.auth-footnote { color: rgba(31,82,108,.66); font-size: 12px; }
+.auth-form-side { display: grid; place-items: center; padding: 48px; background: radial-gradient(circle at 85% 12%, rgba(112,190,235,.16), transparent 28%), #f6fbff; }
+.auth-card { width: min(460px, 100%); display: grid; gap: 22px; padding: 38px; border: 1px solid #d5e8f2; border-radius: 24px; background: rgba(255,255,255,.96); box-shadow: 0 28px 70px rgba(56,118,153,.14); }
+.auth-card-head p { color: #2c8cbd; font-size: 13px; font-weight: 900; letter-spacing: .1em; }
+.auth-card-head h2 { margin: 8px 0; color: #18384c; font-size: 28px; }
+.auth-card-head span { color: #6b8492; font-size: 13px; }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; border-radius: 12px; background: #ecf6fb; }
+.auth-tabs button { min-height: 42px; border: 0; background: transparent; color: #6f8794; font-weight: 800; }
+.auth-tabs button.active { background: #fff; color: #237eaf; box-shadow: 0 5px 14px rgba(56,118,153,.1); }
 .auth-fields { display: grid; gap: 15px; }
-.auth-fields label { display: grid; gap: 7px; color: #344d52; font-size: 12px; font-weight: 800; }
-.auth-fields input { width: 100%; height: 48px; padding: 0 14px; border: 1px solid #d4e0e1; border-radius: 11px; outline: 0; color: #18363a; background: #fbfdfd; }
-.auth-fields input:focus { border-color: #6ca9a3; box-shadow: 0 0 0 3px rgba(22,118,111,.1); background: #fff; }
+.auth-fields label { display: grid; gap: 7px; color: #345266; font-size: 12px; font-weight: 800; }
+.auth-fields input { width: 100%; height: 48px; padding: 0 14px; border: 1px solid #d1e4ee; border-radius: 11px; outline: 0; color: #18384c; background: #fbfdff; }
+.auth-fields input:focus { border-color: #68b5df; box-shadow: 0 0 0 3px rgba(79,171,224,.14); background: #fff; }
 .remember-row { display: flex; align-items: center; gap: 8px; color: #647a7f; font-size: 12px; }
 .remember-row input { accent-color: var(--teal); }
 .auth-error, .form-error { padding: 10px 12px; border: 1px solid #f0c7c0; border-radius: 9px; background: #fff4f2; color: #a84437; font-size: 12px; }
-.auth-submit { min-height: 50px; border: 0; border-radius: 12px; background: linear-gradient(135deg, #125f5b, #178178); color: #fff; font-weight: 900; box-shadow: 0 10px 22px rgba(18,95,91,.2); }
-.auth-submit:hover { transform: translateY(-1px); box-shadow: 0 14px 26px rgba(18,95,91,.25); }
+.auth-submit { min-height: 50px; border: 0; border-radius: 12px; background: linear-gradient(135deg, #247faf, #53b5e8); color: #fff; font-weight: 900; box-shadow: 0 10px 22px rgba(44,140,189,.23); }
+.auth-submit:hover { transform: translateY(-1px); box-shadow: 0 14px 26px rgba(44,140,189,.28); }
 .demo-account { display: grid; grid-template-columns: 1fr auto; gap: 6px 14px; padding: 13px 15px; border: 1px dashed #c9d9d9; border-radius: 11px; background: #f3f8f7; color: #496267; font-size: 11px; }
 .demo-account span { grid-column: 1 / -1; color: var(--teal); font-weight: 900; }
 .demo-account b { font-weight: 700; }
@@ -10105,43 +10872,66 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
   .library-result-grid { grid-template-columns: 1fr; }
   .recheck-panel .recheck-grid { grid-template-columns: 1fr; }
 }
-.tiangong-trace { margin: 0 0 8px; padding: 8px 10px; background: #f4f8f9; border: 1px dashed #b9d3d6; border-radius: 10px; font-size: 12px; color: #5a6a6e; }
-.tiangong-trace summary { cursor: pointer; font-weight: 600; color: #1e6f6a; user-select: none; margin-bottom: 4px; }
-.trace-step { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0; border-top: 1px dotted #d6e3e5; align-items: baseline; }
+.tiangong-trace { margin: 0 0 10px; padding: 10px; background: #f7fbfa; border: 1px solid #d9e9e6; border-radius: 14px; font-size: 12px; color: #50666b; box-shadow: inset 0 1px 0 rgba(255,255,255,.8); }
+.tiangong-trace summary { cursor: pointer; font-weight: 800; color: #235f63; user-select: none; margin-bottom: 7px; list-style: none; }
+.tiangong-trace summary::-webkit-details-marker { display: none; }
+.trace-step { display: grid; grid-template-columns: 42px minmax(72px, auto) minmax(0, 1fr); gap: 7px; padding: 7px 0; border-top: 1px solid #e5efed; align-items: center; }
 .trace-step:first-of-type { border-top: 0; }
-.trace-tag { display: inline-block; padding: 1px 7px; border-radius: 8px; font-size: 11px; font-weight: 600; color: #fff; background: #8aa3a6; min-width: 32px; text-align: center; flex-shrink: 0; }
-.trace-tag.tool_call { background: #1e6f6a; }
-.trace-tag.action { background: #c98a3a; }
-.trace-tag.thought { background: #5b8def; }
-.trace-tag.observation { background: #8a7bb0; }
-.trace-tool { color: #1e6f6a; font-weight: 600; word-break: break-all; }
+.trace-tag { display: inline-grid; place-items: center; padding: 3px 6px; border-radius: 999px; font-size: 10px; font-weight: 800; color: #fff; background: #8aa3a6; min-width: 34px; text-align: center; flex-shrink: 0; }
+.trace-tag.tool_call { background: #235f63; }
+.trace-tag.action { background: #b6803f; }
+.trace-tag.thought { background: #5b7f9f; }
+.trace-tag.observation { background: #7f8f78; }
+.trace-tool { max-width: 150px; padding: 4px 7px; border-radius: 999px; background: #eef6f4; color: #235f63; font-size: 11px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trace-text { min-width: 0; color: #455d62; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trace-text { flex-basis: 100%; color: #41575b; word-break: break-word; white-space: pre-wrap; }
 .tg-cursor { position: fixed; width: 1px; height: 1px; z-index: 99999; pointer-events: none; transition: none !important; }
-.tg-cursor-dot { position: absolute; left: -12px; top: -12px; width: 24px; height: 24px; border-radius: 50%; background: radial-gradient(circle, #fff 0 22%, rgba(37,99,235,.94) 24% 45%, rgba(96,165,250,.28) 47% 100%); border: 1px solid rgba(255,255,255,.95); box-shadow: 0 0 0 7px rgba(37,99,235,.13), 0 13px 24px rgba(37,72,140,.2); animation: tg-pulse 1.35s ease-in-out infinite; }
+.tg-cursor-dot { position: absolute; left: -12px; top: -12px; width: 24px; height: 24px; border-radius: 50%; background: radial-gradient(circle, #fff 0 22%, rgba(32,95,97,.96) 24% 45%, rgba(184,138,68,.24) 47% 100%); border: 1px solid rgba(255,255,255,.95); box-shadow: 0 0 0 7px rgba(32,95,97,.12), 0 13px 24px rgba(38,72,70,.2); animation: tg-pulse 1.35s ease-in-out infinite; }
 @keyframes tg-pulse { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.18); opacity: .88; } }
 .tg-cursor-dot::after { content: ''; position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fff; box-shadow: 0 0 8px rgba(255,255,255,.9); }
-.tg-cursor-label { position: absolute; left: 20px; top: 13px; white-space: nowrap; background: rgba(26,76,192,.92); color: #fff; font-size: 12px; padding: 5px 10px; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; box-shadow: 0 10px 22px rgba(37,72,140,.18); font-weight: 700; backdrop-filter: blur(10px); }
+.tg-cursor-label { position: absolute; left: 20px; top: 13px; white-space: nowrap; background: rgba(32,95,97,.94); color: #fff; font-size: 12px; padding: 5px 10px; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; box-shadow: 0 10px 22px rgba(32,95,97,.16); font-weight: 700; backdrop-filter: blur(10px); }
 .bubble.loading { position: relative; }
 .loading-dots { display: inline-flex; gap: 4px; margin-right: 6px; }
 .loading-dots i { width: 6px; height: 6px; border-radius: 50%; background: #1e6f6a; display: inline-block; animation: tg-bounce 1.2s infinite ease-in-out both; }
 .loading-dots i:nth-child(1) { animation-delay: -.32s; }
 .loading-dots i:nth-child(2) { animation-delay: -.16s; }
 @keyframes tg-bounce { 0%,80%,100% { transform: scale(0); } 40% { transform: scale(1); } }
-.tg-run-overlay { position: fixed; left: 50%; top: 18px; z-index: 99990; width: min(520px, calc(100vw - 36px)); transform: translateX(-50%); pointer-events: none; }
-.tg-run-card { overflow: hidden; border: 1px solid rgba(176,199,207,.72); border-radius: 18px; background: rgba(255,255,255,.9); box-shadow: 0 20px 46px rgba(31,61,76,.16); backdrop-filter: blur(18px); animation: tg-run-in .26s ease-out; }
+.tg-run-overlay { position: fixed; left: 50%; top: 16px; z-index: 99990; width: min(840px, calc(100vw - 40px)); transform: translateX(-50%); pointer-events: none; }
+.tg-run-card { overflow: hidden; border: 1px solid rgba(193,208,204,.86); border-radius: 20px; background: linear-gradient(180deg, rgba(255,255,253,.98), rgba(248,250,247,.96)); box-shadow: 0 20px 46px rgba(36,62,63,.16), 0 1px 0 rgba(255,255,255,.96) inset; backdrop-filter: blur(18px); animation: tg-run-in .26s ease-out; }
 @keyframes tg-run-in { from { opacity: 0; transform: translate3d(0,-12px,0) scale(.98); } to { opacity: 1; transform: translate3d(0,0,0) scale(1); } }
-.tg-run-card header { display: grid; grid-template-columns: 46px minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 14px 16px 11px; }
-.tg-run-mark { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 15px; background: linear-gradient(145deg, #2563EB, #60A5FA); color: #fff; font-size: 13px; font-weight: 900; box-shadow: 0 10px 20px rgba(37,99,235,.2); }
-.tg-run-card small { display: block; margin-bottom: 3px; color: #6c8188; font-size: 11px; font-weight: 800; }
-.tg-run-card b { display: block; overflow: hidden; color: #17323a; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
-.tg-run-card em { min-width: 48px; padding: 6px 10px; border-radius: 999px; background: #eef4ff; color: #1a4cc0; font-size: 12px; font-style: normal; font-weight: 900; text-align: center; }
-.tg-run-progress { height: 4px; margin: 0 16px; overflow: hidden; border-radius: 999px; background: #e5edf0; }
-.tg-run-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2563EB, #60A5FA); transition: width .28s ease; }
-.tg-run-card p { margin: 11px 16px 12px; color: #486067; font-size: 12px; line-height: 1.6; }
-.tg-run-steps { display: flex; gap: 7px; overflow: hidden; padding: 0 16px 15px; }
-.tg-run-steps span { flex: 1 1 0; min-width: 0; padding: 6px 8px; border: 1px solid #dde9eb; border-radius: 999px; background: #f8fbfb; color: #789096; font-size: 11px; font-weight: 800; text-align: center; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
-.tg-run-steps span.done { border-color: #dce8ff; background: #f3f7ff; color: #1a4cc0; }
-.tg-run-steps span.active { border-color: #b9d3ff; background: #edf4ff; color: #1d4ed8; box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
+.tg-run-card header { display: grid; grid-template-columns: 54px minmax(0,1fr) auto; align-items: center; gap: 13px; padding: 14px 16px 10px; }
+.tg-run-mark { position: relative; width: 54px; height: 54px; display: grid; place-items: center; border-radius: 50%; background: linear-gradient(145deg, #fffdf8, #edf4ef); border: 1px solid rgba(198,214,207,.95); box-shadow: 0 12px 24px rgba(35,95,99,.14), 0 0 0 6px rgba(238,244,239,.78); }
+.tg-run-mark img { width: 46px; height: 46px; border-radius: 50%; object-fit: cover; display: block; background: #f4f8f6; }
+.tg-run-mark i { position: absolute; right: 2px; bottom: 4px; width: 12px; height: 12px; border-radius: 50%; background: #6aa876; border: 2px solid #fff; box-shadow: 0 0 0 3px rgba(106,168,118,.16); }
+.tg-run-card small { display: block; margin-bottom: 3px; color: #758887; font-size: 11px; font-weight: 800; }
+.tg-run-card b { display: block; overflow: hidden; color: #17393b; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.tg-run-card em { min-width: 54px; padding: 6px 10px; border-radius: 999px; background: #f5efe4; color: #8a662d; font-size: 12px; font-style: normal; font-weight: 900; text-align: center; }
+.tg-run-progress { height: 5px; margin: 0 16px; overflow: hidden; border-radius: 999px; background: #e8eeee; }
+.tg-run-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #205f61, #b88a44); transition: width .32s ease; }
+.tg-run-detail { margin: 9px 16px 10px; color: #4a6260; font-size: 13px; line-height: 1.55; }
+.tg-run-io { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 0 16px 9px; }
+.tg-run-io span { min-width: 0; padding: 8px 10px; border: 1px solid #e0e9e5; border-radius: 12px; background: #fffefb; box-shadow: 0 1px 0 rgba(255,255,255,.9) inset; }
+.tg-run-io small { margin: 0 0 2px; color: #7c9092; font-size: 10px; }
+.tg-run-io b { font-size: 12px; color: #24464a; }
+.tg-run-exchange { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 8px; padding: 0 16px 10px; }
+.tg-run-exchange section { min-width: 0; padding: 9px 11px; border: 1px solid #e2ebe7; border-radius: 14px; background: linear-gradient(180deg, #ffffff, #f8fbf8); }
+.tg-run-exchange small { margin: 0 0 4px; color: #6f8587; }
+.tg-run-exchange p { min-height: 38px; max-height: 54px; margin: 0; overflow: hidden; color: #2f474c; font-size: 12px; line-height: 1.5; word-break: break-word; }
+.tg-run-exchange section:last-child { border-color: #eadfc8; background: #fffaf1; }
+.tg-run-cognition { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; padding: 0 16px 10px; }
+.tg-run-cognition span { min-width: 0; display: grid; gap: 3px; padding: 8px 10px; border: 1px solid #e0e9e7; border-radius: 13px; background: rgba(255,255,255,.76); }
+.tg-run-cognition small { margin: 0; color: #6f8587; font-size: 10px; }
+.tg-run-cognition b { color: #28494d; font-size: 12px; line-height: 1.35; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.tg-run-steps { display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap: 7px; overflow: hidden; padding: 0 16px 14px; }
+.tg-run-steps span { min-width: 0; padding: 7px 8px; border: 1px solid #dde9eb; border-radius: 999px; background: #f8fbfb; color: #789096; font-size: 11px; font-weight: 800; text-align: center; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+.tg-run-steps span.done { border-color: #d8eadf; background: #f1f8f4; color: #397257; }
+.tg-run-steps span.active { border-color: #d8c79f; background: #fff8eb; color: #7d5b25; box-shadow: 0 0 0 3px rgba(184,138,68,.11); }
+@media (max-width: 900px) {
+  .tg-run-io { grid-template-columns: 1fr; }
+  .tg-run-exchange { grid-template-columns: 1fr; }
+  .tg-run-cognition { grid-template-columns: 1fr; }
+  .tg-run-steps { grid-template-columns: repeat(3, minmax(0,1fr)); }
+}
 
 .side-nav { position: relative; gap: 20px !important; padding: 18px 12px !important; overflow: hidden; border-right: 1px solid rgba(158, 204, 232, .5) !important; background-color: #e9f8ff !important; background-image: linear-gradient(180deg, #d7f1ff 0%, #edf9ff 52%, #ffffff 100%) !important; box-shadow: 10px 0 24px rgba(92, 157, 195, .1) !important; }
 .side-nav::before { content: ""; position: absolute; left: 18px; right: 18px; top: 13px; height: 1px; border-radius: 999px; background: rgba(255,255,255,.72); box-shadow: none; }

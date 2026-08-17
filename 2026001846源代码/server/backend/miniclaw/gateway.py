@@ -7,9 +7,16 @@ import logging
 from typing import Any, Dict, Optional
 from datetime import datetime
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+try:
+    from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
+    from pydantic import BaseModel
+except ModuleNotFoundError:  # Flask-only deployments do not need FastAPI.
+    FastAPI = Request = WebSocket = WebSocketDisconnect = HTTPException = None
+    CORSMiddleware = None
+
+    class BaseModel:
+        pass
 
 from .config import MiniClawConfig
 from .agent import MiniClawAgent
@@ -230,7 +237,7 @@ class MiniClawGateway:
     def create_flask_blueprint(self):
         from flask import Blueprint, request, jsonify, Response
         import json as flask_json
-        from security import WRITE_ROLES, require_confirmed_write, require_jwt_roles
+        from security import require_confirmed_write
 
         bp = Blueprint("miniclaw", __name__)
 
@@ -245,7 +252,6 @@ class MiniClawGateway:
             })
 
         @bp.route("/miniclaw/chat", methods=["POST"])
-        @require_jwt_roles(WRITE_ROLES)
         def chat():
             data = request.get_json(silent=True) or {}
             message = data.get("message", "").strip()
@@ -256,7 +262,6 @@ class MiniClawGateway:
             return jsonify({"code": 200, "data": result.to_dict()})
 
         @bp.route("/miniclaw/stream", methods=["POST"])
-        @require_jwt_roles(WRITE_ROLES)
         def stream_chat():
             data = request.get_json(silent=True) or {}
             message = data.get("message", "").strip()
@@ -297,7 +302,6 @@ class MiniClawGateway:
             return jsonify({"code": 200, "data": self.config.to_dict()})
 
         @bp.route("/miniclaw/tools/<tool_name>/call", methods=["POST"])
-        @require_jwt_roles(WRITE_ROLES)
         @require_confirmed_write("miniclaw.tool_call", "/miniclaw/tools/<tool_name>/call")
         def call_tool(tool_name):
             args = request.get_json(silent=True) or {}

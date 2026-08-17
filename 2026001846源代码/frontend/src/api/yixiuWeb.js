@@ -149,6 +149,10 @@ export const yixiuApi = {
     }
   },
 
+  createSession(payload = {}) {
+    return requestJson('/session', { method: 'POST', body: payload })
+  },
+
   invokeAgent(agentId, payload = {}) {
     return requestJson(`/agents/${encodeURIComponent(agentId)}/invoke`, { method: 'POST', body: payload })
   },
@@ -208,7 +212,8 @@ export const yixiuApi = {
   },
 
   createTask(task) {
-    return requestJson('/tasks', { method: 'POST', body: task })
+    const options = confirmedBody(task, 'task-create')
+    return requestJson('/tasks', { method: 'POST', ...options })
   },
 
   updateTaskStatus(taskId, status, extra = {}) {
@@ -327,7 +332,8 @@ export const yixiuApi = {
   },
 
   sendConversationMessage(conversationId, payload) {
-    return requestJson(`/conversations/${encodeURIComponent(conversationId)}/messages`, { method: 'POST', body: payload })
+    const options = confirmedBody(payload, 'conversation-message')
+    return requestJson(`/conversations/${encodeURIComponent(conversationId)}/messages`, { method: 'POST', ...options })
   },
 
   recheck(payload) {
@@ -335,7 +341,8 @@ export const yixiuApi = {
   },
 
   updateKnowledge(payload) {
-    return requestJson('/knowledge/update', { method: 'POST', body: payload })
+    const options = confirmedBody(payload, 'knowledge-update')
+    return requestJson('/knowledge/update', { method: 'POST', ...options })
   },
 
   reviewKnowledge(itemId, payload) {
