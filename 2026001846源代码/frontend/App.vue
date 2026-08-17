@@ -472,7 +472,23 @@
                 <div class="search-fusion-ai">
                   <div class="search-ai-status">
                     <img :src="operatorProfile.avatar" :alt="operatorProfile.name" @error="handleAvatarError" />
-                    <div><b>观微正在协助</b><small>{{ searchResult ? `已匹配 ${searchResult.references.length} 份资料` : '等待现场线索' }}</small></div>
+                    <div><b>{{ loading.search ? '观微正在检索' : '观微正在协助' }}</b><small>{{ loading.search ? '正在融合设备、故障现象和现场证据' : (searchResult ? `已匹配 ${searchResult.references.length} 份资料` : '等待现场线索') }}</small></div>
+                  </div>
+                  <div v-if="loading.search" class="search-process-card" aria-live="polite">
+                    <div class="search-scan-visual">
+                      <span class="scan-core">观微</span>
+                      <i></i><i></i><i></i>
+                    </div>
+                    <div class="search-process-copy">
+                      <b>智能检索过程中</b>
+                      <p>正在召回维修手册、历史案例、SOP 与安全规范，生成可追溯研判。</p>
+                    </div>
+                    <div class="search-process-track">
+                      <span v-for="step in searchRunningSteps" :key="step.title">
+                        <b>{{ step.title }}</b>
+                        <small>{{ step.desc }}</small>
+                      </span>
+                    </div>
                   </div>
                   <div class="search-prompt-templates">
                     <button v-for="item in searchTemplatePrompts" :key="item.title" type="button" @click="operatorInput = item.prompt">
@@ -542,6 +558,23 @@
                 <p>{{ searchResult.positions.join('、') }}；工具：{{ searchResult.tools.join('、') }}</p>
                 <div class="card-actions"><button class="primary" type="button" @click="prepareKnowledgeFromSearch">沉淀为知识</button><button type="button" @click="searchPanel = 'multimodal'">重新检索</button></div>
               </template>
+              <div v-else-if="loading.search" class="search-running-state">
+                <div class="search-scan-visual large">
+                  <span class="scan-core">检</span>
+                  <i></i><i></i><i></i>
+                </div>
+                <div>
+                  <p class="eyebrow">观微执行中</p>
+                  <h4>正在生成故障研判</h4>
+                  <p>系统正在融合设备参数、故障现象、附件证据和知识库引用。</p>
+                </div>
+                <div class="search-process-track wide">
+                  <span v-for="step in searchRunningSteps" :key="step.title">
+                    <b>{{ step.title }}</b>
+                    <small>{{ step.desc }}</small>
+                  </span>
+                </div>
+              </div>
               <div v-else class="empty search-empty-state">
                 <span class="analysis-orbit"><i></i><i></i><i></i><b>检</b></span>
                 <h4>检索结果将在这里生成</h4>
@@ -1372,7 +1405,12 @@
                   class="kb-template-card"
                   @click="createDocFromTemplate(tpl)"
                 >
-                  <div class="kb-template-icon">{{ tpl.icon }}</div>
+                  <div
+                    class="kb-template-icon kb-template-visual"
+                    :class="`tpl-${templateIconName(tpl)}`"
+                    :data-label="templateIconLabel(tpl)"
+                    aria-hidden="true"
+                  ></div>
                   <div class="kb-template-info">
                     <h4>{{ tpl.name }}</h4>
                     <span>{{ tpl.category }}</span>
@@ -1394,7 +1432,12 @@
               </header>
               <div class="kb-template-grid">
                 <article v-for="tpl in availableTemplates" :key="'lib-' + tpl.id" class="kb-template-card">
-                  <div class="kb-template-icon">{{ tpl.icon }}</div>
+                  <div
+                    class="kb-template-icon kb-template-visual"
+                    :class="`tpl-${templateIconName(tpl)}`"
+                    :data-label="templateIconLabel(tpl)"
+                    aria-hidden="true"
+                  ></div>
                   <div class="kb-template-info">
                     <h4>{{ tpl.name }}</h4>
                     <span>{{ tpl.category }}</span>
@@ -1695,9 +1738,9 @@
             <details v-if="message.steps && message.steps.length" class="tiangong-trace" v-show="!message.loading">
               <summary>天工执行过程 · {{ message.steps.length }} 步</summary>
               <div v-for="(step, idx) in message.steps" :key="idx" class="trace-step">
-                <span class="trace-tag" :class="step.type">{{ stepLabel(step.type) }}</span>
-                <span v-if="step.tool" class="trace-tool">{{ step.tool }}</span>
-                <span class="trace-text">{{ step.content || traceResult(step) }}</span>
+                <span class="trace-tag" :class="[traceDisplay(step, idx, message.steps).stage, traceDisplay(step, idx, message.steps).status]">{{ traceDisplay(step, idx, message.steps).label }}</span>
+                <span v-if="traceDisplay(step, idx, message.steps).agentName" class="trace-tool">{{ traceDisplay(step, idx, message.steps).agentName }}</span>
+                <span class="trace-text">{{ traceDisplay(step, idx, message.steps).content }}</span>
               </div>
             </details>
             <details v-if="message.report" class="aios-result-report">
@@ -1718,6 +1761,13 @@
               <section class="aios-report-section">
                 <h4>执行结论</h4>
                 <p>{{ message.report.conclusion }}</p>
+              </section>
+              <section v-if="message.report.recommendations?.length" class="aios-report-recommend-list">
+                <h4>推荐生成报告</h4>
+                <article v-for="item in message.report.recommendations.slice(0, 3)" :key="item.id">
+                  <b>{{ item.title }}</b>
+                  <small>{{ item.reason }}</small>
+                </article>
               </section>
               <button class="aios-report-open" type="button" @click="selectedAiosReport = message.report">查看完整报告</button>
             </details>
@@ -1948,6 +1998,14 @@
         <section><h3>故障与处置摘要</h3><p>{{ reportTask.description }}</p></section>
         <section><h3>标准作业记录</h3><ol><li v-for="(step, index) in reportTask.sop || []" :key="index"><b>{{ stepTitle(step) }}</b><span>{{ isTaskStepCompleted(reportTask, index) ? '已确认完成' : '待补充记录' }}</span></li></ol></section>
         <section v-if="reportTask.recheck"><h3>复检结论</h3><p>{{ reportTask.recheck.result }} · {{ reportTask.recheck.comment || '未填写补充说明' }}</p></section>
+        <section class="task-report-recommendations">
+          <h3>建议生成的专项报告</h3>
+          <article v-for="item in buildTaskReportRecommendations(reportTask)" :key="item.id">
+            <b>{{ item.title }}</b>
+            <small>{{ item.reason }}</small>
+            <ul><li v-for="line in item.sections" :key="line">{{ line }}</li></ul>
+          </article>
+        </section>
         <div class="actions"><button type="button" @click="windowPrint">打印 / 导出 PDF</button><button class="primary" type="button" @click="reportTask = null">完成预览</button></div>
       </article>
     </div>
@@ -1972,6 +2030,20 @@
         <section class="aios-page-conclusion">
           <h3>执行结论</h3>
           <p>{{ selectedAiosReport.conclusion }}</p>
+        </section>
+        <section v-if="selectedAiosReport.recommendations?.length" class="aios-page-recommendations">
+          <div>
+            <p class="eyebrow">动态推荐</p>
+            <h3>根据本次问题建议生成 {{ selectedAiosReport.recommendations.length }} 份报告</h3>
+          </div>
+          <article v-for="item in selectedAiosReport.recommendations" :key="item.id">
+            <span>{{ item.type }}</span>
+            <h4>{{ item.title }}</h4>
+            <p>{{ item.reason }}</p>
+            <ul>
+              <li v-for="line in item.sections" :key="line">{{ line }}</li>
+            </ul>
+          </article>
         </section>
         <section class="aios-page-blocks">
           <article v-for="block in selectedAiosReport.blocks" :key="block.title">
@@ -2644,7 +2716,7 @@ const refreshAiosTraceSoon = (runId = '') => {
   window.setTimeout(() => refreshAiosTrace(runId || aiosLive.runId), 450)
 }
 
-const searchForm = reactive({ deviceName: '摩托车发动机总成', deviceModel: 'CG-125', faultCode: 'NOISE-02', category: '发动机', faultType: '异响', maintenanceLevel: '二级检修', query: '启动后气门区域有明显异响，热车后略有减轻，怠速不稳。' })
+const searchForm = reactive({ deviceName: '', deviceModel: '', faultCode: '', category: '', faultType: '', maintenanceLevel: '二级检修', query: '' })
 const searchFiles = ref([])
 const searchAssistantFileInput = ref(null)
 const assistantFiles = ref([])
@@ -2668,6 +2740,25 @@ const searchTemplatePrompts = [
   { title: '生成步骤', icon: 'file', prompt: '请把检索结果整理成现场可执行的检修步骤，包含安全确认、检测位置和复检标准。' },
   { title: '提取风险', icon: 'shield', prompt: '请识别当前检修任务中的安全风险、停机建议和必须二次确认的步骤。' },
   { title: '转为任务', icon: 'check', prompt: '请根据当前检索结论生成一条检修任务草稿，包含负责人、工具、备件和计划完成时间。' }
+]
+const templateIconName = (tpl = {}) => {
+  const text = `${tpl.id || ''} ${tpl.name || ''} ${tpl.category || ''}`.toLowerCase()
+  if (text.includes('sop') || text.includes('作业') || text.includes('流程')) return 'tool'
+  if (text.includes('fault') || text.includes('故障') || text.includes('排查') || text.includes('报告')) return 'search'
+  if (text.includes('meeting') || text.includes('会议') || text.includes('纪要') || text.includes('协作')) return 'calendar'
+  if (text.includes('safety') || text.includes('安全') || text.includes('规范') || text.includes('高风险')) return 'shield'
+  if (text.includes('manual') || text.includes('手册') || text.includes('维修')) return 'file'
+  return 'file'
+}
+const templateIconLabel = (tpl = {}) => {
+  const iconName = templateIconName(tpl)
+  return ({ tool: 'SOP', search: '查', calendar: '会', shield: '安', file: '文' })[iconName] || '文'
+}
+const searchRunningSteps = [
+  { title: '解析线索', desc: '提取设备、型号、故障码' },
+  { title: '召回资料', desc: '匹配手册、SOP、案例' },
+  { title: '风险比对', desc: '识别停机与安全确认项' },
+  { title: '生成研判', desc: '输出原因、步骤和依据' }
 ]
 const searchHistory = ref([
   { id: 'history-1', title: 'CG-125 发动机气门异响排查', deviceName: '摩托车发动机总成', model: 'CG-125', faultCode: 'NOISE-02', category: '发动机', faultType: '异响', maintenanceLevel: '二级检修', query: '启动后气门区域异响，热车后减轻，怠速不稳。', confidence: 91, time: '今日 09:42' },
@@ -5552,6 +5643,26 @@ const cloneAssistantFileForSearch = (file) => ({
   status: '已由天工转入智能检索',
   progress: file.progress || 0
 })
+const inferSearchScene = (text = '', files = []) => {
+  const content = `${text || ''} ${files.map((file) => file.name || '').join(' ')}`.toLowerCase()
+  if (/车淹|泡水|涉水|积水|淹水|水淹|雨水|轮毂|车门|轿车|汽车|车辆/.test(content)) {
+    return {
+      deviceName: '涉水车辆',
+      deviceModel: '',
+      faultCode: '',
+      category: '汽车涉水检修',
+      faultType: '泡水/涉水风险',
+      query: '基于现场图片分析车辆泡水/涉水风险；只根据图片和已知描述判断，不确定的车型、型号、受损程度请留空或标注待确认。重点检查发动机进气、机油乳化、变速箱油、电气线束、制动系统、底盘、车内地毯和安全启动风险。'
+    }
+  }
+  return null
+}
+const applySearchScene = (scene = {}) => {
+  if (!scene) return
+  Object.entries(scene).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) searchForm[key] = value
+  })
+}
 const isVisualSearchTransferPrompt = (value) => {
   const text = String(value || '')
   return assistantFiles.value.length > 0 && /图片|图像|照片|附件|资料|上传|转交|交给|智能检索|观微|查看|分析/.test(text) && /智能检索|观微|查看|分析|什么问题|故障/.test(text)
@@ -5666,9 +5777,39 @@ const simulateVoice = () => {
   speechRecognition.start()
 }
 const buildLocalSearchResult = () => {
+  const scene = inferSearchScene(searchForm.query, searchFiles.value)
+  if (scene) {
+    const fileNames = searchFiles.value.map((file) => file.name).filter(Boolean)
+    return {
+      phenomenonSummary: `现场图片显示车辆处于积水环境，已知线索：${fileNames.length ? fileNames.join('、') : '已上传现场图片'}。积水高度、车辆型号、发动机是否进水等信息需现场复核；当前按车辆泡水/涉水风险进行检修排查。`,
+      risk: 'high',
+      confidence: searchFiles.value.length ? 86 : 72,
+      stopAdvice: '不要立即启动发动机；先断电、拖车转移并检查进气、油液和电气系统，避免发动机进水后二次损坏。',
+      modalities: ['text', ...(searchFiles.value.length ? ['image'] : [])],
+      visualFindings: [
+        '车辆处于积水环境，轮胎和底盘区域被水浸泡。',
+        '仅凭图片无法确认车型、发动机进水深度和车内进水程度，需现场拆检确认。',
+        '优先排查进气系统、机油乳化、电气线束、制动系统和底盘泥沙残留。'
+      ],
+      causes: ['道路积水导致底盘、轮毂和制动部件浸水', '积水可能经进气口、车门密封或线束插头进入关键系统', '长时间浸泡可能引发油液乳化、电气短路、轴承锈蚀或车内霉变'],
+      positions: ['发动机进气口/空气滤芯', '机油尺与油底壳', '变速箱油/差速器油', '保险盒/ECU/线束插头', '刹车盘/刹车片/ABS轮速传感器', '底盘悬挂/轴承/排气管', '车内地毯/座椅底部/安全带卷收器'],
+      tools: ['拖车设备', '绝缘检测工具', '内窥镜', '油液检查工具', '万用表', '举升机', '除湿消毒设备'],
+      suggestion: {
+        steps: ['现场拍照记录并禁止启动', '断开电瓶负极并拖车到维修点', '拆检空气滤芯和进气管确认是否进水', '检查机油和变速箱油是否乳化', '检查 ECU、保险盒和线束插头是否受潮', '清洗底盘并做干燥防锈', '车内除湿消毒后复检', '确认油液、电气和制动正常后再试车'],
+        tools: ['拖车设备', '内窥镜', '万用表', '举升机'],
+        risks: ['误启动导致发动机连杆弯曲', '电气短路', '制动性能下降', '底盘轴承锈蚀', '车内发霉异味']
+      },
+      references: [
+        { id: 'vehicle-water-ref-1', title: '泡水车辆检修排查 SOP', type: '标准作业流程 SOP', category: '汽车涉水检修', equipment: '涉水车辆', model: '', match: 88, summary: '覆盖禁止启动、拖车、进气检查、油液检查、电气干燥、底盘清洗防锈和复检验收。', tags: ['泡水车', '涉水', '安全确认'] },
+        { id: 'vehicle-water-ref-2', title: '汽车电气系统进水检查清单', type: '维修手册', category: '电气系统', equipment: '涉水车辆', model: '', match: 83, summary: '重点检查 ECU、保险盒、传感器、线束插头、启动机和发电机受潮短路风险。', tags: ['电气系统', '进水', '复检'] }
+      ]
+    }
+  }
   const isHighRisk = ['过热', '点火故障'].includes(searchForm.faultType)
+  const subject = [searchForm.deviceModel, searchForm.deviceName].filter(Boolean).join(' ') || '待确认设备'
+  const fault = searchForm.faultType || '待确认故障'
   return {
-    phenomenonSummary: `${searchForm.deviceModel || searchForm.deviceName} 出现${searchForm.faultType}现象，建议结合现场记录、图片和历史案例优先定位高频故障部位。`,
+    phenomenonSummary: `${subject} 出现${fault}现象，建议结合现场记录、图片和历史案例优先定位高频故障部位；未知型号和未知部位保持待确认。`,
     risk: isHighRisk ? 'high' : 'medium',
     confidence: searchFiles.value.length ? 88 : 82,
     stopAdvice: isHighRisk ? '先执行安全隔离并确认温度、供电和联锁状态' : '可在安全确认后按标准流程分步排查',
@@ -5687,12 +5828,13 @@ const buildLocalSearchResult = () => {
       risks: ['带电作业风险', '高温部位烫伤', '复测数据缺失']
     },
     references: [
-      { id: 'local-ref-1', title: `${searchForm.deviceModel || searchForm.deviceName} ${searchForm.faultType}历史故障案例`, type: '历史故障案例', category: '历史故障案例', equipment: searchForm.deviceName, model: searchForm.deviceModel, match: 86, summary: '同类现象常见于关键连接、润滑、散热或密封状态异常，需结合复测记录确认。', tags: [searchForm.faultType, '历史案例', '复检'] },
+      { id: 'local-ref-1', title: `${subject} ${fault}历史故障案例`, type: '历史故障案例', category: '历史故障案例', equipment: searchForm.deviceName, model: searchForm.deviceModel, match: 86, summary: '同类现象常见于关键连接、润滑、散热或密封状态异常，需结合复测记录确认。', tags: [fault, '历史案例', '复检'] },
       { id: 'local-ref-2', title: `${searchForm.category}标准作业流程`, type: '标准作业流程 SOP', category: '标准作业流程 SOP', equipment: searchForm.deviceName, model: searchForm.deviceModel, match: 82, summary: '按安全确认、部位检查、处理记录、复测验收的顺序执行，保证后续沉淀可复用。', tags: ['SOP', searchForm.maintenanceLevel, '安全确认'] }
     ]
   }
 }
 const runSearch = async () => {
+  const startedAt = Date.now()
   loading.search = true
   searchPanel.value = 'results'
   try {
@@ -5745,6 +5887,8 @@ const runSearch = async () => {
     ].slice(0, 8)
     toast(error.message ? '接口暂不可用，已生成本地检索研判' : '已生成本地检索研判')
   } finally {
+    const elapsed = Date.now() - startedAt
+    if (elapsed < 1400) await new Promise((resolve) => setTimeout(resolve, 1400 - elapsed))
     loading.search = false
   }
 }
@@ -6158,7 +6302,113 @@ const sendOperatorPrompt = async (prompt) => {
   }
 }
 
-const stepLabel = (type) => ({ thought: '思考', action: '行动', tool_call: '工具', observation: '观察' }[type] || type)
+const EXECUTION_STAGE_META = {
+  parse: { label: '问题解析', desc: '读取用户问题、附件和当前页面上下文。' },
+  intent: { label: '意图识别', desc: '确认任务类型、设备范围、风险等级和需要调用的业务模块。' },
+  plan: { label: '任务拆解', desc: '把目标拆成可执行的页面动作、检索动作和智能体协作动作。' },
+  context: { label: '上下文定位', desc: '进入对应页面或业务面板，锁定当前可处理的数据。' },
+  retrieve: { label: '知识检索', desc: '从知识库、知识图谱、历史案例或多模态附件中召回依据。' },
+  agent: { label: '智能体协作', desc: '调用专业智能体或联系人协作，获取角色结论。' },
+  operate: { label: '作业编排', desc: '生成或匹配 SOP、工单、安全确认和复检动作。' },
+  synthesize: { label: '信息整合', desc: '汇总检索依据、页面状态、智能体回复和任务上下文。' },
+  verify: { label: '校验确认', desc: '核查关键结论、人工确认项和未确定信息。' },
+  report: { label: '结果生成', desc: '生成可查看、可导出、可继续补充的业务结果。' },
+  archive: { label: '知识沉淀', desc: '形成待审核知识候选或更新建议。' }
+}
+const ACTION_STAGE_MAP = {
+  sense_overview: 'parse',
+  navigate: 'context',
+  transfer_attachment: 'parse',
+  search: 'retrieve',
+  knowledge_search: 'retrieve',
+  retrieve_knowledge: 'retrieve',
+  diagnose_fault: 'synthesize',
+  filter: 'operate',
+  openPanel: 'operate',
+  openKnowledgeGraph: 'retrieve',
+  openChat: 'agent',
+  coordinate_team: 'agent',
+  type: 'agent',
+  click_send: 'agent',
+  agent_type: 'agent',
+  agent_send: 'agent',
+  contact_type: 'agent',
+  contact_send: 'agent',
+  orchestrate_task: 'operate',
+  prepare_recheck: 'verify',
+  summarize: 'synthesize',
+  record_memory: 'synthesize',
+  approve: 'verify',
+  report: 'report',
+  finalize_report: 'report',
+  archive_knowledge: 'archive',
+  finish: 'report',
+  wait: 'verify'
+}
+const EXECUTION_STAGE_ORDER = ['parse', 'intent', 'plan', 'context', 'retrieve', 'agent', 'operate', 'synthesize', 'verify', 'report', 'archive']
+
+const traceStageFor = (step = {}) => {
+  const source = step.args || step
+  const action = source.action || step.action || step.tool || step.type
+  const key = source.key || ''
+  if (source.stage && EXECUTION_STAGE_META[source.stage]) return source.stage
+  if (ACTION_STAGE_MAP[action]) return ACTION_STAGE_MAP[action]
+  if (key.includes('open_search') || key.includes('retrieve')) return 'retrieve'
+  if (key.includes('operate') || key.includes('task')) return 'operate'
+  if (key.includes('review') || key.includes('approve')) return 'verify'
+  if (key.includes('archive') || key.includes('knowledge')) return 'archive'
+  if (key.includes('finalize') || key.includes('report')) return 'report'
+  if (step.type === 'observation') return 'verify'
+  if (step.type === 'tool_call') return 'retrieve'
+  return 'synthesize'
+}
+
+const traceStatusFor = (step = {}, index = 0, steps = []) => {
+  const source = step.args || step
+  const status = source.status || source.state || step.status
+  if (['done', 'success', 'completed'].includes(status)) return 'done'
+  if (['running', 'active'].includes(status)) return 'active'
+  if (['failed', 'error', 'blocked'].includes(status)) return 'blocked'
+  if (['waiting', 'pending_approval'].includes(status)) return 'waiting'
+  return index >= Math.max(steps.length - 1, 0) ? 'done' : 'done'
+}
+
+const traceAgentName = (step = {}) => {
+  const source = step.args || step
+  if (source.agentName) return source.agentName
+  if (source.agent?.name) return source.agent.name
+  if (source.agent && TG_AGENT_NAMES[source.agent]) return TG_AGENT_NAMES[source.agent]
+  if (step.agent && TG_AGENT_NAMES[step.agent]) return TG_AGENT_NAMES[step.agent]
+  if (source.agent_id && TG_AGENT_NAMES[source.agent_id]) return TG_AGENT_NAMES[source.agent_id]
+  return ''
+}
+
+const traceContentFor = (step = {}) => {
+  const source = step.args || step
+  const input = source.input || {}
+  const direct = source.content || step.content || traceResult(step)
+  if (direct) return direct
+  if (source.reason || source.expected) return [source.reason, source.expected].filter(Boolean).join('；')
+  const keyword = input.query || input.keyword || source.keyword || source.text
+  return keyword ? `处理线索：${keyword}` : EXECUTION_STAGE_META[traceStageFor(step)]?.desc || '执行当前可观察业务步骤。'
+}
+
+const traceDisplay = (step = {}, index = 0, steps = []) => {
+  const stage = traceStageFor(step)
+  const meta = EXECUTION_STAGE_META[stage] || EXECUTION_STAGE_META.synthesize
+  return {
+    stage,
+    status: traceStatusFor(step, index, steps),
+    label: step.label || meta.label,
+    agentName: traceAgentName(step),
+    content: traceContentFor(step)
+  }
+}
+
+const stepLabel = (type) => {
+  if (EXECUTION_STAGE_META[type]) return EXECUTION_STAGE_META[type].label
+  return ({ thought: '问题解析', action: '业务动作', tool_call: '工具调用', observation: '结果校验' }[type] || type)
+}
 const traceResult = (step) => {
   const r = step.tool_result
   if (!r) return ''
@@ -6168,41 +6418,223 @@ const traceResult = (step) => {
 const isTiangongLongTaskPrompt = (value) => {
   const text = String(value || '')
   const namesTiangong = operatorProfile.value.id === 'tiangong' || /天工|AIOS|总控/.test(text)
-  const hasLongIntent = /长任务|执行|打开|查找|询问|问|总结|协作|知识库|摩托|可视化|UI_PLAN|十二步|12步|上传|转交|交给|图片|附件|图像/.test(text)
-  const hasCrossAgentTarget = /知识库|智能检索|和鸣|观微|执矩|博闻|明鉴|摩托|CG-125|复检|联系人|沉淀|闭环|图片|附件|故障|什么问题/.test(text)
+  const hasLongIntent = /长任务|执行|打开|查找|询问|问|总结|协作|知识库|摩托|汽车|车辆|泡水|涉水|可视化|UI_PLAN|十二步|12步|上传|转交|交给|图片|附件|图像/.test(text)
+  const hasCrossAgentTarget = /知识库|智能检索|和鸣|观微|执矩|博闻|明鉴|摩托|汽车|车辆|泡水|涉水|积水|CG-125|复检|联系人|沉淀|闭环|图片|附件|故障|什么问题/.test(text)
   if (namesTiangong && /可视化执行过程|UI_PLAN|12步|十二步/.test(text)) return true
   return hasLongIntent && hasCrossAgentTarget
 }
 
 const longTaskReplyText = (data) => {
   const steps = Array.isArray(data.steps) ? data.steps : []
-  const body = steps.map((step, index) => `${index + 1}. ${step.agent}：${step.content}`).join('\n')
+  const body = steps.map((step, index) => {
+    const display = traceDisplay(step, index, steps)
+    return `${index + 1}. ${display.label}${display.agentName ? ` · ${display.agentName}` : ''}：${display.content}`
+  }).join('\n')
   return `${data.summary || '天工已完成长任务规划。'}${body ? `\n\n执行路径：\n${body}` : ''}`
+}
+
+const firstTruthy = (...values) => values.find((value) => value !== undefined && value !== null && String(value).trim() !== '') || ''
+const compactList = (items = []) => [...new Set(items.map((item) => String(item || '').trim()).filter(Boolean))]
+
+const buildReportContext = (data = {}, uiSteps = []) => {
+  const focus = data.focus || data.task || {}
+  const digest = Array.isArray(data.step_digest) ? data.step_digest : Array.isArray(data.steps) ? data.steps : []
+  const scene = inferSearchScene(
+    [
+      data.goal,
+      searchForm.query,
+      searchResult.value?.query,
+      focus.fault_type,
+      focus.description,
+      ...uiSteps.map((step) => step.content || step.args?.reason || step.args?.input?.query || step.args?.input?.keyword || '')
+    ].join(' '),
+    [...assistantFiles.value, ...searchFiles.value]
+  )
+  const device = firstTruthy(searchResult.value?.device?.name, focus.equipment_name, focus.equipment, scene?.deviceName, searchForm.deviceName, '待确认设备')
+  const model = firstTruthy(searchResult.value?.device?.model, focus.equipment_model, focus.model, scene?.deviceModel, searchForm.deviceModel)
+  const fault = firstTruthy(searchResult.value?.fault?.type, focus.fault_type, scene?.faultType, searchForm.faultType, focus.description, data.goal, '待确认故障')
+  const risk = firstTruthy(searchResult.value?.risk?.level, focus.severity, searchResult.value?.riskLevel, '待评估')
+  const refs = Array.isArray(searchResult.value?.references) ? searchResult.value.references : []
+  const sop = Array.isArray(searchResult.value?.suggestion?.steps) ? searchResult.value.suggestion.steps : []
+  const agents = compactList([
+    ...digest.map((step) => step.agent || step.agent_id || step.agentName),
+    ...uiSteps.map((step) => traceAgentName(step))
+  ])
+  return {
+    goal: data.goal || searchForm.query || focus.title || '当前检修任务',
+    device,
+    model,
+    fault,
+    risk,
+    refs,
+    sop,
+    agents,
+    sceneType: scene?.type || '',
+    isVehicleWater: scene?.type === 'vehicle_water' || /车|车辆|汽车|泡水|涉水|积水|水淹/.test(`${device} ${fault} ${data.goal || ''}`),
+    highlights: compactList([
+      ...digest.slice(0, 5).map((step) => step.content || step.expected_output || step.title),
+      searchResult.value?.diagnosis,
+      searchResult.value?.stopAdvice
+    ]).slice(0, 5)
+  }
+}
+
+const makeReportItem = (id, type, title, reason, sections, tags = [], priority = '建议') => ({
+  id,
+  type,
+  title,
+  reason,
+  sections: compactList(sections).slice(0, 5),
+  tags,
+  priority
+})
+
+const buildReportRecommendations = (ctx = {}) => {
+  const subject = `${ctx.device || '待确认设备'}${ctx.model ? ` / ${ctx.model}` : ''}`
+  const fault = ctx.fault || '待确认故障'
+  const refsText = ctx.refs?.length ? `已召回 ${ctx.refs.length} 份资料/案例，可列为报告依据。` : '当前未召回明确资料，报告中应保留“依据待补充”。'
+  const base = []
+  if (ctx.isVehicleWater) {
+    base.push(
+      makeReportItem(
+        'vehicle-water-repair',
+        '检修研判',
+        `${subject}泡水检修研判报告`,
+        `用户问题与附件指向车辆涉水/泡水场景，报告需围绕禁止启动、电气进水、油液乳化和拖车处置展开。`,
+        [
+          `设备对象：${subject}；故障现象：${fault}。`,
+          '现场处置：未确认进气和电控状态前禁止启动，优先断开电瓶负极并拖车。',
+          '重点检查：空气滤芯/进气管、机油与变速箱油乳化、ECU/保险盒/线束插头受潮。',
+          refsText,
+          '结论字段保留未知车型、涉水深度、发动机是否启动等待确认项。'
+        ],
+        ['泡水车辆', '启动前禁启', '电气复检'],
+        '高优先级'
+      ),
+      makeReportItem(
+        'vehicle-safety-checklist',
+        '安全确认',
+        '泡水车辆启动前安全确认单',
+        '该场景最大风险是误启动导致发动机二次损伤和电气短路，应单独生成确认单。',
+        [
+          '确认拖车到安全维修点，现场拍照留证。',
+          '确认电瓶负极断开，保险盒、ECU、线束插头无明显积水后再通电检测。',
+          '确认进气系统未进水、油液未乳化、制动系统完成检查。',
+          '未通过任一项时保持禁启状态并升级为拆检。'
+        ],
+        ['安全确认', '禁启', '复检']
+      ),
+      makeReportItem(
+        'vehicle-insurance-evidence',
+        '证据记录',
+        '水淹车辆现场证据与保险处置记录',
+        '已上传现场图片，适合形成可追溯证据，便于维修、保险和责任确认。',
+        [
+          '记录图片时间、地点、积水高度、车身外观和车内进水痕迹。',
+          '记录是否尝试启动、拖车时间、维修接收人和初检结论。',
+          '附加维修报价、损伤部件清单和后续复检结果。',
+          '未知信息不补写，留作待车主或维修点确认。'
+        ],
+        ['现场证据', '保险', '追溯']
+      )
+    )
+  }
+  base.push(
+    makeReportItem(
+      'fault-analysis',
+      '故障分析',
+      `${subject}${fault}故障分析报告`,
+      '基于当前问题、检索结果和智能体执行链路，适合作为本次检修的主报告。',
+      [
+        `设备对象：${subject}。`,
+        `故障/任务：${fault}。`,
+        refsText,
+        ctx.highlights?.[0] || '列出已确认现象、可能原因、检测方法和不确定项。',
+        `风险等级：${ctx.risk || '待评估'}。`
+      ],
+      ['故障研判', '检索依据', '风险']
+    ),
+    makeReportItem(
+      'sop-execution',
+      '作业执行',
+      `${subject}检修 SOP 与过程记录`,
+      ctx.sop?.length ? `当前已形成 ${ctx.sop.length} 个建议步骤，适合转成现场作业记录。` : '当前任务仍需要人工补充 SOP，报告会保留待完善项。',
+      [
+        ...(ctx.sop?.length ? ctx.sop.slice(0, 4) : ['补充安全隔离、拆检、维修、复测和恢复运行记录。']),
+        '记录工具、备件、检测值、负责人和完成时间。',
+        '未完成步骤标记为待补充，不自动写成已完成。'
+      ],
+      ['SOP', '作业记录', '复测']
+    ),
+    makeReportItem(
+      'verification',
+      '复检核查',
+      `${subject}复检与质量核查报告`,
+      '检修结论需要经过明鉴/负责人复核，避免把检索建议直接当最终维修结果。',
+      [
+        '核查故障是否复现、检测值是否恢复正常、安全项是否全部确认。',
+        '列出阻断项、返工项和可恢复运行条件。',
+        '对未知型号、未知损伤程度、未上传检测数据保持待确认。',
+        '形成最终签字/审核入口。'
+      ],
+      ['复检', '质量核查', '人工确认']
+    ),
+    makeReportItem(
+      'knowledge-candidate',
+      '知识沉淀',
+      `${subject}${fault}知识沉淀候选`,
+      '若本次检修有图片、资料或复检结论，可沉淀为待审核知识，但不直接入库。',
+      [
+        '沉淀内容只引用已上传图片、检索资料、工单记录和复检结论。',
+        '提取故障现象、原因、处置步骤、适用设备和不适用条件。',
+        '标记证据来源与审核人，审核通过后再入库。',
+        refsText
+      ],
+      ['知识库', '待审核', '经验复用']
+    )
+  )
+  return base.slice(0, ctx.isVehicleWater ? 5 : 4)
+}
+
+const buildTaskReportRecommendations = (task = {}) => {
+  const ctx = {
+    device: task?.equipment_name || task?.equipment || '待确认设备',
+    model: task?.equipment_model || task?.model || '',
+    fault: task?.fault_type || task?.description || task?.title || '待确认故障',
+    risk: task?.severity || '',
+    refs: [],
+    sop: Array.isArray(task?.sop) ? task.sop.map(stepTitle) : [],
+    highlights: [task?.description, task?.recheck?.comment],
+    isVehicleWater: /车|车辆|汽车|泡水|涉水|积水|水淹/.test(`${task?.equipment_name || ''}${task?.description || ''}${task?.title || ''}`)
+  }
+  return buildReportRecommendations(ctx).slice(0, 4)
 }
 
 const buildAiosReport = (data = {}, uiSteps = []) => {
   const digest = Array.isArray(data.step_digest) ? data.step_digest : Array.isArray(data.steps) ? data.steps : []
-  const agents = [...new Set(digest.map((step) => step.agent || step.agent_id).filter(Boolean))]
+  const ctx = buildReportContext(data, uiSteps)
+  const agents = ctx.agents.length ? ctx.agents : [...new Set(digest.map((step) => step.agent || step.agent_id).filter(Boolean))]
   const readableAgents = agents.length ? agents.join('、') : '天工、观微、执矩、和鸣、博闻、明鉴'
-  const highlights = digest.slice(0, 4).map((step) => step.content || step.expected_output || step.title).filter(Boolean)
+  const highlights = ctx.highlights.length ? ctx.highlights : digest.slice(0, 4).map((step) => step.content || step.expected_output || step.title).filter(Boolean)
+  const recommendations = buildReportRecommendations(ctx)
   return {
-    title: '设备检修闭环执行报告',
+    title: `${ctx.device}${ctx.fault ? ` · ${ctx.fault}` : ''}执行报告`,
     subtitle: data.summary || '天工已完成本轮跨页面协同执行',
-    conclusion: '已完成故障检索、任务联动、联系人协作、知识图谱定位与闭环报告生成；高风险与知识沉淀环节保留人工确认入口。',
+    conclusion: `本次执行基于「${ctx.goal}」整理了${ctx.device}${ctx.model ? `/${ctx.model}` : ''}的已知信息，完成检索、智能体协作、作业/复检入口定位和报告建议。未知设备参数、未上传检测值或未确认现场状态不会自动补写，需在正式归档前由负责人确认。`,
     metrics: [
       { label: '执行步骤', value: `${uiSteps.length || digest.length || 0} 步` },
-      { label: '协作智能体', value: `${agents.length || 6} 个` },
-      { label: '业务页面', value: '5 个' },
-      { label: '闭环状态', value: '待确认' }
+      { label: '协作智能体', value: `${agents.length || 1} 个` },
+      { label: '检索依据', value: `${ctx.refs.length || 0} 份` },
+      { label: '推荐报告', value: `${recommendations.length} 份` }
     ],
     blocks: [
       {
-        title: '已完成操作',
+        title: '真实执行链路',
         items: [
-          '完成多模态检索上下文整理，定位设备、型号、故障和资料依据。',
-          '联动检修任务筛选，聚焦高风险、待复检和相关工单。',
-          '向联系人会话写入协作消息，并保留后端会话记录。',
-          '打开知识图谱与沉淀更新入口，准备形成可审核知识条目。'
+          '读取用户问题、附件和当前页面上下文。',
+          '识别设备/故障/风险字段，无法确认的信息保持待确认。',
+          '按需要进入智能检索、检修任务、知识库、联系人或复检页面。',
+          '仅把可观察的页面动作、检索动作、智能体协作和校验结果展示出来。'
         ]
       },
       {
@@ -6214,23 +6646,44 @@ const buildAiosReport = (data = {}, uiSteps = []) => {
         ]
       },
       {
-        title: '关键结果',
+        title: '本次关键依据',
         items: highlights.length ? highlights : [
-          '已形成初步故障判断、检查位置、检测方式和安全注意事项。',
-          '已生成检修闭环摘要，可继续导出为任务报告或知识沉淀。'
+          `设备：${ctx.device}${ctx.model ? ` / ${ctx.model}` : ''}`,
+          `故障：${ctx.fault}`,
+          '当前缺少明确检索依据或现场检测数据，正式报告需继续补充。'
         ]
       },
       {
         title: '待人工确认',
         items: [
-          '高风险步骤需现场负责人二次确认。',
-          '知识入库前需核对引用依据、设备型号和复检结论。',
-          '最终报告归档前建议补充现场图片与检测数据。'
+          '高风险处置、复电/启动、拆检结论和知识入库必须人工确认。',
+          '未知设备型号、故障程度、检测值和现场环境保持空缺或待确认。',
+          '最终归档前建议补充图片、检测数据、负责人签字和复检结果。'
         ]
       }
     ],
-    tags: ['多智能体协作', '可视化执行', 'RAG 检索', '任务闭环', '知识沉淀']
+    recommendations,
+    tags: compactList(['真实执行链路', '动态报告', ctx.device, ctx.fault, ctx.isVehicleWater ? '泡水车辆' : '设备检修']).slice(0, 6)
   }
+}
+
+const buildExecutionTrace = (uiPlan = [], data = {}) => {
+  const steps = Array.isArray(uiPlan) ? uiPlan.filter((s) => s.action !== 'done') : []
+  return steps.map((s) => {
+    const stage = traceStageFor({ args: s })
+    const meta = EXECUTION_STAGE_META[stage] || EXECUTION_STAGE_META.synthesize
+    return {
+      type: stage,
+      stage,
+      label: meta.label,
+      status: s.status || s.state || 'done',
+      agent: s.agent,
+      agentName: s.agentName || s.agent?.name || TG_AGENT_NAMES[s.agent] || '',
+      tool: s.mcpTool || s.tool || s.action || '',
+      args: s,
+      content: s.reason || s.expected || s.input?.query || s.input?.keyword || s.keyword || s.text || data.goal || ''
+    }
+  })
 }
 
 const runTiangongLongTask = async (value, sourcePage, options = {}) => {
@@ -6246,20 +6699,20 @@ const runTiangongLongTask = async (value, sourcePage, options = {}) => {
   Object.assign(tgRunUi, {
     visible: true,
     statusText: '规划中',
-    title: '生成 12 步执行计划',
-    detail: '天工正在读取系统状态，并请求 AIOS 生成跨页面执行路线。',
+    title: '生成可执行任务链路',
+    detail: '天工正在读取系统状态，并请求 AIOS 返回当前能力范围内可执行的页面路线。',
     agentName: '天工',
     page: '首页 / AIOS',
     tool: 'aios.long-task',
     inputText: value,
     outputText: '等待后端返回 UI_PLAN。',
     current: 0,
-    total: 12,
+    total: 0,
     progress: 4,
     steps: [
-      { index: 1, label: '感知系统' },
-      { index: 2, label: '生成计划' },
-      { index: 3, label: '等待返回' }
+      { index: 1, label: '问题解析' },
+      { index: 2, label: '意图识别' },
+      { index: 3, label: '任务拆解' }
     ]
   })
   const host = `http://${window.location.hostname || '127.0.0.1'}:5000`
@@ -6291,14 +6744,7 @@ const runTiangongLongTask = async (value, sourcePage, options = {}) => {
     ].map((step, index) => ({ ...step, index: index + 1 }))
   }
   applyAiosRun(data, Array.isArray(data.events) ? data.events : [])
-  const uiSteps = uiPlan.filter((s) => s.action !== 'done').map((s) => ({
-    type: 'tool_call',
-    tool: s.mcpTool || s.tool || s.action,
-    args: s,
-    content: s.action === 'navigate'
-      ? `→ ${s.page || TG_AGENT_NAMES[s.agent] || s.agent}`
-      : (s.input?.query || s.input?.keyword || s.keyword || s.text || s.reason || s.expected || '')
-  }))
+  const uiSteps = buildExecutionTrace(uiPlan, { ...data, goal: value })
   const loadIdx = operatorMessages.value.findIndex((m) => m.id === loadingMsg.id)
   const finalMsg = {
     id: loadIdx >= 0 ? loadingMsg.id : `assistant-${Date.now()}`,
@@ -6363,25 +6809,14 @@ const tgSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const tgActionLabel = (step) => {
   const action = step?.action
-  if (action === 'navigate') return `进入${step.page || TG_AGENT_NAMES[step.agent] || '模块'}`
-  if (action === 'search' || action === 'knowledge_search') return '智能检索'
-  if (action === 'filter') return '筛选工单'
-  if (action === 'openPanel') return `打开${step.page || '板块'}`
-  if (action === 'openKnowledgeGraph') return '打开图谱'
-  if (action === 'openChat') return '联系人协作'
-  if (action === 'summarize') return '整理记忆'
-  if (action === 'approve') return '等待确认'
-  if (action === 'report') return '生成报告'
-  if (action === 'finish') return '完成闭环'
-  if (action === 'type') return '填写指令'
-  if (action === 'click_send') return '发送请求'
-  if (action === 'agent_type') return '输入智能体消息'
-  if (action === 'agent_send') return '发送给智能体'
-  if (action === 'transfer_attachment') return '转交现场图片'
-  if (action === 'contact_type') return '输入协作消息'
-  if (action === 'contact_send') return '发送给联系人'
-  if (action === 'wait') return '等待响应'
-  return '执行操作'
+  const stage = traceStageFor({ args: step })
+  const base = EXECUTION_STAGE_META[stage]?.label || '执行操作'
+  if (action === 'navigate') return `上下文定位`
+  if (action === 'transfer_attachment') return '问题解析'
+  if (action === 'filter' || action === 'openPanel' || action === 'orchestrate_task') return '作业编排'
+  if (action === 'approve' || action === 'wait' || action === 'prepare_recheck') return '校验确认'
+  if (action === 'report' || action === 'finalize_report' || action === 'finish') return '结果生成'
+  return base
 }
 
 const tgActionDetail = (step) => {
@@ -6538,6 +6973,42 @@ const expandTgVisiblePlan = (steps = []) => {
       messagedAgents.add(agentId)
     }
   })
+  const hasBowenInteraction = expanded.some((step) => step.agent === 'bowen' && ['agent_type', 'agent_send'].includes(step.action))
+  const hasKnowledgeStep = expanded.some((step) => step.agent === 'bowen' || ['openKnowledgeGraph', 'knowledge_search'].includes(step.action))
+  if (hasKnowledgeStep && !hasBowenInteraction) {
+    const keyword = steps.map((step) => step.input?.query || step.input?.keyword || step.text || '').find(Boolean) || searchForm.query || '当前检修线索'
+    const text = `博闻，请基于「${keyword}」检索知识库资料、知识图谱节点和可沉淀经验；不知道的车型、型号、受损程度请留空，只根据已知图片和检索结果回答。`
+    expanded.push({
+      action: 'openKnowledgeGraph',
+      page: '知识库',
+      agent: 'bowen',
+      agentName: '博闻',
+      target: '知识库悬浮智能体',
+      input: { query: keyword },
+      reason: '打开博闻所在的知识库页面并准备悬浮智能体交互。',
+      expected: '知识库页面已打开，博闻悬浮智能体可交互。'
+    })
+    expanded.push({
+      action: 'agent_type',
+      page: '知识库',
+      agent: 'bowen',
+      agentName: '博闻',
+      target: '博闻悬浮输入框',
+      text,
+      reason: '点开博闻悬浮智能体并输入知识检索指令。',
+      expected: '问题写入博闻悬浮输入框。'
+    })
+    expanded.push({
+      action: 'agent_send',
+      page: '知识库',
+      agent: 'bowen',
+      agentName: '博闻',
+      target: '博闻悬浮发送按钮',
+      text,
+      reason: '发送给博闻，展示真实智能体交互。',
+      expected: '博闻返回知识资料和沉淀建议。'
+    })
+  }
   return expanded
 }
 
@@ -6545,7 +7016,9 @@ const tgApplyStepState = async (step = {}) => {
   const page = tgPageKey(step)
   const action = step.action
   const input = step.input || {}
-  const keyword = input.query || input.keyword || step.keyword || step.text || 'CG-125 发动机异响'
+  const rawKeyword = input.query || input.keyword || step.keyword || step.text || ''
+  const scene = inferSearchScene(rawKeyword, [...assistantFiles.value, ...searchFiles.value])
+  const keyword = rawKeyword || scene?.query || ''
   const agent = step.agent || ''
 
   selectedAgentId.value = agent || selectedAgentId.value
@@ -6553,12 +7026,13 @@ const tgApplyStepState = async (step = {}) => {
 
   if (page === 'search') {
     searchPanel.value = action === 'summarize' ? 'history' : 'multimodal'
+    if (scene) applySearchScene(scene)
     if (keyword) {
       searchForm.query = String(keyword)
-      searchForm.deviceModel = input.model || searchForm.deviceModel || 'CG-125'
-      searchForm.deviceName = input.deviceName || searchForm.deviceName || '摩托车发动机总成'
-      searchForm.faultCode = input.faultCode || searchForm.faultCode || 'NOISE-02'
-      searchForm.faultType = input.faultType || searchForm.faultType || '异响'
+      if (input.model !== undefined) searchForm.deviceModel = input.model || ''
+      if (input.deviceName !== undefined) searchForm.deviceName = input.deviceName || ''
+      if (input.faultCode !== undefined) searchForm.faultCode = input.faultCode || ''
+      if (input.faultType !== undefined) searchForm.faultType = input.faultType || ''
     }
   }
 
@@ -6611,7 +7085,10 @@ const updateTgRunUi = (step, index, total, steps) => {
   tgRunUi.check = '执行后自动校验页面结果'
   tgRunUi.steps = steps
     .filter((item) => item.action !== 'done')
-    .map((item, stepIndex) => ({ index: stepIndex + 1, label: tgActionLabel(item) }))
+    .map((item, stepIndex) => ({
+      index: stepIndex + 1,
+      label: `${tgActionLabel(item)}${item.agent && item.agent !== 'tiangong' ? ` · ${TG_AGENT_NAMES[item.agent] || item.agentName || item.agent}` : ''}`
+    }))
 }
 
 function tgAnimate(fromX, fromY, toX, toY, duration = 400) {
@@ -6726,7 +7203,16 @@ async function tgType(text, selector = '.operator-panel .ask-box input, .ask-box
   await tgSleep(300)
 }
 
-async function tgTypeAgentMessage(text) {
+async function tgTypeAgentMessage(text, step = {}) {
+  if ((step.agent || selectedAgentId.value) === 'bowen') {
+    activePage.value = 'knowledge'
+    selectedAgentId.value = 'bowen'
+    floatingAgent.open = true
+    await nextTick()
+    await tgSleep(450)
+    await tgType(text, '.floating-ask-box input, .operator-panel .ask-box input, .ask-box input', operatorInput)
+    return
+  }
   await tgType(text, '.operator-panel .ask-box input, .floating-ask-box input, .ask-box input', operatorInput)
 }
 
@@ -6766,8 +7252,21 @@ async function sendRemotePrompt(value, targetAgentId = '') {
 }
 
 async function tgClickSend(step = {}) {
-  const btn = pickVisibleElement('.operator-panel .ask-box button[type="submit"], .floating-ask-box button[type="submit"], .ask-box button[type="submit"]')
-  const inputEl = pickVisibleElement('.operator-panel .ask-box input, .floating-ask-box input, .ask-box input')
+  if ((step.agent || selectedAgentId.value) === 'bowen') {
+    activePage.value = 'knowledge'
+    selectedAgentId.value = 'bowen'
+    floatingAgent.open = true
+    await nextTick()
+    await tgSleep(250)
+  }
+  const selectorPrefix = (step.agent || selectedAgentId.value) === 'bowen'
+    ? '.floating-ask-box button[type="submit"], .operator-panel .ask-box button[type="submit"], .ask-box button[type="submit"]'
+    : '.operator-panel .ask-box button[type="submit"], .floating-ask-box button[type="submit"], .ask-box button[type="submit"]'
+  const inputSelector = (step.agent || selectedAgentId.value) === 'bowen'
+    ? '.floating-ask-box input, .operator-panel .ask-box input, .ask-box input'
+    : '.operator-panel .ask-box input, .floating-ask-box input, .ask-box input'
+  const btn = pickVisibleElement(selectorPrefix)
+  const inputEl = pickVisibleElement(inputSelector)
   if (btn) await tgMoveTo(btn, '发送')
   // 优先从 DOM 获取最新值
   const value = inputEl ? inputEl.value : operatorInput.value
@@ -6797,11 +7296,17 @@ const tgTransferAttachmentsToSearch = async (attachments = [], step = {}) => {
   activePage.value = 'search'
   searchPanel.value = 'multimodal'
   selectedAgentId.value = 'guanwei'
-  const keyword = step.input?.keyword || step.text || operatorInput.value || '现场图片故障识别'
-  searchForm.query = `${keyword}；请结合上传图片判断现场设备或道路积水相关风险。`
-  searchForm.deviceName = searchForm.deviceName || '现场待确认设备'
-  searchForm.deviceModel = searchForm.deviceModel || '待确认型号'
-  searchForm.faultType = searchForm.faultType || '现场异常'
+  const keyword = step.input?.keyword || step.text || operatorInput.value || ''
+  const scene = inferSearchScene(keyword, attachments)
+  if (scene) {
+    applySearchScene(scene)
+    searchForm.query = `${scene.query} 已知用户指令：${keyword || '仅上传了现场图片'}`
+  } else {
+    searchForm.query = keyword ? `${keyword}；请结合上传图片判断现场设备、故障部位和风险。未知设备型号请留空，不要套用示例设备。` : '请结合上传图片判断现场设备、故障部位和风险；未知设备型号请留空，不要套用示例设备。'
+    if (!searchForm.deviceName) searchForm.deviceName = ''
+    if (!searchForm.deviceModel) searchForm.deviceModel = ''
+    if (!searchForm.faultType) searchForm.faultType = ''
+  }
   const existing = new Set(searchFiles.value.map((file) => file.localId || file.name))
   const incoming = attachments
     .filter((file) => !existing.has(file.localId || file.name))
@@ -6833,9 +7338,12 @@ async function executeUIPlan(steps, context = {}) {
   tgRunUi.inputText = '读取后端返回的可视化步骤'
   tgRunUi.outputText = `准备执行 ${totalSteps} 个页面动作。`
   tgRunUi.observation = tgObservePage()
-  tgRunUi.decision = '根据用户目标选择页面、智能体和工具顺序'
+  tgRunUi.decision = '根据用户目标选择真实可执行的页面、智能体和工具顺序'
   tgRunUi.check = '尚未开始校验'
-  tgRunUi.steps = steps.filter((item) => item.action !== 'done').map((item, index) => ({ index: index + 1, label: tgActionLabel(item) }))
+  tgRunUi.steps = steps.filter((item) => item.action !== 'done').map((item, index) => ({
+    index: index + 1,
+    label: `${tgActionLabel(item)}${item.agent && item.agent !== 'tiangong' ? ` · ${TG_AGENT_NAMES[item.agent] || item.agentName || item.agent}` : ''}`
+  }))
   try {
     for (const step of steps) {
       if (!tgRunning.value) { console.log('[天工遥控] tgRunning 为 false, 循环终止'); break }
@@ -6877,7 +7385,7 @@ async function executeUIPlan(steps, context = {}) {
           await tgSleep(1000)
         } else if (a === 'type' || a === 'agent_type') {
           toast(`${progressText}：输入指令`)
-          await tgTypeAgentMessage(step.text || '')
+          await tgTypeAgentMessage(step.text || '', step)
           await tgSleep(500)
         } else if (a === 'click_send' || a === 'agent_send') {
           toast(`${progressText}：发送给${TG_AGENT_NAMES[step.agent] || step.agentName || '智能体'}`)
@@ -9206,6 +9714,10 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .aios-report-section { padding: 11px 12px; border: 1px solid #eadfc8; border-radius: 14px; background: #fffaf1; }
 .aios-result-report h4 { margin: 0 0 7px; color: #205f61; font-size: 13px; }
 .aios-result-report p { margin: 0; color: #405a5a; font-size: 12.5px; line-height: 1.65; }
+.aios-report-recommend-list { display: grid; gap: 8px; }
+.aios-report-recommend-list article { padding: 9px 10px; border: 1px solid #e0eae6; border-radius: 12px; background: #fff; }
+.aios-report-recommend-list b { display: block; color: #21464a; font-size: 12.5px; }
+.aios-report-recommend-list small { display: block; margin-top: 3px; color: #687d7a; font-size: 11px; line-height: 1.45; }
 .aios-result-report footer { display: flex; flex-wrap: wrap; gap: 7px; }
 .aios-result-report footer span { padding: 5px 8px; border: 1px solid #dce8e3; border-radius: 999px; background: #f7faf7; color: #52706b; font-size: 11px; font-weight: 800; }
 .aios-report-open { width: 100%; min-height: 38px; border: 1px solid #d9c9a8; border-radius: 12px; background: #fff8ec; color: #7d5b25; font-weight: 900; }
@@ -9221,6 +9733,13 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .aios-page-conclusion { padding: 16px; border-left: 4px solid #b88a44; border-radius: 0 14px 14px 0; background: #fff8ec; }
 .aios-report-page h3 { margin: 0 0 10px; color: #205f61; font-size: 16px; }
 .aios-page-conclusion p { color: #4f5e58; line-height: 1.8; }
+.aios-page-recommendations { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.aios-page-recommendations > div { grid-column: 1 / -1; }
+.aios-page-recommendations article { padding: 15px; border: 1px solid #dce8e3; border-radius: 15px; background: linear-gradient(180deg, #fff, #f8fbf7); box-shadow: 0 8px 18px rgba(30,65,64,.045); }
+.aios-page-recommendations article > span { display: inline-flex; margin-bottom: 8px; padding: 4px 8px; border-radius: 999px; background: #eaf3ef; color: #205f61; font-size: 11px; font-weight: 900; }
+.aios-page-recommendations h4 { margin: 0 0 7px; color: #17393b; font-size: 15px; }
+.aios-page-recommendations p { margin: 0 0 10px; color: #536762; font-size: 13px; line-height: 1.6; }
+.aios-page-recommendations ul, .task-report-recommendations ul { display: grid; gap: 6px; margin: 0; padding-left: 16px; color: #465d59; font-size: 12.5px; line-height: 1.55; }
 .aios-page-blocks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .aios-page-blocks article { padding: 16px; border: 1px solid #e1e9e5; border-radius: 14px; background: #fff; }
 .aios-page-blocks ul { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
@@ -9419,9 +9938,53 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 /* Template modals */
 .kb-template-modal, .kb-template-lib-modal { max-width: 760px; }
 .kb-template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin-top: 16px; }
-.kb-template-card { display: grid; grid-template-columns: 44px 1fr auto; gap: 12px; align-items: center; padding: 14px; border: 1px solid #e5ebec; border-radius: 10px; cursor: pointer; transition: all .15s; background: #fff; }
+.kb-template-card { display: grid; grid-template-columns: 68px 1fr auto; gap: 12px; align-items: center; padding: 14px; border: 1px solid #e5ebec; border-radius: 10px; cursor: pointer; transition: all .15s; background: #fff; }
 .kb-template-card:hover { border-color: #176f69; box-shadow: 0 4px 14px rgba(23,111,105,.1); }
 .kb-template-icon { width: 44px; height: 44px; border-radius: 10px; background: #f0f4f4; display: grid; place-items: center; font-size: 22px; }
+.kb-template-visual {
+  position: relative;
+  width: 68px;
+  height: 54px;
+  overflow: hidden;
+  border: 1px solid #dce8e7;
+  border-radius: 13px;
+  background: linear-gradient(145deg, #edf7f5, #fff);
+  color: #176f69;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.8);
+}
+.kb-template-visual::before {
+  content: "";
+  position: absolute;
+  left: 13px;
+  right: 13px;
+  bottom: 11px;
+  height: 14px;
+  border-top: 3px solid rgba(255,255,255,.95);
+  border-bottom: 3px solid rgba(255,255,255,.72);
+  opacity: .9;
+}
+.kb-template-visual::after {
+  content: attr(data-label);
+  position: relative;
+  z-index: 1;
+  min-width: 30px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.88);
+  color: currentColor;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: -.02em;
+  box-shadow: 0 8px 18px rgba(31,69,75,.1);
+}
+.kb-template-visual.tpl-tool { background: linear-gradient(145deg, #eef8f6, #fff); color: #176f69; }
+.kb-template-visual.tpl-search { background: linear-gradient(145deg, #eef4fb, #fff); color: #2f6f9f; }
+.kb-template-visual.tpl-calendar { background: linear-gradient(145deg, #f6f0fb, #fff); color: #6f5ba8; }
+.kb-template-visual.tpl-shield { background: linear-gradient(145deg, #fbefec, #fff); color: #b45a4d; }
+.kb-template-visual.tpl-file { background: linear-gradient(145deg, #f3f7f7, #fff); color: #526a70; }
 .kb-template-info { display: grid; gap: 2px; min-width: 0; }
 .kb-template-info h4 { font-size: 14px; color: #1d373c; margin: 0; }
 .kb-template-info > span { color: #176f69; font-size: 11px; font-weight: 600; }
@@ -9939,6 +10502,137 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .search-ai-status img { width: 46px; height: 46px; border-radius: 50%; object-fit: cover; box-shadow: 0 8px 18px rgba(47,127,143,.12); }
 .search-ai-status b { color: #233d43; font-size: 14px; }
 .search-ai-status small { display: block; margin-top: 3px; color: #718889; font-size: 11px; }
+.search-process-card,
+.search-running-state {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  gap: 13px;
+  padding: 16px;
+  border: 1px solid #c9e6e2;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 18% 16%, rgba(47,127,143,.14), transparent 32%),
+    linear-gradient(145deg, rgba(255,255,255,.96), rgba(238,248,246,.94));
+  box-shadow: 0 14px 30px rgba(31,69,75,.08);
+}
+.search-process-card::before,
+.search-running-state::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 0%, rgba(255,255,255,.72) 45%, transparent 72%);
+  transform: translateX(-120%);
+  animation: searchShimmer 2.2s ease-in-out infinite;
+  pointer-events: none;
+}
+.search-scan-visual {
+  position: relative;
+  width: 86px;
+  height: 86px;
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(47,127,143,.14), rgba(47,127,143,.04) 56%, transparent 58%);
+}
+.search-scan-visual.large { width: 110px; height: 110px; }
+.scan-core {
+  position: relative;
+  z-index: 2;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  background: linear-gradient(145deg, #2f7f8f, #1f6568);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 900;
+  box-shadow: 0 12px 24px rgba(31,101,104,.18);
+  animation: searchCorePulse 1.4s ease-in-out infinite;
+}
+.search-scan-visual i {
+  position: absolute;
+  inset: 9px;
+  border: 1px solid rgba(47,127,143,.3);
+  border-radius: 50%;
+  animation: searchOrbit 3s linear infinite;
+}
+.search-scan-visual i:nth-of-type(2) {
+  inset: 18px;
+  border-color: rgba(215,149,66,.34);
+  animation-duration: 2.3s;
+  animation-direction: reverse;
+}
+.search-scan-visual i:nth-of-type(3) {
+  inset: 2px;
+  border-style: dashed;
+  border-color: rgba(63,126,178,.28);
+  animation-duration: 4.2s;
+}
+.search-process-copy { position: relative; text-align: center; }
+.search-process-copy b { color: #213d3f; font-size: 15px; }
+.search-process-copy p,
+.search-running-state p { margin: 5px 0 0; color: #637b7d; font-size: 12px; line-height: 1.65; }
+.search-process-track {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.search-process-track.wide { width: 100%; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.search-process-track span {
+  position: relative;
+  min-height: 58px;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  padding: 10px 11px 10px 15px;
+  border: 1px solid rgba(195,222,220,.9);
+  border-radius: 13px;
+  background: rgba(255,255,255,.76);
+  animation: searchStepGlow 2.4s ease-in-out infinite;
+}
+.search-process-track span::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 13px;
+  bottom: 13px;
+  width: 3px;
+  border-radius: 999px;
+  background: #2f7f8f;
+}
+.search-process-track span:nth-child(2) { animation-delay: .18s; }
+.search-process-track span:nth-child(3) { animation-delay: .36s; }
+.search-process-track span:nth-child(4) { animation-delay: .54s; }
+.search-process-track b { color: #27484d; font-size: 12px; }
+.search-process-track small { color: #7a8d8e; font-size: 10px; line-height: 1.4; }
+.search-running-state {
+  flex: 1;
+  min-height: 470px;
+  place-items: center;
+  align-content: center;
+  text-align: center;
+}
+.search-running-state h4 { margin: 4px 0 0; color: #213d3f; font-size: 18px; }
+@keyframes searchShimmer {
+  0% { transform: translateX(-120%); opacity: 0; }
+  35% { opacity: .8; }
+  100% { transform: translateX(120%); opacity: 0; }
+}
+@keyframes searchOrbit {
+  to { transform: rotate(360deg); }
+}
+@keyframes searchCorePulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 12px 24px rgba(31,101,104,.18); }
+  50% { transform: scale(1.06); box-shadow: 0 16px 32px rgba(31,101,104,.26); }
+}
+@keyframes searchStepGlow {
+  0%, 100% { border-color: rgba(195,222,220,.86); transform: translateY(0); }
+  45% { border-color: rgba(47,127,143,.42); transform: translateY(-2px); }
+}
 .search-fusion-panel .form-grid { gap: 12px 14px; }
 .search-fusion-panel .form-grid label { color: #314e52; font-weight: 760; }
 .search-fusion-panel .form-grid input,
@@ -10178,6 +10872,11 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .task-report-card ol { display: grid; gap: 7px; padding: 0; list-style: none; }
 .task-report-card li { display: flex; justify-content: space-between; gap: 15px; padding: 9px 11px; border-radius: 8px; background: #f6f8f8; }
 .task-report-card li span { color: #6c7d80; }
+.task-report-recommendations { display: grid; gap: 10px; }
+.task-report-recommendations article { display: grid; gap: 7px; padding: 12px; border: 1px solid #dce8e3; border-radius: 12px; background: #fbfdfa; }
+.task-report-recommendations article b { color: #21464a; }
+.task-report-recommendations article small { color: #657b78; line-height: 1.55; }
+.task-report-recommendations li { display: list-item; padding: 0; background: transparent; }
 
 .knowledge-detail-card { 
   width: min(1100px, 94vw); 
@@ -10882,6 +11581,17 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .trace-tag.action { background: #b6803f; }
 .trace-tag.thought { background: #5b7f9f; }
 .trace-tag.observation { background: #7f8f78; }
+.trace-tag.parse, .trace-tag.intent, .trace-tag.plan { background: #547f98; }
+.trace-tag.context { background: #6f8e7a; }
+.trace-tag.retrieve { background: #235f63; }
+.trace-tag.agent { background: #2f68a0; }
+.trace-tag.operate { background: #b6803f; }
+.trace-tag.synthesize { background: #66727e; }
+.trace-tag.verify { background: #8a662d; }
+.trace-tag.report { background: #2f7b62; }
+.trace-tag.archive { background: #6d6fa6; }
+.trace-tag.blocked { background: #a45144; }
+.trace-tag.waiting { background: #9a7b3f; }
 .trace-tool { max-width: 150px; padding: 4px 7px; border-radius: 999px; background: #eef6f4; color: #235f63; font-size: 11px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trace-text { min-width: 0; color: #455d62; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trace-text { flex-basis: 100%; color: #41575b; word-break: break-word; white-space: pre-wrap; }

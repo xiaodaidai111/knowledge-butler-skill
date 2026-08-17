@@ -466,13 +466,13 @@ def _seed_agent_teams(conn: sqlite3.Connection) -> None:
         "tech_stack": AIOS_TECH_STACK,
         "engine": "LangGraph 状态图编排，MCP 工具调用，E2B 沙箱隔离，Postgres/pgvector 长期记忆，FastAPI 统一入口，LangSmith Trace 观测。",
         "steps": [
-            {"key": "upload", "title": "上传故障资料", "agent_id": "tiangong"},
-            {"key": "vision", "title": "图像与文档识别", "agent_id": "guanwei"},
+            {"key": "upload", "title": "问题解析与附件接入", "agent_id": "tiangong"},
+            {"key": "vision", "title": "意图识别与图文上下文整理", "agent_id": "guanwei"},
             {"key": "rag", "title": "知识库检索", "agent_id": "guanwei"},
-            {"key": "diagnose", "title": "故障分析", "agent_id": "guanwei"},
-            {"key": "sop", "title": "推荐检修步骤", "agent_id": "zhiju", "requires_approval": True},
-            {"key": "confirm", "title": "人工确认", "agent_id": "tiangong", "human_in_loop": True},
-            {"key": "report", "title": "生成检修报告", "agent_id": "mingjian"},
+            {"key": "diagnose", "title": "信息整合与故障分析", "agent_id": "guanwei"},
+            {"key": "sop", "title": "作业编排与安全确认", "agent_id": "zhiju", "requires_approval": True},
+            {"key": "confirm", "title": "校验确认", "agent_id": "tiangong", "human_in_loop": True},
+            {"key": "report", "title": "结果生成与报告建议", "agent_id": "mingjian"},
             {"key": "archive", "title": "知识沉淀候选", "agent_id": "bowen", "requires_approval": True},
         ],
     }
@@ -1030,6 +1030,8 @@ def _focus_task(goal: str, task_id: str = "") -> dict:
         found = next((item for item in tasks if str(item.get("id")) == str(task_id)), None)
         if found:
             return found
+    if _goal_contains(goal, ["车淹", "泡水", "涉水", "积水", "水淹", "轿车", "汽车", "车辆"]):
+        return {}
     high = next((item for item in tasks if item.get("severity") in {"critical", "high"}), None)
     return high or (tasks[0] if tasks else {})
 
@@ -1065,6 +1067,8 @@ def _goal_contains(goal: str, keywords: list[str]) -> bool:
 def _aios_focus_keyword(goal: str, task: dict | None = None) -> str:
     task = task or {}
     text = str(goal or "")
+    if _goal_contains(text, ["车淹", "泡水", "涉水", "积水", "水淹"]):
+        return "泡水车辆检修知识"
     if _goal_contains(text, ["汽车", "汽修", "轿车", "乘用车"]):
         return "汽车维修知识"
     if _goal_contains(text, ["摩托", "cg-125", "发动机异响"]):
@@ -1111,18 +1115,18 @@ def _aios_plan(goal: str, mode: str = "auto", task_id: str = "") -> dict:
     fault = task.get("fault_type") or "待确认故障"
     focus_keyword = _aios_focus_keyword(goal, task)
     steps = [
-        ("sense", "tiangong", "感知系统状态并锁定目标", "sense_overview", "首页", "system_overview", {"goal": goal, "task_id": task.get("id"), "keyword": focus_keyword}),
-        ("open_search", "guanwei", "打开智能检索并准备多模态上下文", "retrieve_knowledge", "智能检索", "navigate+prefill", {"query": focus_keyword, "equipment": equipment, "fault": fault}),
-        ("retrieve", "guanwei", "召回资料与故障依据", "retrieve_knowledge", "智能检索", "knowledge_search+rag_query", {"query": focus_keyword, "equipment": equipment, "fault": fault}),
-        ("diagnose", "guanwei", "综合证据进行故障判断", "diagnose_fault", "智能检索", "rag_query", {"query": focus_keyword, "equipment": equipment, "fault": fault}),
-        ("open_task", "zhiju", "打开检修任务并匹配工单", "sense_overview", "检修任务", "navigate+filter", {"task_id": task.get("id"), "equipment": equipment, "status": task.get("status")}),
-        ("operate", "zhiju", "编排检修 SOP 与安全确认", "orchestrate_task", "检修任务", "task_update+safety_check", {"task_id": task.get("id"), "equipment": equipment, "fault": fault}),
-        ("collaborate", "heming", "协调人员并生成沟通草稿", "coordinate_team", "检修任务 / 联系人交流", "contacts_read+conversation_message_draft", {"task_id": task.get("id"), "risk": task.get("severity")}),
-        ("open_knowledge", "bowen", "打开知识库并定位图谱关系", "retrieve_knowledge", "知识库", "openKnowledgeGraph+knowledge_search", {"query": focus_keyword, "equipment": equipment}),
-        ("archive", "bowen", "生成待审核知识候选", "archive_knowledge", "知识库 / 沉淀更新", "knowledge_candidate_create", {"task_id": task.get("id"), "equipment": equipment, "fault": fault}),
-        ("review", "mingjian", "生成复检核查清单", "prepare_recheck", "检修任务 / 复检评估", "recheck+quality_score", {"task_id": task.get("id")}),
-        ("memory", "tiangong", "写入会话与长期记忆", "record_memory", "AIOS 记忆", "pgvector_memory_write", {"task_id": task.get("id"), "goal": goal}),
-        ("finalize", "mingjian", "输出闭环报告并展示 Trace", "finalize_report", "首页 / 报告预览", "report_verify+langsmith_trace", {"task_id": task.get("id"), "goal": goal}),
+        ("sense", "tiangong", "问题解析：读取系统状态并锁定目标", "sense_overview", "首页", "system_overview", {"goal": goal, "task_id": task.get("id"), "keyword": focus_keyword}),
+        ("open_search", "guanwei", "上下文定位：进入智能检索并整理多模态线索", "retrieve_knowledge", "智能检索", "navigate+prefill", {"query": focus_keyword, "equipment": equipment, "fault": fault}),
+        ("retrieve", "guanwei", "知识检索：召回资料与故障依据", "retrieve_knowledge", "智能检索", "knowledge_search+rag_query", {"query": focus_keyword, "equipment": equipment, "fault": fault}),
+        ("diagnose", "guanwei", "信息整合：综合证据进行故障判断", "diagnose_fault", "智能检索", "rag_query", {"query": focus_keyword, "equipment": equipment, "fault": fault}),
+        ("open_task", "zhiju", "上下文定位：打开检修任务并匹配工单", "sense_overview", "检修任务", "navigate+filter", {"task_id": task.get("id"), "equipment": equipment, "status": task.get("status")}),
+        ("operate", "zhiju", "作业编排：生成 SOP 与安全确认", "orchestrate_task", "检修任务", "task_update+safety_check", {"task_id": task.get("id"), "equipment": equipment, "fault": fault}),
+        ("collaborate", "heming", "智能体协作：协调人员并生成沟通草稿", "coordinate_team", "检修任务 / 联系人交流", "contacts_read+conversation_message_draft", {"task_id": task.get("id"), "risk": task.get("severity")}),
+        ("open_knowledge", "bowen", "知识检索：打开知识库并定位图谱关系", "retrieve_knowledge", "知识库", "openKnowledgeGraph+knowledge_search", {"query": focus_keyword, "equipment": equipment}),
+        ("archive", "bowen", "知识沉淀：生成待审核知识候选", "archive_knowledge", "知识库 / 沉淀更新", "knowledge_candidate_create", {"task_id": task.get("id"), "equipment": equipment, "fault": fault}),
+        ("review", "mingjian", "校验确认：生成复检核查清单", "prepare_recheck", "检修任务 / 复检评估", "recheck+quality_score", {"task_id": task.get("id")}),
+        ("memory", "tiangong", "信息整合：写入会话与长期记忆", "record_memory", "AIOS 记忆", "pgvector_memory_write", {"task_id": task.get("id"), "goal": goal}),
+        ("finalize", "mingjian", "结果生成：输出闭环报告与可观察记录", "finalize_report", "首页 / 报告预览", "report_verify+langsmith_trace", {"task_id": task.get("id"), "goal": goal}),
     ]
     priority_orders = {
         "knowledge": ["sense", "open_knowledge", "archive", "open_search", "retrieve", "diagnose", "open_task", "operate", "collaborate", "review", "memory", "finalize"],
@@ -1867,6 +1871,63 @@ def search():
     visual_findings = []
     for image in images:
         visual_findings.extend(image.get("analysis", {}).get("fault_signs", []))
+    scene_text = " ".join([query, device, model, category, fault, " ".join(item.get("name", "") for item in attachments)])
+    if _goal_contains(scene_text, ["车淹", "泡水", "涉水", "积水", "水淹", "轿车", "汽车", "车辆"]):
+        vehicle_device = device if device and device not in {"设备", "待确认设备"} else "涉水车辆"
+        vehicle_model = "" if model in {"待确认型号", "unknown", "未知"} else model
+        vehicle_knowledge = [
+            {
+                "id": "vehicle-water-sop",
+                "title": "泡水车辆检修排查 SOP",
+                "type": "标准作业流程 SOP",
+                "category": "汽车涉水检修",
+                "equipment": vehicle_device,
+                "model": vehicle_model,
+                "match": 90,
+                "summary": "禁止启动、拖车转移、进气检查、油液检查、电气干燥、底盘清洗防锈、车内除湿消毒和复检验收。",
+                "tags": ["泡水车", "涉水", "安全确认"],
+            },
+            {
+                "id": "vehicle-water-electric",
+                "title": "汽车电气系统进水检查清单",
+                "type": "维修手册",
+                "category": "电气系统",
+                "equipment": vehicle_device,
+                "model": vehicle_model,
+                "match": 84,
+                "summary": "重点检查 ECU、保险盒、线束插头、传感器、启动机、发电机和绝缘状态；不确定进水深度时保持待确认。",
+                "tags": ["电气系统", "进水", "复检"],
+            },
+        ]
+        return success_response({
+            "query": query,
+            "device_name": vehicle_device,
+            "device_model": vehicle_model,
+            "category": "汽车涉水检修",
+            "maintenance_level": level,
+            "modalities": ["text"] + (["image"] if images else []) + (["document"] if docs else []),
+            "match_score": min(94, 84 + (6 if images else 0) + (3 if docs else 0)),
+            "phenomenon_summary": "根据已知图片/文字线索，车辆处于积水或涉水场景；车型、具体水深、发动机是否进水、车内是否进水均需现场复核，不做无依据推断。",
+            "risk": "high",
+            "stop_advice": "不要立即启动发动机；先断电、拖车转移，并检查进气系统、油液、电气线束、制动系统和底盘。",
+            "causes": ["道路积水导致底盘、轮毂和制动部件浸水", "积水可能进入进气、电气插头、车门密封或车内地毯", "长时间浸泡可能造成油液乳化、电气短路、轴承锈蚀或霉变"],
+            "positions": ["空气滤芯/进气管/节气门", "机油尺/油底壳", "变速箱油/差速器油", "ECU/保险盒/线束插头", "刹车盘/刹车片/ABS轮速传感器", "底盘悬挂/轴承/排气管", "车内地毯/座椅底部/安全带卷收器"],
+            "tools": ["拖车设备", "内窥镜", "万用表", "绝缘检测工具", "油液检查工具", "举升机", "除湿消毒设备"],
+            "visual_findings": visual_findings or ["已接入车辆涉水现场图片；仅根据当前线索判断为泡水/涉水风险，具体受损范围待拆检确认。"],
+            "attachments": attachments,
+            "matched_manuals": vehicle_knowledge,
+            "recommended_sop": [
+                {"step": 1, "action": "现场拍照记录，禁止启动发动机"},
+                {"step": 2, "action": "断开电瓶负极，拖车转移到维修点"},
+                {"step": 3, "action": "拆检空气滤芯、进气管和节气门"},
+                {"step": 4, "action": "检查机油、变速箱油和差速器油是否乳化"},
+                {"step": 5, "action": "检查 ECU、保险盒、线束插头、传感器、启动机和发电机"},
+                {"step": 6, "action": "检查制动系统、底盘、轴承、防尘套和排气管"},
+                {"step": 7, "action": "车内除湿、消毒、除霉味并复检"},
+            ],
+            "safety": ["禁止涉水后直接启动", "先断电再拆检电气系统", "试车前必须完成油液和电气复检"],
+            "audit": {"risk_level": "high", "must_check": ["启动前确认", "进气系统", "油液乳化", "电气绝缘", "制动复检", "现场复拍"], "auditor": "明鉴"},
+        }, "车辆泡水/涉水检索完成")
     confidence = min(96, 82 + (6 if images else 0) + (3 if docs else 0) + (3 if model != "待确认型号" else 0))
     causes = [f"{fault}相关部件存在调整、磨损或连接异常", "运行参数或装配状态偏离手册要求", "需结合检测值排除供电、润滑或压力因素"]
     return success_response({
