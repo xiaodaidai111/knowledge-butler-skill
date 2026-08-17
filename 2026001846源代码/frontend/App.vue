@@ -5698,7 +5698,8 @@ const cloneAssistantFileForSearch = (file) => ({
 const inferSearchScene = (text = '', files = []) => {
   const content = `${text || ''} ${files.map((file) => file.name || '').join(' ')}`.toLowerCase()
   const hasWaterIntent = /车淹|泡水|涉水|积水|淹水|水淹|进水/.test(content)
-  const hasMotorcycleEngineIntent = /摩托|cg-?125|发动机异响|发动机|气门|怠速|正时链条|张紧器|火花塞|化油器|凸轮轴|摇臂/.test(content)
+  const hasAutoVehicleIntent = /汽车|轿车|车辆/.test(content)
+  const hasMotorcycleEngineIntent = /摩托|cg-?125/.test(content) || (!hasAutoVehicleIntent && /发动机异响|发动机|气门|怠速|正时链条|张紧器|火花塞|化油器|凸轮轴|摇臂/.test(content))
   if (hasMotorcycleEngineIntent && !hasWaterIntent) {
     return {
       type: 'motorcycle_engine',
@@ -6618,7 +6619,8 @@ const buildReportContext = (data = {}, uiSteps = []) => {
     focus.description,
     ...(runContext.files || []).map((file) => file.name || '')
   ].join(' ')
-  const hasMotorcycleEngineIntent = scene?.type === 'motorcycle_engine' || /摩托|cg-?125|发动机异响|气门|怠速|正时链条|张紧器|火花塞|化油器/.test(sceneText)
+  const hasAutoVehicleIntent = /汽车|轿车|车辆/.test(sceneText)
+  const hasMotorcycleEngineIntent = scene?.type === 'motorcycle_engine' || /摩托|cg-?125/.test(sceneText) || (!hasAutoVehicleIntent && /发动机异响|气门|怠速|正时链条|张紧器|火花塞|化油器/.test(sceneText))
   const hasWaterIntent = /车淹|泡水|涉水|积水|淹水|水淹|进水/.test(sceneText)
   const device = firstTruthy(contextSearchResult?.device?.name, contextSearchResult?.device_name, focus.equipment_name, focus.equipment, scene?.deviceName, contextSearchForm.deviceName, '待确认设备')
   const model = firstTruthy(contextSearchResult?.device?.model, contextSearchResult?.device_model, focus.equipment_model, focus.model, scene?.deviceModel, contextSearchForm.deviceModel)
