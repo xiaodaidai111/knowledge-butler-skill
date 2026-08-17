@@ -3078,6 +3078,7 @@ const operatorKey = computed(() => {
 })
 const operatorProfile = computed(() => {
   const contextual = operatorProfiles[operatorKey.value] || operatorProfiles.home
+  if (activePage.value === 'home') return contextual
   const selected = selectedAgentId.value ? agentProfileMap[selectedAgentId.value] : null
   if (!selected) return contextual
   return {
@@ -3089,6 +3090,19 @@ const operatorProfile = computed(() => {
   }
 })
 const currentOperatorMessages = computed(() => operatorMessages.value.filter((message) => message.global || message.page === activePage.value))
+const scrollOperatorMessagesToBottom = () => {
+  nextTick(() => {
+    window.setTimeout(() => {
+      const panels = document.querySelectorAll('.operator-panel .chat-thread, .floating-chat-thread, .search-dialog-thread')
+      panels.forEach((panel) => { panel.scrollTop = panel.scrollHeight })
+    }, 60)
+  })
+}
+watch(
+  () => [activePage.value, currentOperatorMessages.value.length, currentOperatorMessages.value.at(-1)?.id, currentOperatorMessages.value.at(-1)?.loading],
+  () => scrollOperatorMessagesToBottom(),
+  { flush: 'post' }
+)
 const todayCompletion = computed(() => {
   const total = overview.stats.pending + overview.stats.inProgress + overview.stats.review + overview.stats.completed
   return Math.round(overview.stats.completed / Math.max(total, 1) * 100)
@@ -6246,7 +6260,7 @@ const sendOperatorPrompt = async (prompt) => {
       const uiCount = Array.isArray(uiPlan) && uiPlan.length ? uiPlan.filter((s) => s.action !== 'done').length : 0
       // 合并工具调用步骤和 UI 操作步骤
       const uiSteps = Array.isArray(uiPlan) && uiPlan.length
-        ? uiPlan.filter((s) => s.action !== 'done').map((s) => ({ type: 'tool_call', tool: s.action, args: s, content: s.action === 'navigate' ? `→ ${TG_AGENT_NAMES[s.agent] || s.agent}` : (s.text || '') }))
+        ? buildExecutionTrace(uiPlan, { goal: value })
         : steps
       
       // 替换 loading 消息为真实回复
@@ -6620,7 +6634,7 @@ const buildAiosReport = (data = {}, uiSteps = []) => {
   return {
     title: `${ctx.device}${ctx.fault ? ` · ${ctx.fault}` : ''}执行报告`,
     subtitle: data.summary || '天工已完成本轮跨页面协同执行',
-    conclusion: `本次执行基于「${ctx.goal}」整理了${ctx.device}${ctx.model ? `/${ctx.model}` : ''}的已知信息，完成检索、智能体协作、作业/复检入口定位和报告建议。未知设备参数、未上传检测值或未确认现场状态不会自动补写，需在正式归档前由负责人确认。`,
+    conclusion: `已完成${ctx.device}${ctx.model ? `/${ctx.model}` : ''}的检修线索整理、资料检索、智能体协作、作业/复检定位和报告推荐。未确认的设备参数、检测值、现场状态已保留为待确认；正式归档前需要负责人复核。`,
     metrics: [
       { label: '执行步骤', value: `${uiSteps.length || digest.length || 0} 步` },
       { label: '协作智能体', value: `${agents.length || 1} 个` },
