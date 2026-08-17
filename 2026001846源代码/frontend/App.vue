@@ -3076,6 +3076,20 @@ const operatorKey = computed(() => {
   if (activePage.value === 'tasks' && taskPanel.value === 'recheck') return 'recheck'
   return activePage.value
 })
+const pageDefaultAgentId = computed(() => {
+  if (activePage.value === 'home') return 'tiangong'
+  if (activePage.value === 'search') return 'guanwei'
+  if (activePage.value === 'knowledge') return 'bowen'
+  if (activePage.value === 'tasks' && taskPanel.value === 'contacts') return 'heming'
+  if (activePage.value === 'tasks' && taskPanel.value === 'recheck') return 'mingjian'
+  if (activePage.value === 'tasks') return 'zhiju'
+  if (activePage.value === 'profile') return 'mingjian'
+  return 'tiangong'
+})
+const activeOperatorAgentId = computed(() => {
+  if (activePage.value === 'home') return 'tiangong'
+  return selectedAgentId.value || pageDefaultAgentId.value
+})
 const operatorProfile = computed(() => {
   const contextual = operatorProfiles[operatorKey.value] || operatorProfiles.home
   if (activePage.value === 'home') return contextual
@@ -3089,7 +3103,16 @@ const operatorProfile = computed(() => {
     welcome: `我是${selected.name}，${selected.duty}`
   }
 })
-const currentOperatorMessages = computed(() => operatorMessages.value.filter((message) => message.global || message.page === activePage.value))
+const operatorMessage = (payload = {}, agentId = activeOperatorAgentId.value) => ({
+  ...payload,
+  agentId: payload.agentId || agentId || pageDefaultAgentId.value,
+  page: payload.page || activePage.value
+})
+const currentOperatorMessages = computed(() => operatorMessages.value.filter((message) => {
+  if (message.page !== activePage.value && !message.global) return false
+  const owner = message.agentId || pageDefaultAgentId.value
+  return owner === activeOperatorAgentId.value
+}))
 const scrollOperatorMessagesToBottom = () => {
   nextTick(() => {
     window.setTimeout(() => {
@@ -4468,12 +4491,12 @@ const closeGlobalSearchOnOutside = (event) => {
 }
 const focusAgent = (agent) => {
   selectedAgentId.value = agent.id
-  operatorMessages.value.push({
+  operatorMessages.value.push(operatorMessage({
     id: `agent-${Date.now()}`,
     page: activePage.value,
     role: 'assistant',
     text: `${agent.name}已接入当前页面。${agent.lastResult || agent.duty}`
-  })
+  }, agent.id))
 }
 const openGraphSearch = async () => {
   graphSearchExpanded.value = true
@@ -4730,6 +4753,12 @@ watch([activePage, knowledgePanel], () => {
 })
 watch([activePage, taskPanel, activeConversationId], () => {
   if (activePage.value === 'tasks' && taskPanel.value === 'contacts') markConversationRead(activeConversationId.value)
+})
+watch([activePage, taskPanel], () => {
+  const defaultAgent = pageDefaultAgentId.value
+  if (activePage.value === 'home' || !selectedAgentId.value || !agentProfileMap[selectedAgentId.value] || selectedAgentId.value !== defaultAgent) {
+    selectedAgentId.value = defaultAgent
+  }
 })
 const taskLinkedKnowledge = ref([])
 watch(selectedTask, async (task) => {
@@ -5602,7 +5631,7 @@ const closeFloatingAgentOnOutside = (event) => {
   nextTick(clampFloatingAgent)
 }
 const clearOperatorMessages = () => {
-  operatorMessages.value = operatorMessages.value.filter((message) => message.page !== activePage.value)
+  operatorMessages.value = operatorMessages.value.filter((message) => !(message.page === activePage.value && (message.agentId || pageDefaultAgentId.value) === activeOperatorAgentId.value))
 }
 const askAgentAboutNode = (node) => {
   floatingAgent.open = true
@@ -5684,8 +5713,10 @@ const isVisualSearchTransferPrompt = (value) => {
 const addFiles = async (event, target) => {
   const selected = Array.from(event.target.files || []).map(toFileMeta)
   if (target === 'search') {
+    searchResult.value = null
     searchFiles.value.push(...selected.map((file) => ({ ...file, status: '已加入检索' })))
   } else if (target === 'assistant') {
+    searchResult.value = null
     assistantFiles.value.push(...selected.map((file) => ({ ...file, status: '待发送' })))
   } else {
     for (const file of selected) {
@@ -5704,6 +5735,7 @@ const addFiles = async (event, target) => {
   event.target.value = ''
 }
 const addDroppedFiles = (event) => {
+  searchResult.value = null
   searchFiles.value.push(...Array.from(event.dataTransfer.files || []).map((file) => ({ ...toFileMeta(file), status: '已加入检索' })))
 }
 const addManagerDroppedFiles = async (event) => {
@@ -6074,12 +6106,12 @@ const runAudit = async () => {
 
 const runOperatorPrimary = () => {
   if (activePage.value === 'home') {
-    operatorMessages.value.push({
+    operatorMessages.value.push(operatorMessage({
       id: `brief-${Date.now()}`,
       page: 'home',
       role: 'assistant',
       text: `今日共 ${tasks.value.length} 项任务，高风险 ${tasks.value.filter((task) => task.severity === 'high').length} 项，待复检 ${tasks.value.filter((task) => task.status === 'review').length} 项。建议先处理高风险和已逾期工单。`
-    })
+    }, 'tiangong'))
     return toast('今日检修简报已生成')
   }
   if (activePage.value === 'search') return runSearch()
@@ -6094,18 +6126,47 @@ const runOperatorPrimary = () => {
   return runAudit()
 }
 
+const createRunContextSnapshot = (prompt = '', attachments = []) => {
+  const text = String(prompt || '')
+  const files = Array.isArray(attachments) ? attachments : []
+  const scene = inferSearchScene(text, files)
+  const normalizedQuery = String(searchForm.query || '').trim()
+  const promptLooksLikeCurrentSearch = !!normalizedQuery && (
+    text.includes(normalizedQuery) ||
+    normalizedQuery.includes(text) ||
+    (!text && activePage.value === 'search') ||
+    (activePage.value === 'search' && /当前|这个|本次|检索|研判|报告|总结|生成|导出/.test(text))
+  )
+  const currentSearchResult = promptLooksLikeCurrentSearch ? searchResult.value : null
+  return {
+    prompt: text,
+    files: files.map((file) => ({ name: file.name, type: file.type, id: file.id || file.localId || '' })),
+    scene,
+    searchForm: {
+      deviceName: scene?.deviceName || (promptLooksLikeCurrentSearch ? searchForm.deviceName : ''),
+      deviceModel: scene?.deviceModel || (promptLooksLikeCurrentSearch ? searchForm.deviceModel : ''),
+      faultType: scene?.faultType || (promptLooksLikeCurrentSearch ? searchForm.faultType : ''),
+      category: scene?.category || (promptLooksLikeCurrentSearch ? searchForm.category : ''),
+      query: scene?.query || text || (promptLooksLikeCurrentSearch ? searchForm.query : '')
+    },
+    searchResult: currentSearchResult
+  }
+}
+
 const sendOperatorPrompt = async (prompt) => {
   const value = String(prompt || '').trim()
   if (!value && !assistantFiles.value.length) return
   if (value.includes('退出登录')) return logout()
   const sourcePage = activePage.value
+  const requestAgentId = activeOperatorAgentId.value
   const visualTransferIntent = isVisualSearchTransferPrompt(value)
   const outgoingAttachments = snapshotFiles(assistantFiles.value)
-  operatorMessages.value.push({ id: `user-${Date.now()}`, page: sourcePage, role: 'user', text: value || '请分析已上传的现场资料', attachments: outgoingAttachments, global: visualTransferIntent })
+  const runContext = createRunContextSnapshot(value, outgoingAttachments)
+  operatorMessages.value.push(operatorMessage({ id: `user-${Date.now()}`, page: sourcePage, role: 'user', text: value || '请分析已上传的现场资料', attachments: outgoingAttachments }, requestAgentId))
   operatorInput.value = ''
   if (visualTransferIntent) {
     try {
-      await runTiangongLongTask(value || '请将现场图片交给观微进行智能检索和故障判断', sourcePage, { attachments: assistantFiles.value.slice() })
+      await runTiangongLongTask(value || '请将现场图片交给观微进行智能检索和故障判断', sourcePage, { attachments: assistantFiles.value.slice(), context: runContext, agentId: requestAgentId })
       return
     } catch (error) {
       Object.assign(tgRunUi, {
@@ -6134,7 +6195,7 @@ const sendOperatorPrompt = async (prompt) => {
         Object.assign(file, saved, { raw: file.raw, localId: file.localId, status: '分析完成' })
       }
       const response = await yixiuApi.assistantChat({ message: value, fileIds: assistantFiles.value.map((file) => file.id).filter(Boolean), agent: operatorProfile.value.name, page: sourcePage })
-      operatorMessages.value.push({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: `${response.response}\n引用：${(response.references || []).join('、')}` })
+      operatorMessages.value.push(operatorMessage({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: `${response.response}\n引用：${(response.references || []).join('、')}` }, requestAgentId))
       // 附件缩略图仍需要显示在历史气泡中，稍后由页面退出统一释放 Blob URL。
       assistantFiles.value = []
       return toast('已完成图文联合分析')
@@ -6144,7 +6205,7 @@ const sendOperatorPrompt = async (prompt) => {
   }
   if (isTiangongLongTaskPrompt(value)) {
     try {
-      await runTiangongLongTask(value, sourcePage)
+      await runTiangongLongTask(value, sourcePage, { context: runContext, agentId: requestAgentId })
     } catch (error) {
       Object.assign(tgRunUi, {
         visible: true,
@@ -6162,7 +6223,7 @@ const sendOperatorPrompt = async (prompt) => {
         steps: []
       })
       aiosLive.error = error.message || '天工长任务暂时无法执行'
-      operatorMessages.value.push({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: `天工长任务启动失败：${aiosLive.error}` })
+      operatorMessages.value.push(operatorMessage({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: `天工长任务启动失败：${aiosLive.error}` }, requestAgentId))
       toast(aiosLive.error)
     }
     return
@@ -6212,7 +6273,7 @@ const sendOperatorPrompt = async (prompt) => {
   }
   try {
     if (operatorProfile.value.id === 'tiangong') {
-      const loadingMsg = { id: `loading-${Date.now()}`, page: sourcePage, role: 'assistant', text: '天工正在感知系统状态…', loading: true }
+      const loadingMsg = operatorMessage({ id: `loading-${Date.now()}`, page: sourcePage, role: 'assistant', text: '天工正在感知系统状态…', loading: true }, 'tiangong')
       operatorMessages.value.push(loadingMsg)
       Object.assign(aiosLive, {
         status: 'running',
@@ -6224,7 +6285,7 @@ const sendOperatorPrompt = async (prompt) => {
 
       if (isTiangongLongTaskPrompt(value)) {
         operatorMessages.value = operatorMessages.value.filter((message) => message.id !== loadingMsg.id)
-        await runTiangongLongTask(value, sourcePage)
+        await runTiangongLongTask(value, sourcePage, { context: runContext, agentId: 'tiangong' })
         return
       }
       
@@ -6268,6 +6329,7 @@ const sendOperatorPrompt = async (prompt) => {
       const finalMsg = {
         id: loadIdx >= 0 ? loadingMsg.id : `assistant-${Date.now()}`,
         page: sourcePage,
+        agentId: 'tiangong',
         role: 'assistant',
         text: cleanReply,
         steps: uiSteps,
@@ -6292,7 +6354,7 @@ const sendOperatorPrompt = async (prompt) => {
       return
     }
     const response = await yixiuApi.assistantChat({ message: value, fileIds: [], agent: operatorProfile.value.name, page: sourcePage })
-    operatorMessages.value.push({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: response.response })
+    operatorMessages.value.push(operatorMessage({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: response.response }, requestAgentId))
     toast(`${operatorProfile.value.name}已结合当前数据给出建议`)
   } catch (error) {
     if (operatorProfile.value.id === 'tiangong') {
@@ -6452,30 +6514,38 @@ const compactList = (items = []) => [...new Set(items.map((item) => String(item 
 
 const buildReportContext = (data = {}, uiSteps = []) => {
   const focus = data.focus || data.task || {}
+  const runContext = data.context || data.runContext || {}
+  const contextSearchForm = runContext.searchForm || {}
+  const contextSearchResult = runContext.searchResult || null
   const digest = Array.isArray(data.step_digest) ? data.step_digest : Array.isArray(data.steps) ? data.steps : []
   const scene = inferSearchScene(
     [
+      runContext.prompt,
       data.goal,
-      searchForm.query,
-      searchResult.value?.query,
+      contextSearchForm.query,
+      contextSearchResult?.query,
       focus.fault_type,
       focus.description,
       ...uiSteps.map((step) => step.content || step.args?.reason || step.args?.input?.query || step.args?.input?.keyword || '')
     ].join(' '),
-    [...assistantFiles.value, ...searchFiles.value]
+    runContext.files || []
   )
-  const device = firstTruthy(searchResult.value?.device?.name, focus.equipment_name, focus.equipment, scene?.deviceName, searchForm.deviceName, '待确认设备')
-  const model = firstTruthy(searchResult.value?.device?.model, focus.equipment_model, focus.model, scene?.deviceModel, searchForm.deviceModel)
-  const fault = firstTruthy(searchResult.value?.fault?.type, focus.fault_type, scene?.faultType, searchForm.faultType, focus.description, data.goal, '待确认故障')
-  const risk = firstTruthy(searchResult.value?.risk?.level, focus.severity, searchResult.value?.riskLevel, '待评估')
-  const refs = Array.isArray(searchResult.value?.references) ? searchResult.value.references : []
-  const sop = Array.isArray(searchResult.value?.suggestion?.steps) ? searchResult.value.suggestion.steps : []
+  const device = firstTruthy(contextSearchResult?.device?.name, contextSearchResult?.device_name, focus.equipment_name, focus.equipment, scene?.deviceName, contextSearchForm.deviceName, '待确认设备')
+  const model = firstTruthy(contextSearchResult?.device?.model, contextSearchResult?.device_model, focus.equipment_model, focus.model, scene?.deviceModel, contextSearchForm.deviceModel)
+  const fault = firstTruthy(contextSearchResult?.fault?.type, contextSearchResult?.fault_type, focus.fault_type, scene?.faultType, contextSearchForm.faultType, focus.description, data.goal, '待确认故障')
+  const risk = firstTruthy(contextSearchResult?.risk?.level, contextSearchResult?.risk, focus.severity, contextSearchResult?.riskLevel, '待评估')
+  const refs = Array.isArray(contextSearchResult?.references)
+    ? contextSearchResult.references
+    : (Array.isArray(contextSearchResult?.matched_manuals) ? contextSearchResult.matched_manuals : [])
+  const sop = Array.isArray(contextSearchResult?.suggestion?.steps)
+    ? contextSearchResult.suggestion.steps
+    : (Array.isArray(contextSearchResult?.recommended_sop) ? contextSearchResult.recommended_sop.map((item) => item.action || item.title || item.detail).filter(Boolean) : [])
   const agents = compactList([
     ...digest.map((step) => step.agent || step.agent_id || step.agentName),
     ...uiSteps.map((step) => traceAgentName(step))
   ])
   return {
-    goal: data.goal || searchForm.query || focus.title || '当前检修任务',
+    goal: data.goal || contextSearchForm.query || focus.title || '当前检修任务',
     device,
     model,
     fault,
@@ -6487,8 +6557,11 @@ const buildReportContext = (data = {}, uiSteps = []) => {
     isVehicleWater: scene?.type === 'vehicle_water' || /车|车辆|汽车|泡水|涉水|积水|水淹/.test(`${device} ${fault} ${data.goal || ''}`),
     highlights: compactList([
       ...digest.slice(0, 5).map((step) => step.content || step.expected_output || step.title),
-      searchResult.value?.diagnosis,
-      searchResult.value?.stopAdvice
+      contextSearchResult?.diagnosis,
+      contextSearchResult?.phenomenonSummary,
+      contextSearchResult?.phenomenon_summary,
+      contextSearchResult?.stopAdvice,
+      contextSearchResult?.stop_advice
     ]).slice(0, 5)
   }
 }
@@ -6702,7 +6775,9 @@ const buildExecutionTrace = (uiPlan = [], data = {}) => {
 
 const runTiangongLongTask = async (value, sourcePage, options = {}) => {
   const transferAttachments = Array.isArray(options.attachments) ? options.attachments.filter(Boolean) : []
-  const loadingMsg = { id: `loading-${Date.now()}`, page: sourcePage, role: 'assistant', text: '天工正在感知系统状态…', loading: true, global: transferAttachments.length > 0 }
+  const runContext = options.context || createRunContextSnapshot(value, snapshotFiles(transferAttachments))
+  const messageAgentId = options.agentId || 'tiangong'
+  const loadingMsg = operatorMessage({ id: `loading-${Date.now()}`, page: sourcePage, role: 'assistant', text: '天工正在感知系统状态…', loading: true }, messageAgentId)
   operatorMessages.value.push(loadingMsg)
   Object.assign(aiosLive, {
     status: 'running',
@@ -6736,7 +6811,7 @@ const runTiangongLongTask = async (value, sourcePage, options = {}) => {
     body: JSON.stringify({ goal: value })
   }).then(r => r.json().catch(() => ({})))
 
-  const data = taskPayload.data || taskPayload || {}
+  const data = { ...(taskPayload.data || taskPayload || {}), context: runContext, goal: value }
   let uiPlan = Array.isArray(data.ui_plan) ? data.ui_plan : []
   if (transferAttachments.length) {
     const transferStep = {
@@ -6763,12 +6838,13 @@ const runTiangongLongTask = async (value, sourcePage, options = {}) => {
   const finalMsg = {
     id: loadIdx >= 0 ? loadingMsg.id : `assistant-${Date.now()}`,
     page: sourcePage,
+    agentId: messageAgentId,
     role: 'assistant',
     text: longTaskReplyText(data),
     report: buildAiosReport(data, uiSteps),
     steps: uiSteps,
     toolCalls: uiSteps.length,
-    global: transferAttachments.length > 0
+    global: false
   }
   if (loadIdx >= 0) operatorMessages.value.splice(loadIdx, 1, finalMsg)
   else operatorMessages.value.push(finalMsg)
@@ -7243,7 +7319,7 @@ async function sendRemotePrompt(value, targetAgentId = '') {
   const agentId = targetAgentId || selectedAgentId.value || operatorProfile.value.id
   const agentProfile = agentProfileMap[agentId] || operatorProfile.value
   if (agentId && agentProfileMap[agentId]) selectedAgentId.value = agentId
-  operatorMessages.value.push({ id: `user-${Date.now()}`, page: sourcePage, role: 'user', text: value })
+  operatorMessages.value.push(operatorMessage({ id: `user-${Date.now()}`, page: sourcePage, role: 'user', text: value }, agentId))
   operatorInput.value = ''
   try {
     if (agentId && agentId !== 'tiangong' && agentProfileMap[agentId]) {
@@ -7253,15 +7329,16 @@ async function sendRemotePrompt(value, targetAgentId = '') {
       operatorMessages.value.push({
         id: `assistant-${Date.now()}`,
         page: sourcePage,
+        agentId,
         role: 'assistant',
         text: `${agentName}已接收天工分派：${result.summary || '已完成本次协作处理。'}`
       })
       return
     }
     const response = await yixiuApi.assistantChat({ message: value, fileIds: [], agent: agentProfile.name, page: sourcePage })
-    operatorMessages.value.push({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: response.response })
+    operatorMessages.value.push(operatorMessage({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: response.response }, agentId))
   } catch (error) {
-    operatorMessages.value.push({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: `（${agentProfile.name || '智能体'}暂未响应：${error.message || ''}）` })
+    operatorMessages.value.push(operatorMessage({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: `（${agentProfile.name || '智能体'}暂未响应：${error.message || ''}）` }, agentId))
   }
 }
 
@@ -7310,6 +7387,7 @@ const tgTransferAttachmentsToSearch = async (attachments = [], step = {}) => {
   activePage.value = 'search'
   searchPanel.value = 'multimodal'
   selectedAgentId.value = 'guanwei'
+  searchResult.value = null
   const keyword = step.input?.keyword || step.text || operatorInput.value || ''
   const scene = inferSearchScene(keyword, attachments)
   if (scene) {
