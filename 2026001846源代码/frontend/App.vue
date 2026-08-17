@@ -2366,6 +2366,7 @@
             <b>{{ tgRunUi.title }}</b>
           </div>
           <em>{{ tgRunUi.current }}/{{ tgRunUi.total }}</em>
+          <button class="tg-run-stop" type="button" title="中断执行" aria-label="中断执行" @click="stopTgRun">×</button>
         </header>
         <div class="tg-run-progress"><span :style="{ width: tgRunUi.progress + '%' }"></span></div>
         <p class="tg-run-detail">{{ tgRunUi.detail }}</p>
@@ -5697,7 +5698,7 @@ const cloneAssistantFileForSearch = (file) => ({
 })
 const inferSearchScene = (text = '', files = []) => {
   const content = `${text || ''} ${files.map((file) => file.name || '').join(' ')}`.toLowerCase()
-  const hasWaterIntent = /车淹|泡水|涉水|积水|淹水|水淹|进水/.test(content)
+  const hasWaterIntent = hasAffirmativeWaterScene(content)
   const hasAutoVehicleIntent = /汽车|轿车|车辆/.test(content)
   const hasMotorcycleEngineIntent = /摩托|cg-?125/.test(content) || (!hasAutoVehicleIntent && /发动机异响|发动机|气门|怠速|正时链条|张紧器|火花塞|化油器|凸轮轴|摇臂/.test(content))
   if (hasMotorcycleEngineIntent && !hasWaterIntent) {
@@ -5723,6 +5724,19 @@ const inferSearchScene = (text = '', files = []) => {
     }
   }
   return null
+}
+const WATER_SCENE_RE = /车淹|泡水|涉水|积水|淹水|水淹|进水/
+const WATER_RESULT_RE = /泡水|涉水|水淹|积水|进水|汽车涉水/
+const WATER_NEGATION_RE = /没有泡水|无泡水|未泡水|不是泡水|非泡水|没有涉水|无涉水|未涉水|不涉水|不是涉水|非涉水|没有积水|无积水|未积水|不是积水|非积水|没有进水|无进水|未进水|不进水|不是进水|非进水|没有水淹|无水淹|未水淹|不涉及水/
+const hasAffirmativeWaterScene = (value = '') => WATER_SCENE_RE.test(String(value || '')) && !WATER_NEGATION_RE.test(String(value || ''))
+const resetSearchIdentityFields = () => {
+  Object.assign(searchForm, {
+    deviceName: '',
+    deviceModel: '',
+    faultCode: '',
+    category: '',
+    faultType: ''
+  })
 }
 const applySearchScene = (scene = {}) => {
   if (!scene) return
@@ -5931,22 +5945,10 @@ const runSearch = async () => {
   const currentScene = inferSearchScene(searchForm.query, searchFiles.value)
   const currentInputText = `${searchForm.query || ''} ${searchFiles.value.map((file) => file.name || '').join(' ')}`
   if (currentScene) {
-    Object.assign(searchForm, {
-      deviceName: '',
-      deviceModel: '',
-      faultCode: '',
-      category: '',
-      faultType: ''
-    })
+    resetSearchIdentityFields()
     applySearchScene(currentScene)
-  } else if (!/车淹|泡水|涉水|积水|淹水|水淹|进水/.test(currentInputText) && /泡水|涉水|水淹|积水|进水/.test(`${searchForm.deviceName}${searchForm.category}${searchForm.faultType}`)) {
-    Object.assign(searchForm, {
-      deviceName: '',
-      deviceModel: '',
-      faultCode: '',
-      category: '',
-      faultType: ''
-    })
+  } else if (!hasAffirmativeWaterScene(currentInputText) && WATER_RESULT_RE.test(`${searchForm.deviceName}${searchForm.category}${searchForm.faultType}`)) {
+    resetSearchIdentityFields()
   }
   loading.search = true
   searchPanel.value = 'results'
@@ -6621,7 +6623,7 @@ const buildReportContext = (data = {}, uiSteps = []) => {
   ].join(' ')
   const hasAutoVehicleIntent = /汽车|轿车|车辆/.test(sceneText)
   const hasMotorcycleEngineIntent = scene?.type === 'motorcycle_engine' || /摩托|cg-?125/.test(sceneText) || (!hasAutoVehicleIntent && /发动机异响|气门|怠速|正时链条|张紧器|火花塞|化油器/.test(sceneText))
-  const hasWaterIntent = /车淹|泡水|涉水|积水|淹水|水淹|进水/.test(sceneText)
+  const hasWaterIntent = hasAffirmativeWaterScene(sceneText)
   const device = firstTruthy(contextSearchResult?.device?.name, contextSearchResult?.device_name, focus.equipment_name, focus.equipment, scene?.deviceName, contextSearchForm.deviceName, '待确认设备')
   const model = firstTruthy(contextSearchResult?.device?.model, contextSearchResult?.device_model, focus.equipment_model, focus.model, scene?.deviceModel, contextSearchForm.deviceModel)
   const fault = firstTruthy(contextSearchResult?.fault?.type, contextSearchResult?.fault_type, focus.fault_type, scene?.faultType, contextSearchForm.faultType, focus.description, data.goal, '待确认故障')
@@ -7053,6 +7055,19 @@ const tgRunUi = reactive({
   progress: 0,
   steps: []
 })
+const stopTgRun = () => {
+  tgRunning.value = false
+  tgCursor.value = { ...tgCursor.value, visible: false, label: '' }
+  Object.assign(tgRunUi, {
+    statusText: '已中断',
+    title: '执行已中断',
+    detail: '用户已中断本次 AI 执行，后续页面动作不会继续。',
+    outputText: '执行已停止。',
+    decision: '收到用户中断指令，停止后续步骤。',
+    check: '已中断，未继续校验。'
+  })
+  toast('已中断 AI 执行')
+}
 const tgSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const tgActionLabel = (step) => {
@@ -7274,6 +7289,7 @@ const tgApplyStepState = async (step = {}) => {
 
   if (page === 'search') {
     searchPanel.value = action === 'summarize' ? 'history' : 'multimodal'
+    if (!scene && !hasAffirmativeWaterScene(rawKeyword) && WATER_RESULT_RE.test(`${searchForm.deviceName}${searchForm.category}${searchForm.faultType}`)) resetSearchIdentityFields()
     if (scene) applySearchScene(scene)
     if (keyword) {
       searchForm.query = String(keyword)
@@ -7550,26 +7566,15 @@ const tgTransferAttachmentsToSearch = async (attachments = [], step = {}) => {
   const keyword = step.input?.keyword || step.text || operatorInput.value || ''
   const scene = inferSearchScene(keyword, attachments)
   if (scene) {
-    Object.assign(searchForm, {
-      deviceName: '',
-      deviceModel: '',
-      faultCode: '',
-      category: '',
-      faultType: ''
-    })
+    resetSearchIdentityFields()
     applySearchScene(scene)
     searchForm.query = `${scene.query} 已知用户指令：${keyword || '仅上传了现场图片'}`
   } else {
+    resetSearchIdentityFields()
     searchForm.query = keyword ? `${keyword}；请结合上传图片判断现场设备、故障部位和风险。未知设备型号请留空，不要套用示例设备。` : '请结合上传图片判断现场设备、故障部位和风险；未知设备型号请留空，不要套用示例设备。'
-    if (!searchForm.deviceName) searchForm.deviceName = ''
-    if (!searchForm.deviceModel) searchForm.deviceModel = ''
-    if (!searchForm.faultType) searchForm.faultType = ''
   }
-  const existing = new Set(searchFiles.value.map((file) => file.localId || file.name))
-  const incoming = attachments
-    .filter((file) => !existing.has(file.localId || file.name))
-    .map(cloneAssistantFileForSearch)
-  if (incoming.length) searchFiles.value.push(...incoming)
+  searchFiles.value.forEach(releaseFileUrl)
+  searchFiles.value = attachments.map(cloneAssistantFileForSearch)
   await nextTick()
   const target = pickVisibleElement('.search-upload-strip, .search-fusion-upload, .search-workbench-v2, .search-dialog-input')
   if (target) await tgMoveTo(target, '转交图片')
@@ -7672,16 +7677,27 @@ async function executeUIPlan(steps, context = {}) {
       }
     }
   } finally {
-    tgRunUi.progress = 100
-    tgRunUi.statusText = '已完成'
-    tgRunUi.current = totalSteps
-    tgRunUi.title = '执行完成'
-    tgRunUi.detail = '天工已完成跨页面可视化执行，右侧对话中可查看本次闭环摘要。'
-    tgRunUi.outputText = '已完成页面切换、检索、任务联动、知识库定位和闭环摘要。'
-    tgRunUi.observation = tgObservePage()
-    tgRunUi.decision = '本轮任务已闭环，保留报告供用户展开查看'
-    tgRunUi.check = '最终校验完成'
-    await tgSleep(4200)
+    const interrupted = !tgRunning.value
+    if (interrupted) {
+      tgRunUi.statusText = '已中断'
+      tgRunUi.title = '执行已中断'
+      tgRunUi.detail = '用户已中断本次 AI 执行，后续页面动作不会继续。'
+      tgRunUi.outputText = '执行已停止。'
+      tgRunUi.decision = '收到用户中断指令，停止后续步骤。'
+      tgRunUi.check = '已中断，未继续校验。'
+      await tgSleep(900)
+    } else {
+      tgRunUi.progress = 100
+      tgRunUi.statusText = '已完成'
+      tgRunUi.current = totalSteps
+      tgRunUi.title = '执行完成'
+      tgRunUi.detail = '天工已完成跨页面可视化执行，右侧对话中可查看本次闭环摘要。'
+      tgRunUi.outputText = '已完成页面切换、检索、任务联动、知识库定位和闭环摘要。'
+      tgRunUi.observation = tgObservePage()
+      tgRunUi.decision = '本轮任务已闭环，保留报告供用户展开查看'
+      tgRunUi.check = '最终校验完成'
+      await tgSleep(4200)
+    }
     tgCursor.value = { ...tgCursor.value, visible: false }
     tgRunUi.visible = false
     tgRunning.value = false
@@ -11865,15 +11881,17 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .loading-dots i:nth-child(2) { animation-delay: -.16s; }
 @keyframes tg-bounce { 0%,80%,100% { transform: scale(0); } 40% { transform: scale(1); } }
 .tg-run-overlay { position: fixed; left: 50%; top: 16px; z-index: 99990; width: min(840px, calc(100vw - 40px)); transform: translateX(-50%); pointer-events: none; }
-.tg-run-card { overflow: hidden; border: 1px solid rgba(193,208,204,.86); border-radius: 20px; background: linear-gradient(180deg, rgba(255,255,253,.98), rgba(248,250,247,.96)); box-shadow: 0 20px 46px rgba(36,62,63,.16), 0 1px 0 rgba(255,255,255,.96) inset; backdrop-filter: blur(18px); animation: tg-run-in .26s ease-out; }
+.tg-run-card { overflow: hidden; border: 1px solid rgba(193,208,204,.86); border-radius: 20px; background: linear-gradient(180deg, rgba(255,255,253,.98), rgba(248,250,247,.96)); box-shadow: 0 20px 46px rgba(36,62,63,.16), 0 1px 0 rgba(255,255,255,.96) inset; backdrop-filter: blur(18px); animation: tg-run-in .26s ease-out; pointer-events: auto; }
 @keyframes tg-run-in { from { opacity: 0; transform: translate3d(0,-12px,0) scale(.98); } to { opacity: 1; transform: translate3d(0,0,0) scale(1); } }
-.tg-run-card header { display: grid; grid-template-columns: 54px minmax(0,1fr) auto; align-items: center; gap: 13px; padding: 14px 16px 10px; }
+.tg-run-card header { position: relative; display: grid; grid-template-columns: 54px minmax(0,1fr) auto; align-items: center; gap: 13px; padding: 14px 52px 10px 16px; }
 .tg-run-mark { position: relative; width: 54px; height: 54px; display: grid; place-items: center; border-radius: 50%; background: linear-gradient(145deg, #fffdf8, #edf4ef); border: 1px solid rgba(198,214,207,.95); box-shadow: 0 12px 24px rgba(35,95,99,.14), 0 0 0 6px rgba(238,244,239,.78); }
 .tg-run-mark img { width: 46px; height: 46px; border-radius: 50%; object-fit: cover; display: block; background: #f4f8f6; }
 .tg-run-mark i { position: absolute; right: 2px; bottom: 4px; width: 12px; height: 12px; border-radius: 50%; background: #6aa876; border: 2px solid #fff; box-shadow: 0 0 0 3px rgba(106,168,118,.16); }
 .tg-run-card small { display: block; margin-bottom: 3px; color: #758887; font-size: 11px; font-weight: 800; }
 .tg-run-card b { display: block; overflow: hidden; color: #17393b; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .tg-run-card em { min-width: 54px; padding: 6px 10px; border-radius: 999px; background: #f5efe4; color: #8a662d; font-size: 12px; font-style: normal; font-weight: 900; text-align: center; }
+.tg-run-stop { position: absolute; right: 14px; top: 14px; width: 30px; height: 30px; border: 1px solid #dfd8cb; border-radius: 999px; background: rgba(255,255,255,.92); color: #8a5a36; font-size: 22px; line-height: 1; cursor: pointer; box-shadow: 0 8px 18px rgba(54,62,62,.12); transition: transform .18s ease, background .18s ease, color .18s ease; }
+.tg-run-stop:hover { transform: translateY(-1px); background: #fff6eb; color: #b04d2d; }
 .tg-run-progress { height: 5px; margin: 0 16px; overflow: hidden; border-radius: 999px; background: #e8eeee; }
 .tg-run-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #205f61, #b88a44); transition: width .32s ease; }
 .tg-run-detail { margin: 9px 16px 10px; color: #4a6260; font-size: 13px; line-height: 1.55; }

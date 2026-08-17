@@ -1030,7 +1030,7 @@ def _focus_task(goal: str, task_id: str = "") -> dict:
         found = next((item for item in tasks if str(item.get("id")) == str(task_id)), None)
         if found:
             return found
-    if _goal_contains(goal, ["车淹", "泡水", "涉水", "积水", "水淹", "轿车", "汽车", "车辆"]):
+    if _has_affirmative_water_scene(goal):
         return {}
     high = next((item for item in tasks if item.get("severity") in {"critical", "high"}), None)
     return high or (tasks[0] if tasks else {})
@@ -1064,10 +1064,23 @@ def _goal_contains(goal: str, keywords: list[str]) -> bool:
     return any(str(word).lower() in text for word in keywords)
 
 
+def _has_affirmative_water_scene(goal: str) -> bool:
+    text = str(goal or "").lower()
+    if not _goal_contains(text, ["车淹", "泡水", "涉水", "积水", "水淹", "进水"]):
+        return False
+    return not _goal_contains(text, [
+        "没有泡水", "无泡水", "未泡水", "不是泡水", "非泡水",
+        "没有涉水", "无涉水", "未涉水", "不涉水", "不是涉水", "非涉水",
+        "没有积水", "无积水", "未积水", "不是积水", "非积水",
+        "没有进水", "无进水", "未进水", "不进水", "不是进水", "非进水",
+        "没有水淹", "无水淹", "未水淹", "不涉及水",
+    ])
+
+
 def _aios_focus_keyword(goal: str, task: dict | None = None) -> str:
     task = task or {}
     text = str(goal or "")
-    if _goal_contains(text, ["车淹", "泡水", "涉水", "积水", "水淹"]):
+    if _has_affirmative_water_scene(text):
         return "泡水车辆检修知识"
     if _goal_contains(text, ["汽车", "汽修", "轿车", "乘用车"]):
         return "汽车维修知识"
@@ -1872,7 +1885,11 @@ def search():
     for image in images:
         visual_findings.extend(image.get("analysis", {}).get("fault_signs", []))
     scene_text = " ".join([query, device, model, category, fault, " ".join(item.get("name", "") for item in attachments)])
-    if _goal_contains(scene_text, ["摩托", "cg-125", "cg125", "发动机异响", "气门", "怠速", "正时链条", "张紧器", "化油器", "火花塞"]) and not _goal_contains(scene_text, ["车淹", "泡水", "涉水", "积水", "水淹"]):
+    has_auto_vehicle_intent = _goal_contains(scene_text, ["汽车", "轿车", "车辆", "乘用车"])
+    has_motorcycle_engine_intent = _goal_contains(scene_text, ["摩托", "cg-125", "cg125"]) or (
+        not has_auto_vehicle_intent and _goal_contains(scene_text, ["发动机异响", "气门", "怠速", "正时链条", "张紧器", "化油器", "火花塞"])
+    )
+    if has_motorcycle_engine_intent and not _has_affirmative_water_scene(scene_text):
         engine_device = device if device and device not in {"设备", "待确认设备"} else "摩托车发动机总成"
         engine_model = "" if model in {"待确认型号", "unknown", "未知"} else model
         engine_knowledge = [
@@ -1929,7 +1946,7 @@ def search():
             "safety": ["热机拆检前必须冷却防烫伤", "试车时避免长时间高转速", "气门间隙调整后必须复测怠速与异响", "未确认润滑状态前不要继续运行"],
             "audit": {"risk_level": "medium", "must_check": ["机油状态", "气门间隙", "正时链条张紧器", "点火状态", "化油器怠速油路", "复测记录"], "auditor": "明鉴"},
         }, "摩托车发动机检索完成")
-    if _goal_contains(scene_text, ["车淹", "泡水", "涉水", "积水", "水淹", "轿车", "汽车", "车辆"]):
+    if _has_affirmative_water_scene(scene_text):
         vehicle_device = device if device and device not in {"设备", "待确认设备"} else "涉水车辆"
         vehicle_model = "" if model in {"待确认型号", "unknown", "未知"} else model
         vehicle_knowledge = [
