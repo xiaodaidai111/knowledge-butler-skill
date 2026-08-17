@@ -262,7 +262,7 @@ export const yixiuApi = {
       references,
       suggestion: {
         ...mockSearchResult.suggestion,
-        steps: (data.recommended_sop || []).map((step) => typeof step === 'string' ? step : step.title),
+        steps: (data.recommended_sop || []).map((step) => typeof step === 'string' ? step : (step.action || step.title || step.detail || step.desc || step.name || '')).filter(Boolean),
         stepDetails: data.recommended_sop || [],
         risks: data.safety || mockSearchResult.suggestion.risks
       },

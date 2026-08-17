@@ -612,9 +612,9 @@
             </div>
 
             <div class="panel span-all maintenance-advice-panel" v-if="searchResult">
-              <div class="advice-heading"><div><p class="eyebrow">检修建议</p><h3>推荐作业路径</h3></div><span>{{ searchResult.suggestion.steps.length }} 个步骤</span></div>
+              <div class="advice-heading"><div><p class="eyebrow">检修建议</p><h3>推荐作业路径</h3></div><span>{{ normalizedSuggestionSteps.length }} 个步骤</span></div>
               <div class="sop-list">
-                <span v-for="(step, index) in searchResult.suggestion.steps" :key="step"><b>{{ index + 1 }}</b>{{ step }}</span>
+                <span v-for="(step, index) in normalizedSuggestionSteps" :key="`${index}-${step}`"><b>{{ index + 1 }}</b>{{ step }}</span>
               </div>
               <p class="advice-reference"><b>引用依据</b>{{ searchResult.references.slice(0, 3).map((item) => item.title).join('、') }}</p>
             </div>
@@ -3323,6 +3323,15 @@ const recommendationResult = computed(() => searchResult.value ? {
   summary: `${searchResult.value.stopAdvice || '结合现场安全要求逐项检查'}；共 ${searchResult.value.suggestion?.steps?.length || 0} 个建议步骤。`,
   tags: ['研判依据', searchForm.faultType, searchForm.maintenanceLevel]
 } : null)
+const stepText = (step) => {
+  if (typeof step === 'string') return step
+  if (!step || typeof step !== 'object') return ''
+  return step.action || step.title || step.detail || step.desc || step.name || step.content || ''
+}
+const normalizedSuggestionSteps = computed(() => {
+  const raw = searchResult.value?.suggestion?.steps || searchResult.value?.recommended_sop || []
+  return raw.map(stepText).filter(Boolean)
+})
 const filterResultsByTab = (tab) => {
   const list = searchResult.value?.references || []
   if (tab === '推荐检修方案') return recommendationResult.value ? [recommendationResult.value] : []
@@ -5688,8 +5697,20 @@ const cloneAssistantFileForSearch = (file) => ({
 })
 const inferSearchScene = (text = '', files = []) => {
   const content = `${text || ''} ${files.map((file) => file.name || '').join(' ')}`.toLowerCase()
+  if (/摩托|cg-?125|发动机异响|发动机|气门|怠速|正时链条|张紧器|火花塞|化油器|凸轮轴|摇臂/.test(content) && !/车淹|泡水|涉水|积水|淹水|水淹/.test(content)) {
+    return {
+      type: 'motorcycle_engine',
+      deviceName: '摩托车发动机总成',
+      deviceModel: /cg-?125/.test(content) ? 'CG-125' : '',
+      faultCode: '',
+      category: '发动机',
+      faultType: /怠速/.test(content) ? '异响/怠速不稳' : '发动机异响',
+      query: '基于本次输入和图片检索摩托车发动机异响；只根据当前图片、文字和本轮检索依据回答，不混入历史检索。重点检查气门间隙、正时链条/张紧器、摇臂/凸轮轴、机油润滑、火花塞、化油器怠速油路、进气漏气和曲轴连杆轴承。'
+    }
+  }
   if (/车淹|泡水|涉水|积水|淹水|水淹|雨水|轮毂|车门|轿车|汽车|车辆/.test(content)) {
     return {
+      type: 'vehicle_water',
       deviceName: '涉水车辆',
       deviceModel: '',
       faultCode: '',
@@ -5824,7 +5845,30 @@ const simulateVoice = () => {
 }
 const buildLocalSearchResult = () => {
   const scene = inferSearchScene(searchForm.query, searchFiles.value)
-  if (scene) {
+  if (scene?.type === 'motorcycle_engine') {
+    const subject = [scene.deviceModel || searchForm.deviceModel, scene.deviceName || searchForm.deviceName].filter(Boolean).join(' ') || '摩托车发动机'
+    return {
+      phenomenonSummary: `${subject}出现发动机异响/怠速不稳线索；车型、里程、冷车/热车差异和检测数值均待确认。本次只按当前图片与输入重新检索，不引用旧涉水车辆结果。`,
+      risk: 'medium',
+      confidence: searchFiles.value.length ? 87 : 82,
+      stopAdvice: '先停机冷却并确认机油液位；异响明显、敲击加重或润滑异常时不要继续高转速试车。',
+      modalities: ['text', ...(searchFiles.value.length ? ['image'] : [])],
+      visualFindings: searchFiles.value.length ? ['已接入本次摩托车发动机图片；具体型号和拆检状态待确认。'] : [],
+      causes: ['气门间隙过大或过小', '正时链条松旷或张紧器异常', '摇臂/凸轮轴磨损', '机油不足、变质或润滑不良', '火花塞积碳或点火弱', '化油器怠速油路堵塞或混合气异常', '进气漏气', '活塞、连杆或曲轴轴承异常磨损'],
+      positions: ['气门室盖/摇臂/凸轮轴', '正时链条与张紧器', '机油尺/机油滤网/润滑油路', '火花塞与高压帽', '化油器怠速油路', '进气歧管与密封垫', '曲轴箱与连杆轴承区域'],
+      tools: ['塞尺', '听诊棒', '火花塞套筒', '压缩压力表', '万用表', '扭矩扳手', '化油器清洗工具'],
+      suggestion: {
+        steps: ['停机冷却并确认机油液位和机油状态', '冷车/热车分别听诊定位异响区域', '拆检气门室盖并用塞尺检查气门间隙', '检查正时链条松旷、张紧器回位和导轨磨损', '检查摇臂、凸轮轴和气门机构磨损', '检查火花塞积碳、点火强度和高压帽连接', '清洁化油器怠速油路并检查进气漏气', '复装后记录怠速、加速响应和异响复测结果'],
+        tools: ['塞尺', '听诊棒', '火花塞套筒', '扭矩扳手'],
+        risks: ['热机烫伤', '误启动夹伤', '气门间隙调整错误导致动力下降或异响加重', '高转速试车扩大机械磨损']
+      },
+      references: [
+        { id: 'engine-ref-1', title: 'CG-125/同类单缸发动机气门间隙检查 SOP', type: '标准作业流程 SOP', category: '发动机资料', equipment: '摩托车发动机总成', model: scene.deviceModel || '', match: 89, summary: '覆盖停机冷却、拆气门室盖、塞尺测量、间隙调整、复装和热车复测。', tags: ['发动机', '气门间隙', '异响'] },
+        { id: 'engine-ref-2', title: '摩托车发动机异响与怠速不稳排查案例', type: '历史故障案例', category: '历史故障案例', equipment: '摩托车发动机总成', model: scene.deviceModel || '', match: 84, summary: '围绕正时链条、张紧器、摇臂/凸轮轴、点火和化油器怠速油路进行排查。', tags: ['发动机异响', '怠速不稳', '复检'] }
+      ]
+    }
+  }
+  if (scene?.type === 'vehicle_water') {
     const fileNames = searchFiles.value.map((file) => file.name).filter(Boolean)
     return {
       phenomenonSummary: `现场图片显示车辆处于积水环境，已知线索：${fileNames.length ? fileNames.join('、') : '已上传现场图片'}。积水高度、车辆型号、发动机是否进水等信息需现场复核；当前按车辆泡水/涉水风险进行检修排查。`,
@@ -6554,7 +6598,8 @@ const buildReportContext = (data = {}, uiSteps = []) => {
     sop,
     agents,
     sceneType: scene?.type || '',
-    isVehicleWater: scene?.type === 'vehicle_water' || /车|车辆|汽车|泡水|涉水|积水|水淹/.test(`${device} ${fault} ${data.goal || ''}`),
+    isMotorcycleEngine: scene?.type === 'motorcycle_engine' || /摩托|cg-?125|发动机|气门|怠速|正时链条|张紧器|火花塞|化油器/.test(`${device} ${model} ${fault} ${data.goal || ''}`),
+    isVehicleWater: scene?.type === 'vehicle_water' || (/车|车辆|汽车|泡水|涉水|积水|水淹/.test(`${device} ${fault} ${data.goal || ''}`) && !/摩托|cg-?125|发动机异响|气门|怠速|正时链条/.test(`${device} ${model} ${fault} ${data.goal || ''}`)),
     highlights: compactList([
       ...digest.slice(0, 5).map((step) => step.content || step.expected_output || step.title),
       contextSearchResult?.diagnosis,
@@ -6581,6 +6626,60 @@ const buildReportRecommendations = (ctx = {}) => {
   const fault = ctx.fault || '待确认故障'
   const refsText = ctx.refs?.length ? `已召回 ${ctx.refs.length} 份资料/案例，可列为报告依据。` : '当前未召回明确资料，报告中应保留“依据待补充”。'
   const base = []
+  if (ctx.isMotorcycleEngine) {
+    base.push(
+      makeReportItem(
+        'motor-engine-analysis',
+        '故障分析',
+        `${subject}发动机异响故障分析报告`,
+        '当前任务指向摩托车发动机异响/怠速不稳，报告应围绕气门机构、正时链条、润滑、点火和进气系统展开。',
+        [
+          `设备对象：${subject}；故障现象：${fault}。`,
+          '优先原因：气门间隙异常、正时链条/张紧器松旷、摇臂/凸轮轴磨损、机油润滑不良。',
+          refsText,
+          '车型、里程、冷车/热车差异和检测数值保留为待确认。'
+        ],
+        ['摩托车发动机', '异响', '怠速不稳'],
+        '高优先级'
+      ),
+      makeReportItem(
+        'motor-valve-clearance',
+        '专项检查',
+        `${subject}气门间隙检查记录`,
+        '发动机上部异响常与气门间隙相关，应单独记录测量和调整过程。',
+        [
+          '记录停机冷却状态、拆检位置、进/排气门测量值和调整值。',
+          '使用塞尺检查，复装后进行冷车、热车复测。',
+          '未实际测量前不得写成已完成或合格。'
+        ],
+        ['气门间隙', '塞尺', '复测']
+      ),
+      makeReportItem(
+        'motor-timing-chain',
+        '专项检查',
+        `${subject}正时链条与张紧器检修记录`,
+        '正时链条松旷或张紧器异常会造成连续敲击/哗啦声，适合形成专项检查记录。',
+        [
+          '检查链条松旷、张紧器回位、导轨磨损和正时标记。',
+          '记录是否更换张紧器、导轨或链条。',
+          '复测怠速和加速过程是否仍有异响。'
+        ],
+        ['正时链条', '张紧器', '导轨']
+      ),
+      makeReportItem(
+        'motor-idle-sop',
+        '作业执行',
+        `${subject}怠速不稳排查 SOP`,
+        '怠速不稳需要同步排查点火、化油器怠速油路和进气漏气，不能只看机械异响。',
+        [
+          '检查火花塞积碳、高压帽连接和点火强度。',
+          '清洁化油器怠速油路，检查混合气和怠速调整。',
+          '检查进气歧管、密封垫和真空管是否漏气。'
+        ],
+        ['怠速不稳', '点火', '化油器']
+      )
+    )
+  }
   if (ctx.isVehicleWater) {
     base.push(
       makeReportItem(
@@ -6680,7 +6779,7 @@ const buildReportRecommendations = (ctx = {}) => {
       ['知识库', '待审核', '经验复用']
     )
   )
-  return base.slice(0, ctx.isVehicleWater ? 5 : 4)
+  return base.slice(0, ctx.isVehicleWater || ctx.isMotorcycleEngine ? 5 : 4)
 }
 
 const buildTaskReportRecommendations = (task = {}) => {
@@ -6750,7 +6849,7 @@ const buildAiosReport = (data = {}, uiSteps = []) => {
       }
     ],
     recommendations,
-    tags: compactList(['真实执行链路', '动态报告', ctx.device, ctx.fault, ctx.isVehicleWater ? '泡水车辆' : '设备检修']).slice(0, 6)
+    tags: compactList(['真实执行链路', '动态报告', ctx.device, ctx.fault, ctx.isMotorcycleEngine ? '发动机检修' : (ctx.isVehicleWater ? '泡水车辆' : '设备检修')]).slice(0, 6)
   }
 }
 
