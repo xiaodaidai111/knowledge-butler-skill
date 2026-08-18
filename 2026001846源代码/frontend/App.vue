@@ -6222,6 +6222,37 @@ const createRunContextSnapshot = (prompt = '', attachments = []) => {
   }
 }
 
+const AGENT_REPLY_FALLBACKS = {
+  tiangong: '已收到本次任务。我会按当前输入和本轮上传资料处理，未确认的设备型号、检测值和现场状态会保留为待确认。',
+  guanwei: '已收到本次检索请求。我会优先使用当前输入和本轮上传资料检索知识库，不套用上一轮案例。',
+  zhiju: '已收到本次作业编排请求。我会围绕当前设备、故障现象和已确认资料整理可执行步骤。',
+  bowen: '已收到本次知识整理请求。我会基于当前资料生成可审核的知识候选，缺失信息保持待补充。',
+  heming: '已收到本次协作请求。我会根据当前任务内容选择合适联系人和协作动作。',
+  mingjian: '已收到本次核查请求。我会按当前任务依据、检测记录和复检要求给出核查意见。'
+}
+
+const agentFallbackReply = (agentId = '', agentName = '智能体') => AGENT_REPLY_FALLBACKS[agentId] || `${agentName}已收到本次问题。我会基于当前输入和本轮资料给出建议，未确认信息保持待确认。`
+
+const looksLikeBrokenAgentText = (value = '') => {
+  const text = String(value || '').trim()
+  if (!text) return true
+  const brokenCount = (text.match(/[�锛銆鐨妫绱濈€]/g) || []).length
+  const controlCount = (text.match(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g) || []).length
+  const symbolCount = (text.match(/[{}[\]<>|`~^\\]/g) || []).length
+  const exposesToolTrace = /\[UI_PLAN\]|<\/?tool|tool_calls?|arguments?|undefined|null|NaN/i.test(text)
+  return brokenCount >= 3 || controlCount > 0 || (exposesToolTrace && symbolCount > 6)
+}
+
+const cleanAgentReplyText = (value, agentId = '', agentName = '智能体') => {
+  let text = String(value || '').replace(/\[UI_PLAN\][\s\S]*?\[\/UI_PLAN\]/g, '').trim()
+  text = text
+    .replace(/```(?:json)?[\s\S]*?```/g, '')
+    .replace(/^[\s:：,，;；。]+|[\s:：,，;；。]+$/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  return looksLikeBrokenAgentText(text) ? agentFallbackReply(agentId, agentName) : text
+}
+
 const sendOperatorPrompt = async (prompt) => {
   const value = String(prompt || '').trim()
   if (!value && !assistantFiles.value.length) return
@@ -6264,7 +6295,14 @@ const sendOperatorPrompt = async (prompt) => {
         Object.assign(file, saved, { raw: file.raw, localId: file.localId, status: '分析完成' })
       }
       const response = await yixiuApi.assistantChat({ message: value, fileIds: assistantFiles.value.map((file) => file.id).filter(Boolean), agent: operatorProfile.value.name, page: sourcePage })
-      operatorMessages.value.push(operatorMessage({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: `${response.response}\n引用：${(response.references || []).join('、')}` }, requestAgentId))
+      const replyText = cleanAgentReplyText(response.response, requestAgentId, operatorProfile.value.name)
+      const references = (response.references || []).filter(Boolean)
+      operatorMessages.value.push(operatorMessage({
+        id: `assistant-${Date.now()}`,
+        page: sourcePage,
+        role: 'assistant',
+        text: references.length ? `${replyText}\n引用：${references.join('、')}` : replyText
+      }, requestAgentId))
       // 附件缩略图仍需要显示在历史气泡中，稍后由页面退出统一释放 Blob URL。
       assistantFiles.value = []
       return toast('已完成图文联合分析')
@@ -6385,7 +6423,7 @@ const sendOperatorPrompt = async (prompt) => {
       }
       
       // 去掉 [UI_PLAN] 标记后的纯文本回复
-      const cleanReply = reply.replace(/\[UI_PLAN\][\s\S]*?\[\/UI_PLAN\]/, '').trim()
+      const cleanReply = cleanAgentReplyText(reply, 'tiangong', '天工')
       
       const uiCount = Array.isArray(uiPlan) && uiPlan.length ? uiPlan.filter((s) => s.action !== 'done').length : 0
       // 合并工具调用步骤和 UI 操作步骤
@@ -6423,7 +6461,7 @@ const sendOperatorPrompt = async (prompt) => {
       return
     }
     const response = await yixiuApi.assistantChat({ message: value, fileIds: [], agent: operatorProfile.value.name, page: sourcePage })
-    operatorMessages.value.push(operatorMessage({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: response.response }, requestAgentId))
+    operatorMessages.value.push(operatorMessage({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: cleanAgentReplyText(response.response, requestAgentId, operatorProfile.value.name) }, requestAgentId))
     toast(`${operatorProfile.value.name}已结合当前数据给出建议`)
   } catch (error) {
     if (operatorProfile.value.id === 'tiangong') {
@@ -7505,12 +7543,12 @@ async function sendRemotePrompt(value, targetAgentId = '') {
         page: sourcePage,
         agentId,
         role: 'assistant',
-        text: `${agentName}已接收天工分派：${result.summary || '已完成本次协作处理。'}`
+        text: `${agentName}已接收天工分派：${cleanAgentReplyText(result.summary || '已完成本次协作处理。', agentId, agentName)}`
       })
       return
     }
     const response = await yixiuApi.assistantChat({ message: value, fileIds: [], agent: agentProfile.name, page: sourcePage })
-    operatorMessages.value.push(operatorMessage({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: response.response }, agentId))
+    operatorMessages.value.push(operatorMessage({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: cleanAgentReplyText(response.response, agentId, agentProfile.name) }, agentId))
   } catch (error) {
     operatorMessages.value.push(operatorMessage({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text: `（${agentProfile.name || '智能体'}暂未响应：${error.message || ''}）` }, agentId))
   }
@@ -14476,6 +14514,114 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
   .search-focus-shell .search-prompt-templates,
   .search-focus-shell .search-collapse-summary {
     grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 1380px), (max-height: 820px) {
+  .app-shell {
+    grid-template-columns: 196px minmax(0, 1fr) !important;
+  }
+  .app-shell.collapsed {
+    grid-template-columns: 70px minmax(0, 1fr) !important;
+  }
+  .side-nav {
+    gap: 12px !important;
+    padding: 12px 10px !important;
+  }
+  .brand {
+    width: 150px !important;
+    height: 58px !important;
+  }
+  .side-nav nav button {
+    min-height: 38px !important;
+    padding: 0 10px !important;
+  }
+  .topbar {
+    height: 66px !important;
+    grid-template-columns: minmax(150px, 1fr) minmax(230px, 320px) 34px auto auto !important;
+    gap: 9px !important;
+    padding: 0 12px !important;
+  }
+  .topbar .page-title-block {
+    min-height: 54px !important;
+    padding: 8px 14px !important;
+  }
+  .topbar h1 {
+    font-size: 17px !important;
+  }
+  .topbar .breadcrumb {
+    font-size: 11px !important;
+  }
+  .topbar .work-strip {
+    display: none !important;
+  }
+  .content-shell {
+    height: calc(100vh - 66px) !important;
+    grid-template-columns: minmax(0, 1fr) 8px minmax(286px, 300px) !important;
+  }
+  .page-scroll {
+    padding: 14px !important;
+  }
+  .operator-panel {
+    min-width: 286px !important;
+    padding: 14px 12px !important;
+    gap: 10px !important;
+  }
+  .operator-avatar {
+    width: 68px !important;
+    height: 68px !important;
+  }
+  .chat-thread {
+    gap: 10px !important;
+  }
+  .bubble {
+    padding: 10px 12px !important;
+    font-size: 13px !important;
+  }
+  .ask-box {
+    min-height: 50px !important;
+  }
+  .home-news-carousel {
+    grid-column: span 7 !important;
+  }
+  .home-schedule-panel {
+    grid-column: span 5 !important;
+  }
+  .news-carousel-stage,
+  .news-image-link,
+  .news-image-link img {
+    min-height: 180px !important;
+  }
+  .home-task-panel .home-task-list {
+    max-height: 360px !important;
+  }
+  .dashboard-charts .chart-tile {
+    min-height: 188px !important;
+  }
+  .dashboard-charts .chart-tile .chart-canvas {
+    height: 184px !important;
+  }
+  .kb-template-modal,
+  .kb-template-lib-modal {
+    width: min(880px, calc(100vw - 44px)) !important;
+    max-height: calc(100vh - 52px) !important;
+    overflow: auto !important;
+  }
+  .kb-template-grid {
+    grid-template-columns: repeat(2, minmax(260px, 1fr)) !important;
+  }
+  .search-focus-shell {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .search-focus-shell .page-scroll {
+    padding: 14px !important;
+  }
+  .search-focus-shell .search-fusion-body {
+    grid-template-columns: minmax(520px, 1.1fr) minmax(330px, .9fr) !important;
+    gap: 12px !important;
+  }
+  .search-focus-shell .search-context-board {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
   }
 }
 
