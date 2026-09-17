@@ -19,7 +19,10 @@ let chart = null
 let resizeObserver = null
 
 const render = () => {
-  if (!chart) return
+  // 只守 chart 不够：父组件的 option 在数据为空或组件卸载途中可能瞬间算成 null，
+  // 此时 setOption(null, true) 会在 echarts 内部 legacyCopyOverallTrans 里抛
+  // "Cannot read properties of null (reading '0')"。这里把 option 一起守掉。
+  if (!chart || !props.option || typeof props.option !== 'object') return
   chart.setOption(props.option, true)
 }
 
@@ -37,7 +40,15 @@ onMounted(async () => {
     })
   }
   // 容器尺寸变化时自适应（面板显隐、侧栏折叠等场景）
-  resizeObserver = new ResizeObserver(() => chart && chart.resize())
+  // 尺寸为 0 时不能 resize：面板切走/hover 折叠的瞬间，echarts 会在
+  // legacyCopyOverallTrans 里拿到 null 的坐标系变换矩阵并抛
+  // "Cannot read properties of null (reading '0')"。
+  resizeObserver = new ResizeObserver(() => {
+    const node = el.value
+    if (!chart || !node?.isConnected) return
+    if (node.clientWidth === 0 || node.clientHeight === 0) return
+    chart.resize()
+  })
   resizeObserver.observe(el.value)
 })
 

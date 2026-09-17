@@ -1,7 +1,0 @@
-{
-  "navigationStyle": "custom",
-  "disableScroll": true,
-  "usingComponents": {
-    "file-explorer": "../../src/components/FileExplorer/FileExplorer"
-  }
-}

@@ -1,0 +1,98 @@
+{
+  "info": {
+    "name": "慧识外卖 API",
+    "_postman_id": "8b1f9b52-5b55-4ab4-8a6b-4c4a0a4c2c22",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/health",
+          "host": ["{{base_url}}"],
+          "path": ["api", "health"]
+        }
+      }
+    },
+    {
+      "name": "Diagnose",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/diagnose",
+          "host": ["{{base_url}}"],
+          "path": ["api", "diagnose"]
+        }
+      }
+    },
+    {
+      "name": "Chat",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Api-Key", "value": "{{api_key}}" },
+          { "key": "X-Base-Url", "value": "{{base_url_header}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"评估一下海风便当屋\",\n  \"history\": []\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/chat",
+          "host": ["{{base_url}}"],
+          "path": ["api", "chat"]
+        }
+      }
+    },
+    {
+      "name": "Restaurant Score",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"store_05\",\n  \"name\": \"海风便当屋\",\n  \"category\": \"日式便当\",\n  \"rating\": 4.1,\n  \"monthly_orders\": 640,\n  \"price_range\": \"¥28-52\",\n  \"last_inspection_score\": 76,\n  \"violations\": 2,\n  \"complaint_count\": 7,\n  \"total_reviews\": 410,\n  \"negative_reviews\": 74,\n  \"packaging_flags\": [\"密封不严\", \"餐具异味\"]\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/restaurant/score",
+          "host": ["{{base_url}}"],
+          "path": ["api", "restaurant", "score"]
+        }
+      }
+    },
+    {
+      "name": "Image Analyze",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Api-Key", "value": "{{api_key}}" },
+          { "key": "X-Base-Url", "value": "{{base_url_header}}" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "image", "type": "file", "src": "" },
+            { "key": "note", "type": "text", "value": "这是热食，汤汁比较多" }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/api/image/analyze",
+          "host": ["{{base_url}}"],
+          "path": ["api", "image", "analyze"]
+        }
+      }
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://127.0.0.1:5000" },
+    { "key": "api_key", "value": "" },
+    { "key": "base_url_header", "value": "" }
+  ]
+}

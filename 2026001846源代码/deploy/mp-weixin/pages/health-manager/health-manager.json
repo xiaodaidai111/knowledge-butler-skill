@@ -1,6 +1,0 @@
-{
-  "navigationStyle": "custom",
-  "usingComponents": {
-    "health-manager-fab": "../../src/components/HealthManagerFab/HealthManagerFab"
-  }
-}

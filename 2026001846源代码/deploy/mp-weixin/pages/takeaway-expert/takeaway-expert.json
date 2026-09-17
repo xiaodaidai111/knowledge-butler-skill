@@ -1,6 +1,0 @@
-{
-  "navigationStyle": "custom",
-  "usingComponents": {
-    "voice-output-button": "../../src/components/VoiceOutputButton"
-  }
-}

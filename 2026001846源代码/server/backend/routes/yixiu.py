@@ -44,54 +44,58 @@ KNOWLEDGE_PATH = DATA_DIR / "maintenance_knowledge_base.json"
 
 AGENTS = [
     {
-        "id": "tiangong", "name": "天工", "role": "综合智能中枢",
-        "duty": "理解用户目标，统筹观微、执矩、博闻、和鸣、明鉴完成跨模块检修任务。",
+        "id": "tiangong", "name": "天工", "role": "Agent Router",
+        "duty": "理解用户目标，推荐上下文、Skill、Agent 和模型，并展示任务执行链路。",
         "status": "online", "ip": "10.10.1.10", "avatar": "/static/agents/tiangong.png",
-        "capabilities": ["任务规划", "跨智能体调度", "长任务执行", "风险优先级判断", "闭环报告"],
+        "capabilities": ["任务规划", "跨智能体调度", "模型路由", "上下文推荐", "执行链路追踪"],
     },
     {
-        "id": "guanwei", "name": "观微", "role": "智能检索器灵",
-        "duty": "联合分析故障现象、设备型号、故障代码、现场图片和维修文档，召回手册、案例与 SOP。",
+        "id": "guanwei", "name": "观微", "role": "Context Engine",
+        "duty": "为任务自动组装需求、代码、文档、历史经验和相关 Skill。",
         "status": "online", "ip": "10.10.1.21", "avatar": "/static/agents/guanwei.png",
-        "capabilities": ["多模态检索", "故障现象归纳", "相似案例召回", "引用依据整理"],
+        "capabilities": ["Context Pack 生成", "需求召回", "代码线索匹配", "Memory 召回", "Skill 推荐"],
     },
     {
-        "id": "zhiju", "name": "执矩", "role": "检修作业器灵",
-        "duty": "按设备类型、风险等级和检修等级编排标准作业步骤，推动工单流转。",
+        "id": "zhiju", "name": "执矩", "role": "Task Execution",
+        "duty": "管理任务、分派成员和 Agent，并记录执行过程、产物与关键决策。",
         "status": "online", "ip": "10.10.1.22", "avatar": "/static/agents/zhiju.png",
-        "capabilities": ["SOP生成", "任务步骤编排", "安全确认", "工单状态推进"],
+        "capabilities": ["执行流生成", "任务步骤编排", "Agent 分派", "过程记录", "状态推进"],
     },
     {
-        "id": "bowen", "name": "博闻", "role": "知识管理器灵",
-        "duty": "整理技术资料、维护知识网络、沉淀历史检修案例并管理版本与审核流程。",
+        "id": "bowen", "name": "博闻", "role": "Team Memory",
+        "duty": "保存团队决策、问题、尝试、根因、方案、适用条件和验证记录。",
         "status": "online", "ip": "10.10.1.23", "avatar": "/static/agents/bowen.png",
-        "capabilities": ["知识沉淀", "文件解析", "图谱关联", "版本管理", "资料审核"],
+        "capabilities": ["Memory Unit", "文件解析", "图谱关联", "版本管理", "人工审核"],
     },
     {
-        "id": "heming", "name": "和鸣", "role": "协作调度器灵",
-        "duty": "管理联系人、任务会话、专家支援和现场协作记录，生成沟通摘要。",
+        "id": "heming", "name": "和鸣", "role": "Memory Evolution",
+        "duty": "从任务记录、Bug、PR 和聊天中提炼可复用经验，生成 Memory 与 Skill 候选。",
         "status": "online", "ip": "10.10.1.24", "avatar": "/static/agents/heming.png",
-        "capabilities": ["联系人检索", "协作消息", "任务群聊", "会议纪要", "支援请求"],
+        "capabilities": ["经验抽取", "重复问题识别", "Skill 候选生成", "人工审核流", "协作摘要"],
     },
     {
-        "id": "mingjian", "name": "明鉴", "role": "复检核查器灵",
-        "duty": "核验引用依据、作业合规、安全风险、复检数据和报告完整性。",
+        "id": "mingjian", "name": "明鉴", "role": "Eval Lab",
+        "duty": "验证 Skill 是否有效，比较版本质量、成本、成功率和回归表现。",
         "status": "online", "ip": "10.10.1.25", "avatar": "/static/agents/mingjian.png",
-        "capabilities": ["复检评估", "安全核查", "质量评分", "返工建议", "验收归档"],
+        "capabilities": ["Skill 回归", "质量评分", "成本对比", "成功率统计", "验收归档"],
     },
 ]
 
 MODULES = [
-    {"key": "multimodal_search", "title": "多模态知识检索", "desc": "支持文本、故障图片、维修文档和设备型号联合检索。", "agent": "观微"},
-    {"key": "standard_work", "title": "标准作业闭环", "desc": "覆盖任务创建、逐步作业、合规确认、复检和报告归档。", "agent": "执矩"},
-    {"key": "knowledge_graph", "title": "知识沉淀与更新", "desc": "支持案例上传、人工修正、审核入库与知识图谱更新。", "agent": "博闻"},
-    {"key": "quality_audit", "title": "安全与质量核查", "desc": "复核引用、风险提醒、操作顺序、数据记录和报告字段。", "agent": "明鉴"},
+    {"key": "context_engine", "title": "Context Engine 上下文引擎", "desc": "为任务自动组装需求、代码、文档、历史经验和相关 Skill。", "agent": "观微"},
+    {"key": "task_execution", "title": "Task Execution 任务执行中心", "desc": "管理任务、分派人和 Agent，并记录执行过程。", "agent": "执矩"},
+    {"key": "team_memory", "title": "Team Memory 团队记忆库", "desc": "保存团队决策、问题、尝试、根因、方案、适用条件和验证记录。", "agent": "博闻"},
+    {"key": "memory_evolution", "title": "Memory Evolution 记忆演化引擎", "desc": "从任务记录、Bug、PR、聊天中提炼可复用经验。", "agent": "和鸣"},
+    {"key": "eval_lab", "title": "Eval Lab 评测中心", "desc": "验证 Skill 是否有效，比较版本质量、成本和成功率。", "agent": "明鉴"},
+    {"key": "issue_to_skill", "title": "Issue to Skill 问题演化系统", "desc": "把 Bug、失败任务、重复问题转成 Memory 和 Skill。", "agent": "和鸣"},
+    {"key": "agent_router", "title": "Agent / Router 操作面板", "desc": "推荐上下文、Skill、Agent、模型，并展示执行链路。", "agent": "天工"},
+    {"key": "team_intelligence", "title": "Team Intelligence 团队智能分析", "desc": "统计 Skill 覆盖率、重复劳动率、AI 成本和团队能力沉淀。", "agent": "天工"},
 ]
 
 CONTACTS = [
-    {"id": 1, "name": "聪明的一修", "position": "检修工程师", "department": "动力设备检修一组", "specialty": "发动机 / 电气", "phone": "138-0000-1024", "status": "在线", "currentTask": "ZK-320 过热检修", "devices": ["CG-125", "ZK-320"], "workload": 72},
-    {"id": 2, "name": "王铭", "position": "复检人员", "department": "质量复检组", "specialty": "复检评估", "phone": "138-0000-2048", "status": "在线", "currentTask": "点火系统复核", "devices": ["DLI-001"], "workload": 48},
-    {"id": 3, "name": "赵宁", "position": "安全负责人", "department": "安全管理部", "specialty": "高风险作业", "phone": "138-0000-4096", "status": "忙碌", "currentTask": "高风险作业确认", "devices": ["配电柜", "液压系统"], "workload": 83},
+    {"id": 1, "name": "聪明的一修", "position": "协作负责人", "department": "AI 原生项目协作组", "specialty": "Context / Memory", "phone": "138-0000-1024", "status": "在线", "currentTask": "支付回调修复", "devices": ["支付服务", "权限模块"], "workload": 72},
+    {"id": 2, "name": "王铭", "position": "评测负责人", "department": "Eval Lab", "specialty": "Skill 回归", "phone": "138-0000-2048", "status": "在线", "currentTask": "日报 Skill 回归", "devices": ["日报 Skill"], "workload": 48},
+    {"id": 3, "name": "赵宁", "position": "Memory 审核人", "department": "Team Memory", "specialty": "问题资产化", "phone": "138-0000-4096", "status": "忙碌", "currentTask": "重复问题审核", "devices": ["登录链路", "支付服务"], "workload": 83},
 ]
 
 
@@ -110,35 +114,35 @@ _BUILTIN_TEMPLATES = [
     },
     {
         "id": "tpl-sop",
-        "name": "检修作业 SOP",
+        "name": "任务执行 Skill",
         "icon": "📋",
-        "category": "检修流程",
-        "description": "标准作业流程模板，适用于设备检修、维护作业",
-        "skeleton": {"content": "# 检修作业 SOP\n\n## 一、基本信息\n- 设备名称：\n- 设备型号：\n- 作业类型：\n- 作业地点：\n- 负责人：\n\n## 二、安全确认\n- [ ] 停机断电\n- [ ] 验电挂牌\n- [ ] 穿戴劳保用品\n- [ ] 工具检查合格\n\n## 三、作业步骤\n1. 外观检查\n2. 参数测量\n3. 故障定位\n4. 维修处置\n5. 更换部件\n\n## 四、复测验收\n- [ ] 空载试运行\n- [ ] 负载试运行\n- [ ] 参数记录\n- [ ] 清理现场\n\n## 五、备注\n"}
+        "category": "Skill 工作流",
+        "description": "标准任务执行流程模板，适用于人机协作、Agent 分派和过程记录",
+        "skeleton": {"content": "# 任务执行 Skill\n\n## 一、基本信息\n- 项目：\n- 模块 / 技术栈：\n- 任务类型：\n- 负责人：\n- 参与 Agent：\n\n## 二、上下文要求\n- [ ] 需求说明\n- [ ] 相关代码\n- [ ] 历史 Memory\n- [ ] Eval 标准\n\n## 三、执行步骤\n1. 生成 Context Pack\n2. 分析影响范围\n3. 制定修改方案\n4. 执行任务\n5. 运行 Eval\n\n## 四、沉淀要求\n- [ ] 记录根因\n- [ ] 记录方案\n- [ ] 记录验证结果\n- [ ] 提交 Memory 审核\n\n## 五、备注\n"}
     },
     {
         "id": "tpl-fault",
-        "name": "故障排查报告",
+        "name": "问题复盘 Memory",
         "icon": "🔍",
-        "category": "故障分析",
-        "description": "故障现象、排查过程、处置结论完整记录",
-        "skeleton": {"content": "# 故障排查报告\n\n## 一、故障现象\n- 设备：\n- 故障描述：\n- 发生时间：\n- 影响范围：\n\n## 二、排查过程\n### 初步检查\n- 外观检查：\n- 参数检测：\n\n### 深入分析\n- 可能原因1：\n- 可能原因2：\n- 排查方法：\n\n## 三、处置措施\n- 最终原因：\n- 处置方案：\n- 更换部件：\n\n## 四、预防建议\n"}
+        "category": "Team Memory",
+        "description": "问题、尝试、根因、方案、适用条件和验证记录",
+        "skeleton": {"content": "# 问题复盘 Memory\n\n## 一、问题背景\n- 项目：\n- 模块：\n- 任务 / Issue：\n- 影响范围：\n\n## 二、尝试过程\n### 初步判断\n- 假设：\n- 证据：\n\n### 深入分析\n- 根因候选1：\n- 根因候选2：\n- 排查方法：\n\n## 三、最终方案\n- 最终根因：\n- 解决方案：\n- 改动范围：\n\n## 四、适用条件与验证\n- 适用条件：\n- 不适用边界：\n- Eval 结果：\n"}
     },
     {
         "id": "tpl-meeting",
-        "name": "检修会议纪要",
+        "name": "协作任务纪要",
         "icon": "📒",
         "category": "协作沟通",
-        "description": "班组例会、技术交流、故障复盘纪要",
-        "skeleton": {"content": "# 检修会议纪要\n\n## 会议信息\n- 会议主题：\n- 会议时间：\n- 参会人员：\n- 主持人：\n\n## 议题与讨论\n### 议题一：\n- 讨论内容：\n- 结论：\n\n### 议题二：\n- 讨论内容：\n- 结论：\n\n## 行动计划\n| 事项 | 责任人 | 截止时间 | 状态 |\n|------|--------|----------|------|\n|  |  |  |  |\n\n## 备注\n"}
+        "description": "任务同步、技术讨论、决策沉淀和后续行动纪要",
+        "skeleton": {"content": "# 协作任务纪要\n\n## 会议信息\n- 会议主题：\n- 会议时间：\n- 参会人员：\n- 主持人：\n\n## 议题与决策\n### 议题一：\n- 讨论内容：\n- 决策：\n\n### 议题二：\n- 讨论内容：\n- 决策：\n\n## 行动计划\n| 事项 | 责任人 | 截止时间 | 状态 |\n|------|--------|----------|------|\n|  |  |  |  |\n\n## 可沉淀 Memory\n"}
     },
     {
         "id": "tpl-safety",
-        "name": "安全操作规范",
+        "name": "Eval 回归规范",
         "icon": "🛡️",
-        "category": "安全规范",
-        "description": "高风险作业安全规程与防护要求",
-        "skeleton": {"content": "# 安全操作规范\n\n## 一、适用范围\n本规范适用于 作业。\n\n## 二、人员要求\n- 作业人员必须持有 资格证\n- 熟悉设备结构与操作规程\n- 掌握应急处置方法\n\n## 三、防护用品\n- [ ] 安全帽\n- [ ] 绝缘手套\n- [ ] 护目镜\n- [ ] 防滑鞋\n- [ ] 安全带（高空作业）\n\n## 四、安全流程\n1. 开具工作票\n2. 现场交底\n3. 落实防护措施\n4. 实施作业\n5. 验收确认\n\n## 五、应急处置\n- 触电急救：\n- 火灾扑救：\n- 设备故障：\n\n## 六、注意事项\n"}
+        "category": "Eval Lab",
+        "description": "Skill 回归评测、质量门禁与人工审核规范",
+        "skeleton": {"content": "# Eval 回归规范\n\n## 一、适用范围\n本规范适用于 Skill、Agent 工作流和关键任务方案。\n\n## 二、评测要求\n- 明确输入样例\n- 明确期望输出\n- 明确评分 Rubric\n- 记录成本、耗时和成功率\n\n## 三、评测流程\n1. 准备样例集\n2. 运行当前版本\n3. 运行候选版本\n4. 对比质量与成本\n5. 记录人工审核结论\n\n## 四、发布门禁\n- [ ] 成功率达标\n- [ ] 成本可接受\n- [ ] 失败样例已解释\n- [ ] Memory 已沉淀\n\n## 五、备注\n"}
     }
 ]
 
@@ -371,6 +375,146 @@ def _db() -> sqlite3.Connection:
           created_at TEXT,
           updated_at TEXT
         );
+        CREATE TABLE IF NOT EXISTS team_projects (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          repo_url TEXT DEFAULT '',
+          owner TEXT DEFAULT '',
+          status TEXT DEFAULT 'active',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS team_context_packs (
+          id TEXT PRIMARY KEY,
+          task_id TEXT DEFAULT '',
+          title TEXT NOT NULL,
+          objective TEXT DEFAULT '',
+          source_refs_json TEXT DEFAULT '[]',
+          code_refs_json TEXT DEFAULT '[]',
+          memory_refs_json TEXT DEFAULT '[]',
+          skill_refs_json TEXT DEFAULT '[]',
+          risk_json TEXT DEFAULT '{}',
+          status TEXT DEFAULT 'draft',
+          created_by TEXT DEFAULT 'Context Engine',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS team_memories (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          memory_type TEXT DEFAULT 'Memory Unit',
+          problem TEXT DEFAULT '',
+          attempts_json TEXT DEFAULT '[]',
+          root_cause TEXT DEFAULT '',
+          solution TEXT DEFAULT '',
+          applies_when TEXT DEFAULT '',
+          validation_json TEXT DEFAULT '{}',
+          source_refs_json TEXT DEFAULT '[]',
+          tags_json TEXT DEFAULT '[]',
+          status TEXT DEFAULT 'pending_review',
+          reviewer TEXT DEFAULT '',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS team_skills (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          version TEXT DEFAULT 'v0.1',
+          purpose TEXT DEFAULT '',
+          trigger_rules TEXT DEFAULT '',
+          workflow_json TEXT DEFAULT '{}',
+          required_context_json TEXT DEFAULT '[]',
+          metrics_json TEXT DEFAULT '{}',
+          status TEXT DEFAULT 'draft',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS team_eval_cases (
+          id TEXT PRIMARY KEY,
+          skill_id TEXT DEFAULT '',
+          name TEXT NOT NULL,
+          input_json TEXT DEFAULT '{}',
+          expected_json TEXT DEFAULT '{}',
+          rubric_json TEXT DEFAULT '{}',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS team_eval_runs (
+          id TEXT PRIMARY KEY,
+          eval_case_id TEXT DEFAULT '',
+          skill_id TEXT DEFAULT '',
+          skill_version TEXT DEFAULT '',
+          score REAL DEFAULT 0,
+          success INTEGER DEFAULT 0,
+          cost_json TEXT DEFAULT '{}',
+          result_json TEXT DEFAULT '{}',
+          created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS team_issue_skill_links (
+          id TEXT PRIMARY KEY,
+          issue_key TEXT NOT NULL,
+          task_id TEXT DEFAULT '',
+          repeat_count INTEGER DEFAULT 1,
+          memory_id TEXT DEFAULT '',
+          skill_id TEXT DEFAULT '',
+          status TEXT DEFAULT 'candidate',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS team_model_routing_logs (
+          id TEXT PRIMARY KEY,
+          task_id TEXT DEFAULT '',
+          agent_id TEXT DEFAULT '',
+          model_name TEXT DEFAULT '',
+          reason TEXT DEFAULT '',
+          context_pack_id TEXT DEFAULT '',
+          cost_json TEXT DEFAULT '{}',
+          created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS external_ai_sources (
+          id TEXT PRIMARY KEY,
+          provider TEXT NOT NULL,
+          name TEXT NOT NULL,
+          auth_type TEXT DEFAULT 'mcp_token',
+          workspace_name TEXT DEFAULT '',
+          endpoint TEXT DEFAULT '',
+          scopes_json TEXT DEFAULT '[]',
+          status TEXT DEFAULT 'enabled',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS external_ai_imports (
+          id TEXT PRIMARY KEY,
+          source_id TEXT DEFAULT '',
+          provider TEXT DEFAULT '',
+          project_id TEXT DEFAULT '',
+          project_name TEXT DEFAULT '',
+          title TEXT NOT NULL,
+          raw_content TEXT DEFAULT '',
+          content_type TEXT DEFAULT 'summary',
+          parse_status TEXT DEFAULT 'pending',
+          summary TEXT DEFAULT '',
+          metadata_json TEXT DEFAULT '{}',
+          imported_by TEXT DEFAULT 'AI Import Gateway',
+          imported_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS external_ai_artifacts (
+          id TEXT PRIMARY KEY,
+          import_id TEXT NOT NULL,
+          artifact_type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          content TEXT DEFAULT '',
+          confidence INTEGER DEFAULT 70,
+          review_status TEXT DEFAULT 'pending_review',
+          target_ref TEXT DEFAULT '',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_external_ai_imports_project
+          ON external_ai_imports(project_id, provider, imported_at);
+        CREATE INDEX IF NOT EXISTS idx_external_ai_artifacts_import
+          ON external_ai_artifacts(import_id, artifact_type, review_status);
         """
     )
     # 预置模板数据
@@ -379,7 +523,22 @@ def _db() -> sqlite3.Connection:
     _seed_agent_configs(conn)
     _seed_agent_teams(conn)
     _seed_aios_channels(conn)
+    _ensure_skill_columns(conn)
     return conn
+
+
+def _ensure_skill_columns(conn: sqlite3.Connection) -> None:
+    """team_skills 原本只有 purpose/workflow_json 几个通用列。
+
+    Skill Factory 需要的是「能力包」：结构化字段、生命周期、版本、Eval 记录。
+    与其再造一张 yixiu_skills 让项目里出现两个 skill 表，不如给已有表加一个
+    payload_json 存完整对象，name/version/status/updated_at 仍落成真实列方便
+    排查。CREATE TABLE IF NOT EXISTS 不会给老库加列，所以这里补一次 ALTER。
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(team_skills)")}
+    if "payload_json" not in columns:
+        conn.execute("ALTER TABLE team_skills ADD COLUMN payload_json TEXT DEFAULT '{}'")
+        conn.commit()
 
 
 def _json(value, default):
@@ -387,6 +546,244 @@ def _json(value, default):
         return json.loads(value) if value else default
     except (TypeError, ValueError):
         return default
+
+
+def _split_lines(text: str) -> list[str]:
+    return [line.strip(" \t-•*#") for line in str(text or "").splitlines() if line.strip(" \t-•*#")]
+
+
+def _pick_lines(lines: list[str], keywords: list[str], limit: int = 4) -> list[str]:
+    matched = []
+    for line in lines:
+        if any(word.lower() in line.lower() for word in keywords):
+            matched.append(line[:220])
+        if len(matched) >= limit:
+            break
+    return matched
+
+
+def _guess_import_title(provider: str, project_name: str, content: str) -> str:
+    for line in _split_lines(content):
+        cleaned = line.strip()
+        if cleaned and len(cleaned) <= 60:
+            return cleaned
+    prefix = {"codex": "Codex", "claude": "Claude", "chatgpt": "ChatGPT", "cursor": "Cursor"}.get(provider, provider or "外部 AI")
+    return f"{prefix} 工作台导入 - {project_name or '未关联项目'}"
+
+
+CODEX_FIXED_UPLOAD_FIELDS = [
+    "task_goal", "work_summary", "changed_files", "decisions", "risks",
+    "todos", "validation", "memory_candidates", "skill_candidates",
+    "eval_cases", "next_actions",
+]
+
+
+def _list_from_import_value(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        items = value
+    else:
+        items = str(value).replace("；", "\n").replace(";", "\n").splitlines()
+    return [str(item).strip()[:260] for item in items if str(item).strip()]
+
+
+def _structured_external_report(data: dict) -> dict:
+    report = data.get("codex_report") or data.get("structured_report") or {}
+    if not isinstance(report, dict):
+        report = {}
+    merged = {key: data.get(key, report.get(key)) for key in CODEX_FIXED_UPLOAD_FIELDS}
+    return {key: value for key, value in merged.items() if value not in (None, "", [])}
+
+
+def _parse_fixed_report_from_content(content: str) -> dict:
+    try:
+        parsed = json.loads(content)
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    report = parsed.get("codex_report") or parsed.get("structured_report") or parsed
+    if not isinstance(report, dict):
+        return {}
+    if not any(key in report for key in CODEX_FIXED_UPLOAD_FIELDS):
+        return {}
+    return {key: report.get(key) for key in CODEX_FIXED_UPLOAD_FIELDS if report.get(key) not in (None, "", [])}
+
+
+def _fixed_report_to_content(report: dict) -> str:
+    labels = {
+        "task_goal": "任务目标",
+        "work_summary": "工作总结",
+        "changed_files": "改动文件",
+        "decisions": "关键决策",
+        "risks": "风险与边界",
+        "todos": "待办事项",
+        "validation": "验证结果",
+        "memory_candidates": "Memory 候选",
+        "skill_candidates": "Skill 候选",
+        "eval_cases": "Eval 候选",
+        "next_actions": "下一步",
+    }
+    sections = []
+    for key in CODEX_FIXED_UPLOAD_FIELDS:
+        value = report.get(key)
+        if value in (None, "", []):
+            continue
+        items = _list_from_import_value(value)
+        if not items:
+            continue
+        if len(items) == 1:
+            sections.append(f"{labels[key]}：{items[0]}")
+        else:
+            sections.append(f"{labels[key]}：\n" + "\n".join(f"- {item}" for item in items))
+    return "\n".join(sections)
+
+
+def _parse_external_ai_content(provider: str, project_name: str, title: str, content: str) -> dict:
+    lines = _split_lines(content)
+    text = "\n".join(lines)
+    fixed_report = _parse_fixed_report_from_content(text)
+    decisions = _pick_lines(lines, ["决策", "决定", "方案", "采用", "选择", "decision"], 5)
+    risks = _pick_lines(lines, ["风险", "阻塞", "问题", "失败", "注意", "risk", "blocker"], 5)
+    todos = _pick_lines(lines, ["待办", "todo", "下一步", "follow", "需要", "补充"], 5)
+    files = _pick_lines(lines, [".vue", ".js", ".py", ".sql", ".md", "修改", "文件", "diff", "pr"], 6)
+    summary = "；".join(lines[:3])[:360] if lines else "外部 AI 工作台导入内容等待解析。"
+    if fixed_report:
+        fixed_goal = _list_from_import_value(fixed_report.get("task_goal"))
+        fixed_summary = _list_from_import_value(fixed_report.get("work_summary"))
+        fixed_validation = _list_from_import_value(fixed_report.get("validation"))
+        # 固定格式是权威来源，不要再退回「按关键词扫原文」：上层已经把 raw_content
+        # 换成一休自己的 JSON 信封，扫它只会把 "task_goal": / "changed_files": 这类
+        # 字段名当成决策、风险或文件路径收进候选资产里。
+        decisions = _list_from_import_value(fixed_report.get("decisions"))
+        risks = _list_from_import_value(fixed_report.get("risks"))
+        todos = _list_from_import_value(fixed_report.get("todos") or fixed_report.get("next_actions"))
+        files = _list_from_import_value(fixed_report.get("changed_files"))
+        summary_parts = [*fixed_goal[:1], *fixed_summary[:2], *fixed_validation[:1]]
+        summary = "；".join(summary_parts)[:360] if summary_parts else summary
+    if not decisions:
+        decisions = ["保留外部 AI 对话中的关键方案，等待人工审核后沉淀为团队决策。"]
+    if not risks:
+        risks = ["需人工确认导入内容是否包含敏感信息、错误结论或不适用上下文。"]
+    if not todos:
+        todos = ["关联到项目进展，并决定是否生成 Memory、Skill 或 Eval 用例。"]
+
+    memory_content = "\n".join([
+        f"来源：{provider or 'external'} / {project_name or '未关联项目'}",
+        f"摘要：{summary}",
+        "关键决策：",
+        *[f"- {item}" for item in decisions[:3]],
+        "风险与边界：",
+        *[f"- {item}" for item in risks[:3]],
+    ])
+    skill_content = "\n".join([
+        "触发条件：当项目出现同类需求、Bug、PR 或上下文缺口时使用。",
+        "执行流程：",
+        "1. 导入外部 AI 工作台记录",
+        "2. 提取目标、决策、风险、待办和代码变更",
+        "3. 关联项目与 Context Pack",
+        "4. 生成人工审核的 Memory / Skill / Eval 候选",
+    ])
+    eval_content = "\n".join([
+        "评测目标：验证外部 AI 导入内容是否能复用到项目推进。",
+        "检查项：摘要准确性、风险完整性、代码变更可追溯性、Memory 候选可审核性。",
+        f"代码/文件线索：{'；'.join(files[:4]) if files else '待补充'}",
+    ])
+    if fixed_report.get("memory_candidates"):
+        memory_content = "\n".join(_list_from_import_value(fixed_report.get("memory_candidates")))
+    if fixed_report.get("skill_candidates"):
+        skill_content = "\n".join(_list_from_import_value(fixed_report.get("skill_candidates")))
+    if fixed_report.get("eval_cases"):
+        eval_content = "\n".join(_list_from_import_value(fixed_report.get("eval_cases")))
+    artifacts = [
+        {"artifact_type": "project_update", "title": f"{title} - 项目进展", "content": summary, "confidence": 82},
+        {"artifact_type": "decision", "title": f"{title} - 关键决策", "content": "\n".join(decisions), "confidence": 78},
+        {"artifact_type": "risk", "title": f"{title} - 风险提醒", "content": "\n".join(risks), "confidence": 76},
+        {"artifact_type": "todo", "title": f"{title} - 待办事项", "content": "\n".join(todos), "confidence": 74},
+        {"artifact_type": "memory_candidate", "title": f"{title} Memory 候选", "content": memory_content, "confidence": 80},
+        {"artifact_type": "skill_candidate", "title": "外部 AI 工作台导入 Skill 候选", "content": skill_content, "confidence": 72},
+        {"artifact_type": "eval_case", "title": f"{title} 导入质量 Eval", "content": eval_content, "confidence": 70},
+    ]
+    return {
+        "summary": summary,
+        "metadata": {
+            "line_count": len(lines),
+            "decision_count": len(decisions),
+            "risk_count": len(risks),
+            "todo_count": len(todos),
+            "file_refs": files,
+            "parser": "codex_fixed_v1" if fixed_report else "rule_based_v1",
+            "fixed_format": bool(fixed_report),
+        },
+        "artifacts": artifacts,
+    }
+
+
+def _external_source_payload(row) -> dict:
+    item = dict(row)
+    item["scopes"] = _json(item.pop("scopes_json", "[]"), [])
+    return item
+
+
+def _external_import_payload(row, artifacts: list[dict] | None = None) -> dict:
+    item = dict(row)
+    item["metadata"] = _json(item.pop("metadata_json", "{}"), {})
+    item["artifacts"] = artifacts or []
+    return item
+
+
+def _external_artifact_payload(row) -> dict:
+    return dict(row)
+
+
+def _create_external_ai_import_record(data: dict) -> dict:
+    provider = str(data.get("provider") or "codex").strip().lower()
+    project_name = str(data.get("project_name") or data.get("project") or "").strip()
+    fixed_report = _structured_external_report(data)
+    raw_content = str(data.get("raw_content") or data.get("content") or "").strip()
+    if fixed_report:
+        raw_content = json.dumps({
+            "format": "yixiu.codex.upload.v1",
+            "codex_report": fixed_report,
+            "rendered_content": _fixed_report_to_content(fixed_report),
+        }, ensure_ascii=False, indent=2)
+    if not raw_content:
+        raise ValueError("请提供需要导入的外部 AI 内容")
+    title = str(data.get("title") or _guess_import_title(provider, project_name, raw_content)).strip()
+    import_id = data.get("id") or f"imp-{uuid.uuid4().hex[:12]}"
+    source_id = data.get("source_id") or f"src-{provider}"
+    now = _now()
+    parsed = _parse_external_ai_content(provider, project_name, title, raw_content)
+    with _db() as conn:
+        conn.execute(
+            """
+            INSERT INTO external_ai_imports
+              (id, source_id, provider, project_id, project_name, title, raw_content, content_type,
+               parse_status, summary, metadata_json, imported_by, imported_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'parsed', ?, ?, ?, ?, ?)
+            """,
+            (
+                import_id, source_id, provider, data.get("project_id", ""), project_name,
+                title, raw_content, data.get("content_type", "summary"), parsed["summary"],
+                json.dumps(parsed["metadata"], ensure_ascii=False), data.get("imported_by", "AI Import Gateway"), now, now,
+            ),
+        )
+        for artifact in parsed["artifacts"]:
+            conn.execute(
+                """
+                INSERT INTO external_ai_artifacts
+                  (id, import_id, artifact_type, title, content, confidence, review_status, target_ref, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'pending_review', '', ?, ?)
+                """,
+                (
+                    f"art-{uuid.uuid4().hex[:12]}", import_id, artifact["artifact_type"], artifact["title"],
+                    artifact["content"], artifact["confidence"], now, now,
+                ),
+            )
+        row = conn.execute("SELECT * FROM external_ai_imports WHERE id=?", (import_id,)).fetchone()
+        artifacts = conn.execute("SELECT * FROM external_ai_artifacts WHERE import_id=? ORDER BY created_at DESC", (import_id,)).fetchall()
+    return _external_import_payload(row, [_external_artifact_payload(item) for item in artifacts])
 
 
 AGENT_ALIASES = {
@@ -449,7 +846,7 @@ def _seed_agent_configs(conn: sqlite3.Connection) -> None:
                 "qwen-local-or-cloud",
                 AGENT_PROMPTS.get(agent_id, ""),
                 json.dumps(AGENT_TOOL_ALLOWLISTS.get(agent_id, []), ensure_ascii=False),
-                json.dumps(["维修手册", "历史案例", "SOP", "安全规范"], ensure_ascii=False),
+                json.dumps(["Context Pack", "Memory Unit", "Skill", "Eval Case"], ensure_ascii=False),
                 json.dumps(memory_keys, ensure_ascii=False),
                 "business_read_write" if agent_id in {"tiangong", "zhiju", "bowen", "heming"} else "read_business",
                 "enabled",
@@ -462,15 +859,15 @@ def _seed_agent_configs(conn: sqlite3.Connection) -> None:
 def _seed_agent_teams(conn: sqlite3.Connection) -> None:
     now = _now()
     workflow = {
-        "name": "设备检修闭环工作流",
+        "name": "Team Memory OS 人机协作工作流",
         "tech_stack": AIOS_TECH_STACK,
         "engine": "LangGraph 状态图编排，MCP 工具调用，E2B 沙箱隔离，Postgres/pgvector 长期记忆，FastAPI 统一入口，LangSmith Trace 观测。",
         "steps": [
             {"key": "upload", "title": "问题解析与附件接入", "agent_id": "tiangong"},
             {"key": "vision", "title": "意图识别与图文上下文整理", "agent_id": "guanwei"},
-            {"key": "rag", "title": "知识库检索", "agent_id": "guanwei"},
-            {"key": "diagnose", "title": "信息整合与故障分析", "agent_id": "guanwei"},
-            {"key": "sop", "title": "作业编排与安全确认", "agent_id": "zhiju", "requires_approval": True},
+            {"key": "rag", "title": "Memory 与 Skill 召回", "agent_id": "guanwei"},
+            {"key": "diagnose", "title": "信息整合与任务判断", "agent_id": "guanwei"},
+            {"key": "sop", "title": "执行流编排与人工确认", "agent_id": "zhiju", "requires_approval": True},
             {"key": "confirm", "title": "校验确认", "agent_id": "tiangong", "human_in_loop": True},
             {"key": "report", "title": "结果生成与报告建议", "agent_id": "mingjian"},
             {"key": "archive", "title": "知识沉淀候选", "agent_id": "bowen", "requires_approval": True},
@@ -489,8 +886,8 @@ def _seed_agent_teams(conn: sqlite3.Connection) -> None:
              updated_at=excluded.updated_at""",
         (
             "team-yixiu-closed-loop",
-            "一修检修闭环 Team",
-            "由天工统筹，观微检索诊断，执矩编排作业，和鸣协作，博闻沉淀，明鉴核查。",
+            "一修 Team Memory OS",
+            "由天工统筹，观微组装上下文，执矩编排执行，和鸣演化经验，博闻沉淀 Memory，明鉴执行 Eval。",
             "tiangong",
             json.dumps(members, ensure_ascii=False),
             json.dumps(workflow, ensure_ascii=False),
@@ -737,6 +1134,9 @@ def _database_status() -> dict:
         "yixiu_agent_memory", "yixiu_aios_queue", "yixiu_agent_configs",
         "yixiu_agent_teams", "yixiu_conversation_sessions",
         "yixiu_aios_approvals", "yixiu_aios_channels", "yixiu_service_accounts",
+        "team_projects", "team_context_packs", "team_memories", "team_skills",
+        "team_eval_cases", "team_eval_runs", "team_issue_skill_links",
+        "team_model_routing_logs",
     ]
     result = {
         "sqlite": {"name": "一修业务库", "path": str(DB_PATH), "exists": DB_PATH.exists(), "ok": True, "tables": {}},
@@ -906,12 +1306,59 @@ def _file_dict(row) -> dict:
 
 
 def _demo_tasks(status: str = "") -> list[dict]:
-    try:
-        from routes.maintenance_tasks import _get_demo_tasks
-        return _get_demo_tasks(status)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("读取演示任务失败: %s", exc)
-        return []
+    items = [
+        {
+            "id": "tm-1",
+            "workOrderNo": "TM-20260907-001",
+            "title": "支付回调偶发重复扣款修复",
+            "equipment_name": "支付服务",
+            "equipment_no": "repo/payment-service",
+            "equipment_model": "Node.js + MySQL",
+            "equipment_category": "后端服务",
+            "fault_code": "BUG-421",
+            "fault_type": "线上 Bug",
+            "description": "回调重试时幂等键缺失，需要人和 Agent 联合修复并补 Eval。",
+            "severity": "high",
+            "status": "pending",
+            "assignee_name": "聪明的一修",
+            "collaborators": ["Context Engine", "Eval Lab"],
+            "current_step": "Context Pack 生成",
+            "progress": 18,
+            "due_at": "2026-09-07 18:00",
+            "created_at": "2026-09-07 09:30",
+            "tools": ["日志检索", "PR Diff", "回归用例"],
+            "parts": ["幂等校验 Skill", "支付回调 Memory"],
+            "safety": ["影响面确认", "灰度发布", "回滚方案"],
+            "sop": ["组装上下文", "定位根因", "生成修复方案", "提交 PR", "运行 Eval", "沉淀 Memory"],
+            "recheck": {"status": "waiting", "result": "", "comment": ""},
+        },
+        {
+            "id": "tm-2",
+            "workOrderNo": "TM-20260907-002",
+            "title": "权限模型重构任务",
+            "equipment_name": "成员权限模块",
+            "equipment_no": "repo/team-console",
+            "equipment_model": "Vue + Flask",
+            "equipment_category": "前后端协作",
+            "fault_code": "PR-118",
+            "fault_type": "功能改造",
+            "description": "统一项目、任务、Memory 和 Skill 的权限边界。",
+            "severity": "medium",
+            "status": "in_progress",
+            "assignee_name": "王铭",
+            "collaborators": ["聪明的一修", "Agent Router"],
+            "current_step": "执行链路同步",
+            "progress": 56,
+            "due_at": "2026-09-07 20:00",
+            "created_at": "2026-09-07 08:15",
+            "tools": ["Schema Diff", "接口契约", "用例矩阵"],
+            "parts": ["权限决策 Memory", "路由策略 Skill"],
+            "safety": ["数据隔离", "最小权限", "审计记录"],
+            "sop": ["梳理需求", "改造接口", "更新前端状态", "补充回归用例", "记录决策"],
+            "recheck": {"status": "waiting", "result": "", "comment": ""},
+        },
+    ]
+    return [item for item in items if not status or item.get("status") == status]
 
 
 def _base_knowledge() -> list[dict]:
@@ -955,18 +1402,18 @@ def _ensure_task_row(conn: sqlite3.Connection, task_id: str):
 
 
 def _sop_for(category: str, level: str, fault: str) -> tuple[list[dict], list[str]]:
-    category = category or "通用设备"
-    level = level or "二级检修"
-    fault = fault or "故障"
+    category = category or "通用任务"
+    level = level or "标准协作"
+    fault = fault or "任务"
     steps = [
-        {"title": "作业许可与安全隔离", "detail": f"确认{category}{level}作业票，执行停机、断电、验电和挂牌。", "required": True, "evidence": "安全确认"},
-        {"title": "故障现象记录", "detail": f"记录{fault}出现条件、报警、温度、声音及现场图片，禁止带故障盲目拆机。", "required": True, "evidence": "数据或图片"},
-        {"title": "按依据逐项检测", "detail": "按照召回手册和相似案例测量关键参数，先确认原因再更换部件。", "required": True, "evidence": "检测值"},
-        {"title": "维修处置与过程复核", "detail": "执行紧固、清洁、调整或更换，记录工具、部件及关键扭矩。", "required": True, "evidence": "过程记录"},
-        {"title": "复测验收", "detail": "恢复防护后试运行，对照标准复测并确认故障消除。", "required": True, "evidence": "复测结果"},
-        {"title": "报告与知识沉淀", "detail": "提交检修报告、引用依据和证据；有效经验进入知识审核队列。", "required": True, "evidence": "检修报告"},
+        {"title": "目标与影响面确认", "detail": f"确认{category}{level}任务范围，明确业务影响、数据风险和回滚边界。", "required": True, "evidence": "任务说明"},
+        {"title": "Context Pack 生成", "detail": f"记录{fault}背景，召回需求、代码、Issue、PR、聊天和历史 Memory。", "required": True, "evidence": "上下文包"},
+        {"title": "按依据制定方案", "detail": "按照召回的 Memory、Skill 和历史任务生成执行步骤，先确认根因再修改。", "required": True, "evidence": "方案记录"},
+        {"title": "人机协作执行", "detail": "分派成员和 Agent，记录关键决策、产物、失败尝试和调整原因。", "required": True, "evidence": "执行记录"},
+        {"title": "Eval Lab 验证", "detail": "对照样例集和 Rubric 验证质量、成本、成功率和回归结果。", "required": True, "evidence": "Eval 结果"},
+        {"title": "Memory / Skill 沉淀", "detail": "提交根因、方案、适用条件和验证记录；有效经验进入人工审核队列。", "required": True, "evidence": "Memory 候选"},
     ]
-    safety = ["必须执行停机断电和挂牌上锁", "拆卸前确认温度、压力和残余能量", "检测结果异常时禁止直接恢复运行"]
+    safety = ["敏感日志和客户数据必须脱敏", "高影响任务必须保留回滚方案", "未经 Eval 验证的 Skill 不直接推广复用"]
     return steps, safety
 
 
@@ -1001,10 +1448,166 @@ def _analyze_image(path: Path, mime: str) -> dict:
         return fallback
 
 
+def _normalize_text_list(value, fallback: list[str]) -> list[str]:
+    if isinstance(value, list):
+        items = [str(item).strip() for item in value if str(item).strip()]
+        return items or fallback
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return fallback
+
+
+def _normalize_sop(value, fallback: list[dict]) -> list[dict]:
+    if not isinstance(value, list):
+        return fallback
+    steps = []
+    for index, item in enumerate(value, start=1):
+        if isinstance(item, dict):
+            action = str(item.get("action") or item.get("content") or item.get("text") or "").strip()
+            if action:
+                try:
+                    step_no = int(item.get("step") or index)
+                except (TypeError, ValueError):
+                    step_no = index
+                steps.append({"step": step_no, "action": action})
+        elif str(item).strip():
+            steps.append({"step": index, "action": str(item).strip()})
+    return steps or fallback
+
+
+def _search_llm_prompt(result: dict, matched: list[dict], attachments: list[dict]) -> str:
+    evidence = []
+    for item in matched[:6]:
+        evidence.append({
+            "title": item.get("title") or item.get("name"),
+            "type": item.get("type"),
+            "summary": item.get("summary"),
+            "tags": item.get("tags", []),
+        })
+    files = []
+    for item in attachments[:6]:
+        files.append({
+            "name": item.get("name"),
+            "type": item.get("type"),
+            "analysis": item.get("analysis", {}),
+        })
+    return (
+        "请作为一修系统的多模态检修检索智能体，根据用户输入、图片/文档分析和召回资料，"
+        "生成可直接展示在检索结果面板里的中文结构化内容。必须只返回 JSON 对象，不要 Markdown，不要代码块。"
+        "不要编造具体检测数值；不确定处写“待现场确认”。"
+        "JSON 字段必须包含：phenomenon_summary, match_score, risk, stop_advice, "
+        "causes, positions, tools, visual_findings, recommended_sop, safety, audit。"
+        "risk 只能是 low/medium/high；match_score 为 0-100 整数；"
+        "causes/positions/tools/visual_findings/safety 为字符串数组；"
+        "recommended_sop 为数组，每项包含 step 和 action；audit 包含 risk_level, must_check, auditor。\n"
+        f"当前基础结果：{json.dumps(result, ensure_ascii=False)[:5000]}\n"
+        f"召回资料：{json.dumps(evidence, ensure_ascii=False)[:3000]}\n"
+        f"附件分析：{json.dumps(files, ensure_ascii=False)[:3000]}"
+    )
+
+
+def _enhance_search_with_llm(result: dict, matched: list[dict], attachments: list[dict]) -> dict:
+    enhanced = dict(result)
+    try:
+        from services.ai_gateway import ai_agent
+        status = ai_agent.status()
+        enhanced["llm"] = {
+            "enabled": bool(status.get("configured")),
+            "provider": status.get("provider"),
+            "model": status.get("chat_model"),
+            "generated": False,
+        }
+        if not status.get("configured"):
+            enhanced["llm"]["error"] = "AI 服务未配置，已使用本地规则结果"
+            return enhanced
+        messages = [
+            {"role": "system", "content": "你是工业设备检修领域的大模型检索助手，只输出合法 JSON。"},
+            {"role": "user", "content": _search_llm_prompt(result, matched, attachments)},
+        ]
+        try:
+            answer = ai_agent.chat(
+                messages,
+                temperature=0.25,
+                max_tokens=1800,
+                response_format={"type": "json_object"},
+            )
+        except Exception as exc:  # noqa: BLE001
+            if "response_format" not in str(exc):
+                raise
+            answer = ai_agent.chat(messages, temperature=0.25, max_tokens=1800)
+        parsed = ai_agent.parse_json(answer)
+        if not parsed:
+            enhanced["llm"]["error"] = "模型返回内容无法解析，已使用本地规则结果"
+            return enhanced
+        if parsed.get("phenomenon_summary"):
+            enhanced["phenomenon_summary"] = str(parsed["phenomenon_summary"]).strip()
+        if isinstance(parsed.get("match_score"), (int, float)):
+            enhanced["match_score"] = max(0, min(100, int(parsed["match_score"])))
+        if parsed.get("risk") in {"low", "medium", "high"}:
+            enhanced["risk"] = parsed["risk"]
+        if parsed.get("stop_advice"):
+            enhanced["stop_advice"] = str(parsed["stop_advice"]).strip()
+        enhanced["causes"] = _normalize_text_list(parsed.get("causes"), enhanced.get("causes", []))
+        enhanced["positions"] = _normalize_text_list(parsed.get("positions"), enhanced.get("positions", []))
+        enhanced["tools"] = _normalize_text_list(parsed.get("tools"), enhanced.get("tools", []))
+        enhanced["visual_findings"] = _normalize_text_list(parsed.get("visual_findings"), enhanced.get("visual_findings", []))
+        enhanced["recommended_sop"] = _normalize_sop(parsed.get("recommended_sop"), enhanced.get("recommended_sop", []))
+        enhanced["safety"] = _normalize_text_list(parsed.get("safety"), enhanced.get("safety", []))
+        if isinstance(parsed.get("audit"), dict):
+            audit = dict(enhanced.get("audit") or {})
+            audit.update(parsed["audit"])
+            audit.setdefault("auditor", "明鉴")
+            enhanced["audit"] = audit
+        enhanced["llm"]["generated"] = True
+        enhanced["llm"]["generated_at"] = _now()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("多模态检索大模型生成失败: %s", exc)
+        enhanced.setdefault("llm", {})
+        enhanced["llm"].update({"generated": False, "error": str(exc)})
+    return enhanced
+
+
 def _agent_by_id(agent_id: str) -> dict:
     key = _agent_key(agent_id)
     agent = next((item for item in AGENTS if item.get("id") == key or item.get("name") == key), AGENTS[0])
     return enrich_agent(dict(agent))
+
+
+_CHITCHAT_KEYWORDS = (
+    "你好", "您好", "嗨", "hi", "hello", "hey", "在吗", "在么", "在不在",
+    "你是谁", "你是", "介绍一下自己", "自我介绍", "早上好", "下午好",
+    "晚上好", "早安", "晚安", "谢谢", "thanks", "thank you", "好的",
+    "ok", "okay", "嗯", "哦", "再见", "bye", "拜拜", "88", "哈喽",
+)
+
+
+def _is_chitchat(message: str) -> bool:
+    """启发式判断消息是否为问候/闲聊，避免误触规则化工具上下文。"""
+    msg = (message or "").strip().lower()
+    if not msg or len(msg) > 12:
+        return False
+    if msg in _CHITCHAT_KEYWORDS:
+        return True
+    return any(kw in msg for kw in _CHITCHAT_KEYWORDS)
+
+
+def _agent_fallback_answer(agent: dict, message: str, tool_context: dict | None, chitchat: bool) -> str:
+    name = agent.get("name", "一修智能体")
+    role = agent.get("role", "智能体")
+    duty = agent.get("duty", "协助完成设备检修工作")
+    if chitchat:
+        return f"你好，我是{name}，一修系统中的{role}。{duty}你可以把现场现象、设备型号或图片线索发给我，我会按职责协助处理。"
+    if tool_context and tool_context.get("summary"):
+        summary = str(tool_context.get("summary")).strip()
+        extra = ""
+        if tool_context.get("suggestion"):
+            extra = f"\n建议：{tool_context['suggestion']}"
+        elif tool_context.get("recommended_status"):
+            extra = f"\n建议状态：{tool_context['recommended_status']}"
+        elif tool_context.get("recommendation"):
+            extra = f"\n建议：{tool_context['recommendation']}"
+        return f"{name}已收到：{message}\n{summary}{extra}"
+    return f"{name}已收到：{message}。我会围绕“{duty}”继续协助；如涉及现场作业，请先完成安全确认、证据记录和复测闭环。"
 
 
 def _knowledge_hits(query: str, task: dict | None = None, limit: int = 5) -> list[dict]:
@@ -1413,15 +2016,47 @@ def overview():
     with _db() as conn:
         stored_tasks = [_task_payload(row) for row in conn.execute("SELECT * FROM yixiu_tasks ORDER BY created_at DESC").fetchall()]
         file_count = conn.execute("SELECT COUNT(*) FROM yixiu_files").fetchone()[0]
+        context_pack_count = conn.execute("SELECT COUNT(*) FROM team_context_packs").fetchone()[0]
+        memory_count = conn.execute("SELECT COUNT(*) FROM team_memories").fetchone()[0]
+        skill_count = conn.execute("SELECT COUNT(*) FROM team_skills").fetchone()[0]
+        eval_run_count = conn.execute("SELECT COUNT(*) FROM team_eval_runs").fetchone()[0]
     tasks = stored_tasks + tasks
     knowledge = _stored_knowledge() + _base_knowledge()
     pending = [item for item in tasks if item.get("status") in {"pending", "in_progress"}]
     high = [item for item in tasks if item.get("severity") in {"high", "critical"}]
     return success_response({
-        "name": "一修", "subtitle": "设备检修知识检索与标准作业系统", "updated_at": _now(),
-        "stats": {"online_equipment": 128, "pending_tasks": len(pending), "high_risk_items": len(high), "knowledge_items": len(knowledge), "files": file_count},
+        "name": "一修", "subtitle": "AI 原生项目协作与团队记忆系统", "updated_at": _now(),
+        "stats": {
+            "active_projects": 12,
+            "pending_tasks": len(pending),
+            "repeat_issues": len(high),
+            "knowledge_items": len(knowledge),
+            "files": file_count,
+            "context_packs": context_pack_count,
+            "memory_units": memory_count + len(knowledge),
+            "skills": skill_count,
+            "eval_runs": eval_run_count,
+            "skill_coverage": 68,
+            "repeat_work_down": 24,
+            "ai_cost_saved": 31,
+        },
+        "team_os": {
+            "positioning": "从设备故障检索升级为任务上下文包生成、人机协作执行和可计算团队记忆。",
+            "modules": MODULES,
+            "metrics": {
+                "skill_coverage": "68%",
+                "repeat_work_reduction": "24%",
+                "eval_pass_rate": "92%",
+                "memory_units": memory_count + len(knowledge),
+            },
+        },
         "agents": AGENTS, "modules": MODULES, "tasks": tasks[:8], "knowledge": knowledge[:8],
-    }, "一修概览获取成功")
+    }, "Team Memory OS 概览获取成功")
+
+
+@yixiu_bp.get("/team-os/overview")
+def team_os_overview():
+    return overview()
 
 
 @yixiu_bp.get("/agents")
@@ -1513,6 +2148,105 @@ def invoke_agent(agent_id: str):
         data.get("commit", True) is not False,
     )
     return success_response(payload, f"{payload['agent']['name']}已完成本次协助")
+
+
+@yixiu_bp.post("/agents/<agent_id>/chat")
+def agent_chat(agent_id: str):
+    """单智能体独立问答：基于自身人设 + 工具化上下文调用 LLM 自然语言作答。"""
+    data = request.get_json(silent=True) or {}
+    message = str(data.get("message") or data.get("question") or data.get("goal") or "").strip()
+    history = data.get("history") or []
+    if not message:
+        return error_response(400, "请输入问题")
+
+    agent = _agent_by_id(_agent_key(agent_id))
+    if not agent or not agent.get("id"):
+        return error_response(404, "智能体不存在")
+
+    chitchat = _is_chitchat(message)
+
+    # 系统提示词：人设 + 职责 + 能力 + 工具化结构数据
+    capabilities = "、".join(agent.get("capabilities", []))
+    persona = AGENT_PROMPTS.get(agent["id"], "")
+    system_prompt = (
+        f"你是「{agent['name']}」，一修系统中的{agent['role']}。\n"
+        f"职责：{agent['duty']}\n"
+        f"能力：{capabilities}\n"
+    )
+    if persona:
+        system_prompt += f"约束：{persona}\n"
+    system_prompt += (
+        "\n回答要求：\n"
+        "- 用户消息若是问候、闲聊或自我介绍类（如「你好」「你是谁」「在吗」），"
+        "请用本智能体人设简短自然地回应，1-3 句即可，不要展开业务流程或硬塞工具数据。\n"
+        "- 用户消息若是具体业务问题，再用专业、清晰、分点的中文作答；"
+        "如果问题超出你的职责范围，明确说明并建议由哪个智能体处理。\n"
+        "- 涉及高风险作业（配电柜、液压系统、带电作业等）必须强调安全确认和防护措施。"
+    )
+
+    # 工具化上下文：仅在业务问题时复用规则化分支结果作为 LLM 辅助材料
+    tool_context = None
+    if not chitchat:
+        try:
+            invoked = _invoke_agent(agent["id"], message, str(data.get("task_id") or "").strip(), commit=False)
+            tool_context = invoked.get("result")
+            if tool_context:
+                system_prompt += (
+                    "\n\n# 你通过工具获取的结构化数据（仅当与用户问题相关时参考；闲聊时忽略，按人设自然回应）\n"
+                    f"```json\n{json.dumps(tool_context, ensure_ascii=False, indent=2)}\n```"
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("agent_chat tool context skipped for %s: %s", agent["id"], exc)
+
+    # 调用 LLM
+    provider = "ai"
+    try:
+        from services.ai_gateway import ai_agent
+        status = ai_agent.status()
+        provider = status.get("provider", "ai")
+        if not status.get("configured"):
+            answer = _agent_fallback_answer(agent, message, tool_context, chitchat)
+            provider = "local-fallback"
+        else:
+            messages = [{"role": "system", "content": system_prompt}]
+            for turn in history[-10:]:
+                role = str(turn.get("role") or "user").strip()
+                if role not in ("user", "assistant"):
+                    role = "user"
+                content = str(turn.get("content") or turn.get("text") or "").strip()
+                if content:
+                    messages.append({"role": role, "content": content})
+            messages.append({"role": "user", "content": message})
+            answer = ai_agent.chat(messages, temperature=0.6)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("agent_chat LLM call failed for %s: %s", agent["id"], exc)
+        answer = _agent_fallback_answer(agent, message, tool_context, chitchat)
+        provider = "local-fallback"
+
+    # 记录事件
+    try:
+        with _db() as conn:
+            _record_agent_event(
+                conn,
+                agent["id"],
+                message[:80],
+                answer,
+                event_type="agent_chat",
+                payload={"message": message, "answer": answer, "tool_context": tool_context},
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
+    return success_response(
+        {
+            "agent": agent,
+            "message": message,
+            "response": answer,
+            "tool_context": tool_context,
+            "provider": provider,
+        },
+        f"{agent['name']}已独立回答问题",
+    )
 
 
 @yixiu_bp.post("/agents/dispatch")
@@ -1856,11 +2590,11 @@ def file_content(file_id: str):
 def search():
     data = request.get_json(silent=True) or {}
     query = str(data.get("query") or data.get("description") or "").strip()
-    device = str(data.get("deviceName") or data.get("device_name") or "设备").strip()
-    model = str(data.get("deviceModel") or data.get("device_model") or "待确认型号").strip()
-    category = str(data.get("category") or "通用设备").strip()
-    fault = str(data.get("faultType") or data.get("fault_type") or "待确认故障").strip()
-    level = str(data.get("maintenanceLevel") or "二级检修").strip()
+    device = str(data.get("deviceName") or data.get("device_name") or "未命名项目").strip()
+    model = str(data.get("deviceModel") or data.get("device_model") or "待确认技术栈").strip()
+    category = str(data.get("category") or "通用任务").strip()
+    fault = str(data.get("faultType") or data.get("fault_type") or "待确认任务").strip()
+    level = str(data.get("maintenanceLevel") or "标准协作").strip()
     file_ids = data.get("fileIds") or []
     attachments = []
     if file_ids:
@@ -1916,7 +2650,7 @@ def search():
                 "tags": ["发动机异响", "怠速不稳", "复检"],
             },
         ]
-        return success_response({
+        result = {
             "query": query,
             "device_name": engine_device,
             "device_model": engine_model,
@@ -1945,7 +2679,8 @@ def search():
             ],
             "safety": ["热机拆检前必须冷却防烫伤", "试车时避免长时间高转速", "气门间隙调整后必须复测怠速与异响", "未确认润滑状态前不要继续运行"],
             "audit": {"risk_level": "medium", "must_check": ["机油状态", "气门间隙", "正时链条张紧器", "点火状态", "化油器怠速油路", "复测记录"], "auditor": "明鉴"},
-        }, "摩托车发动机检索完成")
+        }
+        return success_response(_enhance_search_with_llm(result, engine_knowledge, attachments), "摩托车发动机检索完成")
     if _has_affirmative_water_scene(scene_text):
         vehicle_device = device if device and device not in {"设备", "待确认设备"} else "涉水车辆"
         vehicle_model = "" if model in {"待确认型号", "unknown", "未知"} else model
@@ -1973,7 +2708,7 @@ def search():
                 "tags": ["电气系统", "进水", "复检"],
             },
         ]
-        return success_response({
+        result = {
             "query": query,
             "device_name": vehicle_device,
             "device_model": vehicle_model,
@@ -2001,21 +2736,384 @@ def search():
             ],
             "safety": ["禁止涉水后直接启动", "先断电再拆检电气系统", "试车前必须完成油液和电气复检"],
             "audit": {"risk_level": "high", "must_check": ["启动前确认", "进气系统", "油液乳化", "电气绝缘", "制动复检", "现场复拍"], "auditor": "明鉴"},
-        }, "车辆泡水/涉水检索完成")
-    confidence = min(96, 82 + (6 if images else 0) + (3 if docs else 0) + (3 if model != "待确认型号" else 0))
-    causes = [f"{fault}相关部件存在调整、磨损或连接异常", "运行参数或装配状态偏离手册要求", "需结合检测值排除供电、润滑或压力因素"]
-    return success_response({
+        }
+        return success_response(_enhance_search_with_llm(result, vehicle_knowledge, attachments), "车辆泡水/涉水检索完成")
+    confidence = min(96, 82 + (6 if images else 0) + (3 if docs else 0) + (3 if model != "待确认技术栈" else 0))
+    causes = [f"{fault}相关上下文需要补齐需求、代码与历史决策", "接口契约、数据模型或执行流程可能存在未同步变更", "需结合 Eval 用例验证方案是否可复用"]
+    result = {
         "query": query, "device_name": device, "device_model": model, "category": category, "maintenance_level": level,
-        "modalities": ["text", "equipment_model"] + (["image"] if images else []) + (["document"] if docs else []),
-        "match_score": confidence, "phenomenon_summary": f"{device}（{model}）{fault}联合检索结果",
-        "risk": "high" if any(word in query for word in ["冒烟", "漏电", "起火", "严重", "高温"]) else "medium",
-        "stop_advice": "先完成安全隔离和数据记录，再按引用依据检修",
-        "causes": causes, "positions": ["故障关联部件", "连接与紧固位置", "供电/润滑/压力回路"],
-        "tools": ["万用表", "测温仪", "扭矩工具"], "visual_findings": visual_findings,
+        "modalities": ["text", "task_context"] + (["image"] if images else []) + (["document"] if docs else []),
+        "match_score": confidence, "phenomenon_summary": f"{device}（{model}）{fault}任务上下文包已生成",
+        "risk": "high" if any(word in query for word in ["线上", "资金", "权限", "严重", "阻塞"]) else "medium",
+        "stop_advice": "先确认影响范围、数据安全和回滚方案，再进入人机协作执行",
+        "causes": causes, "positions": ["需求入口", "相关代码路径", "数据模型", "历史任务记录"],
+        "tools": ["Context Engine", "Team Memory", "Eval Lab"], "visual_findings": visual_findings,
         "attachments": attachments, "matched_manuals": matched,
         "recommended_sop": steps, "safety": safety,
-        "audit": {"risk_level": "medium", "must_check": ["安全隔离", "引用依据", "检测数据", "复测记录", "现场证据"], "auditor": "明鉴"},
-    }, "多模态检索完成")
+        "audit": {"risk_level": "medium", "must_check": ["影响范围", "引用依据", "Eval 用例", "人工审核", "沉淀条件"], "auditor": "明鉴"},
+        "context_pack": {
+            "title": f"{device} {fault} Context Pack",
+            "objective": query or fault,
+            "sources": ["需求描述", "附件材料", "历史任务", "Team Memory", "Skill 库"],
+            "recommended_agents": ["guanwei", "zhiju", "bowen", "mingjian"],
+        },
+        "matching_memories": matched,
+        "recommended_skills": [
+            {"id": "skill-context-pack", "name": "任务上下文包生成 Skill", "reason": "当前任务需要先补齐需求、代码、文档和历史经验。"},
+            {"id": "skill-eval-regression", "name": "Skill 回归评测 Skill", "reason": "当前任务完成后需要验证方案质量、成本和成功率。"},
+        ],
+    }
+    return success_response(_enhance_search_with_llm(result, matched, attachments), "Context Pack 生成完成")
+
+
+@yixiu_bp.post("/team-os/context/pack")
+def team_os_context_pack():
+    return search()
+
+
+@yixiu_bp.get("/integrations/mcp/manifest")
+def integrations_mcp_manifest():
+    host = request.host_url.rstrip("/")
+    return success_response({
+        "name": "一休 AI Import Gateway",
+        "description": "允许 Codex、Claude、ChatGPT、Cursor 等外部 AI 工作台把对话总结、代码变更、风险、待办和候选资产同步到一休。",
+        "endpoint": f"{host}/api/yixiu/mcp",
+        "rest_import_endpoint": f"{host}/api/yixiu/integrations/imports",
+        "auth": {
+            "type": "bearer_or_workspace_token",
+            "header": "Authorization: Bearer <YIXIU_IMPORT_TOKEN>",
+            "demo_mode": "本地演示可直接在页面粘贴导入；生产环境建议启用 OAuth 或工作区 Token。"
+        },
+        "tools": [
+            {"name": "yixiu.create_project_update", "path": "/integrations/imports", "purpose": "保存外部 AI 对话总结并生成项目进展"},
+            {"name": "yixiu.save_context_pack", "path": "/team-os/context/pack", "purpose": "保存任务上下文包"},
+            {"name": "yixiu.create_memory_candidate", "path": "/integrations/imports/{id}/parse", "purpose": "从导入内容生成 Memory 候选"},
+            {"name": "yixiu.create_skill_candidate", "path": "/integrations/imports/{id}/parse", "purpose": "从导入内容生成 Skill 候选"},
+            {"name": "yixiu.link_to_project", "path": "/integrations/imports/{id}/link-project", "purpose": "将导入记录关联到一休项目"}
+        ],
+        "payload_example": {
+            "provider": "codex",
+            "project_name": "支付服务",
+            "title": "支付回调幂等修复总结",
+            "content_type": "summary",
+            "task_goal": "修复支付回调重复触发导致订单重复处理的问题",
+            "work_summary": ["新增幂等键校验", "补充重复回调 Eval 用例"],
+            "changed_files": ["server/payment/callback.py", "tests/test_payment_callback.py"],
+            "decisions": ["以 provider_event_id 作为幂等边界"],
+            "risks": ["历史脏数据需要迁移前复核"],
+            "todos": ["上线前补充灰度监控"],
+            "validation": ["pytest tests/test_payment_callback.py 通过"]
+        }
+    }, "MCP 接入配置获取成功")
+
+
+@yixiu_bp.post("/mcp")
+def yixiu_mcp_endpoint():
+    """Minimal MCP-style JSON-RPC endpoint for agent-side uploads into Yixiu.
+
+    Supports initialize, tools/list and tools/call. It is intentionally scoped to
+    asset import tools; imported content becomes pending-review candidates.
+    """
+    payload = request.get_json(silent=True) or {}
+    request_id = payload.get("id")
+    method = payload.get("method", "")
+    params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+
+    def rpc_result(result):
+        return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+    def rpc_error(code, message):
+        return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+
+    tools = [
+        {
+            "name": "yixiu.import_external_ai",
+            "description": "Upload a Codex/Claude/ChatGPT/Cursor task summary, chat transcript, diff, or PR note into Yixiu and generate project update, Memory, Skill and Eval candidates.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "provider": {"type": "string", "description": "codex, claude, chatgpt, cursor, github"},
+                    "project_name": {"type": "string", "description": "Project or repository name in Yixiu"},
+                    "title": {"type": "string", "description": "Import title"},
+                    "content_type": {"type": "string", "description": "summary, chat, diff, pr, file"},
+                    "task_goal": {"type": "string", "description": "Fixed format: task objective"},
+                    "work_summary": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: completed work summary"},
+                    "changed_files": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: changed files or modules"},
+                    "decisions": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: key decisions"},
+                    "risks": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: risks, limits, blockers"},
+                    "todos": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: pending actions"},
+                    "validation": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: tests and verification results"},
+                    "memory_candidates": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: reusable memory candidates"},
+                    "skill_candidates": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: reusable skill candidates"},
+                    "eval_cases": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: regression/eval case candidates"},
+                    "next_actions": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: recommended next actions"},
+                    "raw_content": {"type": "string", "description": "Fallback free-text content if fixed fields are unavailable"}
+                },
+                "required": ["provider", "project_name"]
+            }
+        },
+        {
+            "name": "yixiu.create_project_update",
+            "description": "Create a Yixiu project progress record from the current agent work summary.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "provider": {"type": "string"},
+                    "project_name": {"type": "string"},
+                    "title": {"type": "string"},
+                    "summary": {"type": "string"}
+                },
+                "required": ["project_name", "summary"]
+            }
+        }
+    ]
+
+    if method == "initialize":
+        return rpc_result({
+            "protocolVersion": "2024-11-05",
+            "serverInfo": {"name": "yixiu-ai-import-gateway", "version": "0.1.0"},
+            "capabilities": {"tools": {}}
+        })
+    if method == "tools/list":
+        return rpc_result({"tools": tools})
+    if method == "tools/call":
+        name = params.get("name")
+        args = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+        try:
+            if name == "yixiu.import_external_ai":
+                imported = _create_external_ai_import_record({**args, "imported_by": "MCP Agent"})
+            elif name == "yixiu.create_project_update":
+                imported = _create_external_ai_import_record({
+                    "provider": args.get("provider", "mcp-agent"),
+                    "project_name": args.get("project_name", ""),
+                    "title": args.get("title", f"{args.get('project_name', '项目')} 进展同步"),
+                    "content_type": "summary",
+                    "raw_content": args.get("summary", ""),
+                    "imported_by": "MCP Agent",
+                })
+            else:
+                return rpc_error(-32601, f"未知工具：{name}")
+        except ValueError as exc:
+            return rpc_error(-32602, str(exc))
+        return rpc_result({
+            "content": [{
+                "type": "text",
+                "text": f"已同步到一休：{imported['title']}；生成 {len(imported.get('artifacts', []))} 个候选资产，等待人工审核。"
+            }],
+            "structuredContent": {"import": imported}
+        })
+    return rpc_error(-32601, f"不支持的 MCP 方法：{method}")
+
+
+@yixiu_bp.get("/integrations/sources")
+def list_external_ai_sources():
+    with _db() as conn:
+        rows = conn.execute("SELECT * FROM external_ai_sources ORDER BY created_at DESC").fetchall()
+    return success_response({"sources": [_external_source_payload(row) for row in rows]}, "外部 AI 来源获取成功")
+
+
+@yixiu_bp.post("/integrations/sources")
+def create_external_ai_source():
+    data = request.get_json(silent=True) or {}
+    provider = str(data.get("provider") or "codex").strip().lower()
+    name = str(data.get("name") or f"{provider.title()} 工作台").strip()
+    source_id = data.get("id") or f"src-{provider}-{uuid.uuid4().hex[:8]}"
+    scopes = data.get("scopes") if isinstance(data.get("scopes"), list) else ["project_update", "memory_candidate", "skill_candidate", "eval_case"]
+    now = _now()
+    with _db() as conn:
+        conn.execute(
+            """
+            INSERT INTO external_ai_sources
+              (id, provider, name, auth_type, workspace_name, endpoint, scopes_json, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              provider=excluded.provider, name=excluded.name, auth_type=excluded.auth_type,
+              workspace_name=excluded.workspace_name, endpoint=excluded.endpoint,
+              scopes_json=excluded.scopes_json, status=excluded.status, updated_at=excluded.updated_at
+            """,
+            (
+                source_id, provider, name, data.get("auth_type", "mcp_token"),
+                data.get("workspace_name", ""), data.get("endpoint", ""),
+                json.dumps(scopes, ensure_ascii=False), data.get("status", "enabled"), now, now,
+            ),
+        )
+        row = conn.execute("SELECT * FROM external_ai_sources WHERE id=?", (source_id,)).fetchone()
+    return success_response({"source": _external_source_payload(row)}, "外部 AI 来源已保存")
+
+
+@yixiu_bp.get("/integrations/imports")
+def list_external_ai_imports():
+    project_id = request.args.get("project_id", "").strip()
+    with _db() as conn:
+        if project_id:
+            rows = conn.execute("SELECT * FROM external_ai_imports WHERE project_id=? ORDER BY imported_at DESC", (project_id,)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM external_ai_imports ORDER BY imported_at DESC LIMIT 50").fetchall()
+        result = []
+        for row in rows:
+            artifacts = conn.execute("SELECT * FROM external_ai_artifacts WHERE import_id=? ORDER BY created_at DESC", (row["id"],)).fetchall()
+            result.append(_external_import_payload(row, [_external_artifact_payload(item) for item in artifacts]))
+    return success_response({"imports": result}, "外部 AI 导入记录获取成功")
+
+
+@yixiu_bp.post("/integrations/imports")
+def create_external_ai_import():
+    data = request.get_json(silent=True) or {}
+    try:
+        imported = _create_external_ai_import_record(data)
+    except ValueError as exc:
+        return error_response(400, str(exc))
+    return success_response({"import": imported}, "外部 AI 内容已导入并解析")
+
+
+@yixiu_bp.post("/integrations/imports/<import_id>/parse")
+def parse_external_ai_import(import_id: str):
+    with _db() as conn:
+        row = conn.execute("SELECT * FROM external_ai_imports WHERE id=?", (import_id,)).fetchone()
+        if not row:
+            return error_response(404, "导入记录不存在")
+        parsed = _parse_external_ai_content(row["provider"], row["project_name"], row["title"], row["raw_content"])
+        now = _now()
+        conn.execute("DELETE FROM external_ai_artifacts WHERE import_id=?", (import_id,))
+        conn.execute(
+            "UPDATE external_ai_imports SET parse_status='parsed', summary=?, metadata_json=?, updated_at=? WHERE id=?",
+            (parsed["summary"], json.dumps(parsed["metadata"], ensure_ascii=False), now, import_id),
+        )
+        for artifact in parsed["artifacts"]:
+            conn.execute(
+                "INSERT INTO external_ai_artifacts VALUES (?, ?, ?, ?, ?, ?, 'pending_review', '', ?, ?)",
+                (f"art-{uuid.uuid4().hex[:12]}", import_id, artifact["artifact_type"], artifact["title"], artifact["content"], artifact["confidence"], now, now),
+            )
+        row = conn.execute("SELECT * FROM external_ai_imports WHERE id=?", (import_id,)).fetchone()
+        artifacts = conn.execute("SELECT * FROM external_ai_artifacts WHERE import_id=? ORDER BY created_at DESC", (import_id,)).fetchall()
+    return success_response({"import": _external_import_payload(row, [_external_artifact_payload(item) for item in artifacts])}, "导入内容已重新解析")
+
+
+@yixiu_bp.put("/integrations/artifacts/<artifact_id>/review")
+def review_external_ai_artifact(artifact_id: str):
+    data = request.get_json(silent=True) or {}
+    status = data.get("status", "approved")
+    if status not in {"approved", "rejected", "pending_review"}:
+        return error_response(400, "审核状态不合法")
+    now = _now()
+    with _db() as conn:
+        row = conn.execute("SELECT * FROM external_ai_artifacts WHERE id=?", (artifact_id,)).fetchone()
+        if not row:
+            return error_response(404, "候选资产不存在")
+        target_ref = row["target_ref"] or ""
+        if status == "approved" and row["artifact_type"] == "memory_candidate" and not target_ref:
+            knowledge_id = f"kb-import-{uuid.uuid4().hex[:10]}"
+            import_row = conn.execute("SELECT * FROM external_ai_imports WHERE id=?", (row["import_id"],)).fetchone()
+            tags = ["外部AI导入", import_row["provider"] if import_row else "external", "Memory候选"]
+            conn.execute(
+                """
+                INSERT INTO yixiu_knowledge
+                  (id, title, type, category, equipment, model, summary, content, tags, source,
+                   status, reviewer, correction, created_at, updated_at)
+                VALUES (?, ?, 'Memory Unit', '外部 AI 导入', ?, ?, ?, ?, ?, ?, 'approved', ?, ?, ?, ?)
+                """,
+                (
+                    knowledge_id, row["title"], (import_row["project_name"] if import_row else "未关联项目"),
+                    data.get("model", "外部 AI 工作台"), row["content"][:240], row["content"],
+                    json.dumps(tags, ensure_ascii=False), f"external_import:{row['import_id']}",
+                    data.get("reviewer", "一休审核"), data.get("correction", ""), now, now,
+                ),
+            )
+            target_ref = knowledge_id
+        conn.execute(
+            "UPDATE external_ai_artifacts SET review_status=?, target_ref=?, updated_at=? WHERE id=?",
+            (status, target_ref, now, artifact_id),
+        )
+        updated = conn.execute("SELECT * FROM external_ai_artifacts WHERE id=?", (artifact_id,)).fetchone()
+    return success_response({"artifact": _external_artifact_payload(updated)}, "候选资产审核完成")
+
+
+def _skill_payload(row) -> dict:
+    """team_skills 行 → Skill Factory 的对象。
+
+    payload_json 是权威来源；老行（或手写 INSERT）没有 payload 时，退回用真实列
+    拼一个最小可用的对象，避免前端拿到空壳。
+    """
+    data = _json(row["payload_json"], {})
+    if not isinstance(data, dict) or not data:
+        data = {}
+    return {
+        "id": row["id"],
+        "name": data.get("name") or row["name"],
+        "version": data.get("version") or row["version"] or "v0.1",
+        "status": data.get("status") or row["status"] or "Draft",
+        "updatedAt": data.get("updatedAt") or row["updated_at"] or "",
+        **{key: value for key, value in data.items() if key not in ("id", "name", "version", "status", "updatedAt")},
+    }
+
+
+def _upsert_skill_row(conn: sqlite3.Connection, skill: dict, now: str) -> sqlite3.Row | None:
+    skill_id = str(skill.get("id") or "").strip()
+    if not skill_id:
+        return None
+    name = str(skill.get("name") or skill_id).strip()
+    version = str(skill.get("version") or "v0.1")
+    status = str(skill.get("status") or "Draft")
+    conn.execute(
+        """
+        INSERT INTO team_skills (id, name, version, status, purpose, created_at, updated_at, payload_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          name=excluded.name, version=excluded.version, status=excluded.status,
+          purpose=excluded.purpose, updated_at=excluded.updated_at, payload_json=excluded.payload_json
+        """,
+        (skill_id, name, version, status, str(skill.get("summary") or "")[:400], now, now,
+         json.dumps(skill, ensure_ascii=False)),
+    )
+    return conn.execute("SELECT * FROM team_skills WHERE id = ?", (skill_id,)).fetchone()
+
+
+@yixiu_bp.get("/skills")
+def list_skills():
+    """Skill Factory 的正式库。前端拿到空数组时会把本地种子推上来。"""
+    with _db() as conn:
+        rows = conn.execute("SELECT * FROM team_skills ORDER BY updated_at DESC").fetchall()
+    return success_response({"skills": [_skill_payload(row) for row in rows], "total": len(rows)}, "Skill 列表获取成功")
+
+
+@yixiu_bp.post("/skills")
+def save_skill():
+    data = request.get_json(silent=True) or {}
+    skill = data.get("skill") if isinstance(data.get("skill"), dict) else data
+    if not str(skill.get("id") or "").strip():
+        return error_response(400, "skill.id 不能为空")
+    with _db() as conn:
+        row = _upsert_skill_row(conn, skill, _now())
+    return success_response({"skill": _skill_payload(row)}, "Skill 已保存")
+
+
+@yixiu_bp.post("/skills/bulk")
+def save_skills_bulk():
+    """首次落库用：把前端的种子 Skill 一次性写进团队库。"""
+    data = request.get_json(silent=True) or {}
+    items = data.get("skills") if isinstance(data.get("skills"), list) else []
+    if not items:
+        return error_response(400, "skills 不能为空")
+    now = _now()
+    saved = []
+    with _db() as conn:
+        for skill in items:
+            if not isinstance(skill, dict):
+                continue
+            row = _upsert_skill_row(conn, skill, now)
+            if row is not None:
+                saved.append(row["id"])
+    return success_response({"saved": saved, "total": len(saved)}, f"已保存 {len(saved)} 个 Skill")
+
+
+@yixiu_bp.delete("/skills/<skill_id>")
+def delete_skill(skill_id: str):
+    with _db() as conn:
+        row = conn.execute("SELECT id FROM team_skills WHERE id = ?", (skill_id,)).fetchone()
+        if row is None:
+            return error_response(404, "Skill 不存在")
+        conn.execute("DELETE FROM team_skills WHERE id = ?", (skill_id,))
+    return success_response({"id": skill_id}, "Skill 已删除")
 
 
 @yixiu_bp.route("/knowledge", methods=["GET"])
@@ -2025,6 +3123,11 @@ def knowledge():
     if keyword:
         items = [item for item in items if keyword.lower() in json.dumps(item, ensure_ascii=False).lower()]
     return success_response({"items": items, "total": len(items)}, "知识资料获取成功")
+
+
+@yixiu_bp.get("/team-os/memories")
+def team_os_memories():
+    return knowledge()
 
 
 @yixiu_bp.post("/knowledge/upload")
@@ -2118,17 +3221,17 @@ def update_knowledge():
     title = str(data.get("title", "")).strip()
     summary = str(data.get("summary", "")).strip()
     if not title or not summary:
-        return error_response(400, "知识标题和沉淀摘要不能为空")
+        return error_response(400, "Memory 标题和沉淀摘要不能为空")
     item_id = f"kb-{uuid.uuid4().hex[:12]}"
-    tags = data.get("tags") or ["设备检修", "经验总结"]
-    content = data.get("content") or f"# {title}\n\n## 适用范围\n- 设备：{data.get('equipment') or '待补充'}\n- 型号：{data.get('model') or '通用'}\n\n## 故障现象与经验\n{summary}\n\n## 安全与复核\n提交内容须经人工审核，确认引用依据、适用范围和安全风险后方可入库。"
+    tags = data.get("tags") or ["Team Memory", "Skill Candidate"]
+    content = data.get("content") or f"# {title}\n\n## 适用范围\n- 项目：{data.get('equipment') or '待补充'}\n- 模块 / 技术栈：{data.get('model') or '通用'}\n\n## 问题、尝试与经验\n{summary}\n\n## 验证与审核\n提交内容须经人工审核，确认引用依据、适用条件、失败边界和 Eval 结果后方可入库。"
     with _db() as conn:
-        conn.execute("INSERT INTO yixiu_knowledge VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (item_id, title, data.get("type", "历史故障案例"), data.get("category", "案例"), data.get("equipment", ""), data.get("model", ""), summary, content, json.dumps(tags, ensure_ascii=False), data.get("source", "一线经验提交"), "pending", "", "", _now(), _now()))
+        conn.execute("INSERT INTO yixiu_knowledge VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (item_id, title, data.get("type", "Memory Unit"), data.get("category", "团队记忆"), data.get("equipment", ""), data.get("model", ""), summary, content, json.dumps(tags, ensure_ascii=False), data.get("source", "Task Execution Record"), "pending", "", "", _now(), _now()))
         row = conn.execute("SELECT * FROM yixiu_knowledge WHERE id=?", (item_id,)).fetchone()
     item = dict(row)
     item["tags"] = _json(item["tags"], [])
     item["reviewable"] = True
-    return success_response(item, "知识条目已进入人工审核队列")
+    return success_response(item, "Memory Unit 已进入人工审核队列")
 
 
 @yixiu_bp.put("/knowledge/<item_id>/review")

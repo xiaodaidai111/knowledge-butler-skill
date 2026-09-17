@@ -10,7 +10,11 @@ import {
 
 const getHost = () => {
   if (typeof window === 'undefined') return 'http://127.0.0.1:5000'
-  return `http://${window.location.hostname || '127.0.0.1'}:5000`
+  const { hostname, port, origin } = window.location
+  if (hostname === '127.0.0.1' || hostname === 'localhost') {
+    return `http://${hostname || '127.0.0.1'}:5000`
+  }
+  return origin
 }
 
 const API_BASE = `${getHost()}/api/yixiu`
@@ -20,11 +24,6 @@ const getStoredToken = () => {
   if (typeof window !== 'undefined') {
     const token = window.localStorage?.getItem('token') || window.localStorage?.getItem('yixiu-token')
     if (token) return token
-  }
-  try {
-    if (typeof uni !== 'undefined' && uni.getStorageSync) return uni.getStorageSync('token') || ''
-  } catch (_error) {
-    return ''
   }
   return ''
 }
@@ -155,6 +154,10 @@ export const yixiuApi = {
 
   invokeAgent(agentId, payload = {}) {
     return requestJson(`/agents/${encodeURIComponent(agentId)}/invoke`, { method: 'POST', body: payload })
+  },
+
+  agentChat(agentId, payload = {}) {
+    return requestJson(`/agents/${encodeURIComponent(agentId)}/chat`, { method: 'POST', body: payload })
   },
 
   dispatchAgents(payload = {}) {
@@ -392,5 +395,42 @@ export const yixiuApi = {
   },
   deleteTemplate(id) {
     return requestJson(`/templates/${id}`, { method: 'DELETE' })
+  },
+
+  mcpManifest() {
+    return requestJson('/integrations/mcp/manifest')
+  },
+  integrationSources() {
+    return requestJson('/integrations/sources')
+  },
+  saveIntegrationSource(payload = {}) {
+    return requestJson('/integrations/sources', { method: 'POST', body: payload })
+  },
+  externalImports(params = {}) {
+    const query = new URLSearchParams()
+    if (params.projectId) query.set('project_id', params.projectId)
+    return requestJson(`/integrations/imports${query.size ? `?${query}` : ''}`)
+  },
+  createExternalImport(payload = {}) {
+    return requestJson('/integrations/imports', { method: 'POST', body: payload })
+  },
+  parseExternalImport(importId) {
+    return requestJson(`/integrations/imports/${encodeURIComponent(importId)}/parse`, { method: 'POST', body: {} })
+  },
+  reviewExternalArtifact(artifactId, payload = {}) {
+    return requestJson(`/integrations/artifacts/${encodeURIComponent(artifactId)}/review`, { method: 'PUT', body: payload })
+  },
+
+  skills() {
+    return requestJson('/skills')
+  },
+  saveSkill(skill) {
+    return requestJson('/skills', { method: 'POST', body: { skill } })
+  },
+  saveSkills(skills) {
+    return requestJson('/skills/bulk', { method: 'POST', body: { skills } })
+  },
+  deleteSkill(id) {
+    return requestJson(`/skills/${encodeURIComponent(id)}`, { method: 'DELETE' })
   }
 }

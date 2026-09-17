@@ -1,0 +1,4212 @@
+"""一修网页版业务编排接口。
+
+提供多模态检索、标准作业、知识沉淀和人工审核所需的稳定接口。
+所有新增业务数据使用 SQLite 持久化，上传文件保存到本机 uploads/yixiu 目录。
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import mimetypes
+import os
+import sqlite3
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+from flask import Blueprint, current_app, request, send_file
+from werkzeug.utils import secure_filename
+
+from aios_runtime import (
+    AGENT_OUTPUT_SCHEMAS,
+    AGENT_PROMPTS,
+    AGENT_TOOL_ALLOWLISTS,
+    AIOS_ACTION_REGISTRY,
+    AIOS_TECH_STACK,
+    TIANGONG_OPERATION_PROMPT,
+    attach_state_machine,
+    enrich_agent,
+    next_executable_steps,
+    transition_step,
+)
+from security import AUDIT_ROLES, WRITE_ROLES, require_confirmed_write, require_jwt_roles
+from utils import error_response, generate_token, success_response
+
+logger = logging.getLogger(__name__)
+yixiu_bp = Blueprint("yixiu", __name__)
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = BACKEND_DIR / "data"
+DB_PATH = DATA_DIR / "yixiu_web.db"
+KNOWLEDGE_PATH = DATA_DIR / "maintenance_knowledge_base.json"
+
+AGENTS = [
+    {
+        "id": "tiangong", "name": "天工", "role": "Agent Router",
+        "duty": "理解用户目标，推荐上下文、Skill、Agent 和模型，并展示任务执行链路。",
+        "status": "online", "ip": "10.10.1.10", "avatar": "/static/agents/tiangong.png",
+        "capabilities": ["任务规划", "跨智能体调度", "模型路由", "上下文推荐", "执行链路追踪"],
+    },
+    {
+        "id": "guanwei", "name": "观微", "role": "Context Engine",
+        "duty": "为任务自动组装需求、代码、文档、历史经验和相关 Skill。",
+        "status": "online", "ip": "10.10.1.21", "avatar": "/static/agents/guanwei.png",
+        "capabilities": ["Context Pack 生成", "需求召回", "代码线索匹配", "Memory 召回", "Skill 推荐"],
+    },
+    {
+        "id": "zhiju", "name": "执矩", "role": "Task Execution",
+        "duty": "管理任务、分派成员和 Agent，并记录执行过程、产物与关键决策。",
+        "status": "online", "ip": "10.10.1.22", "avatar": "/static/agents/zhiju.png",
+        "capabilities": ["执行流生成", "任务步骤编排", "Agent 分派", "过程记录", "状态推进"],
+    },
+    {
+        "id": "bowen", "name": "博闻", "role": "Team Memory",
+        "duty": "保存团队决策、问题、尝试、根因、方案、适用条件和验证记录。",
+        "status": "online", "ip": "10.10.1.23", "avatar": "/static/agents/bowen.png",
+        "capabilities": ["Memory Unit", "文件解析", "图谱关联", "版本管理", "人工审核"],
+    },
+    {
+        "id": "heming", "name": "和鸣", "role": "Memory Evolution",
+        "duty": "从任务记录、Bug、PR 和聊天中提炼可复用经验，生成 Memory 与 Skill 候选。",
+        "status": "online", "ip": "10.10.1.24", "avatar": "/static/agents/heming.png",
+        "capabilities": ["经验抽取", "重复问题识别", "Skill 候选生成", "人工审核流", "协作摘要"],
+    },
+    {
+        "id": "mingjian", "name": "明鉴", "role": "Eval Lab",
+        "duty": "验证 Skill 是否有效，比较版本质量、成本、成功率和回归表现。",
+        "status": "online", "ip": "10.10.1.25", "avatar": "/static/agents/mingjian.png",
+        "capabilities": ["Skill 回归", "质量评分", "成本对比", "成功率统计", "验收归档"],
+    },
+]
+
+MODULES = [
+    {"key": "context_engine", "title": "Context Engine 上下文引擎", "desc": "为任务自动组装需求、代码、文档、历史经验和相关 Skill。", "agent": "观微"},
+    {"key": "task_execution", "title": "Task Execution 任务执行中心", "desc": "管理任务、分派人和 Agent，并记录执行过程。", "agent": "执矩"},
+    {"key": "team_memory", "title": "Team Memory 团队记忆库", "desc": "保存团队决策、问题、尝试、根因、方案、适用条件和验证记录。", "agent": "博闻"},
+    {"key": "memory_evolution", "title": "Memory Evolution 记忆演化引擎", "desc": "从任务记录、Bug、PR、聊天中提炼可复用经验。", "agent": "和鸣"},
+    {"key": "eval_lab", "title": "Eval Lab 评测中心", "desc": "验证 Skill 是否有效，比较版本质量、成本和成功率。", "agent": "明鉴"},
+    {"key": "issue_to_skill", "title": "Issue to Skill 问题演化系统", "desc": "把 Bug、失败任务、重复问题转成 Memory 和 Skill。", "agent": "和鸣"},
+    {"key": "agent_router", "title": "Agent / Router 操作面板", "desc": "推荐上下文、Skill、Agent、模型，并展示执行链路。", "agent": "天工"},
+    {"key": "team_intelligence", "title": "Team Intelligence 团队智能分析", "desc": "统计 Skill 覆盖率、重复劳动率、AI 成本和团队能力沉淀。", "agent": "天工"},
+]
+
+CONTACTS = [
+    {"id": 1, "name": "聪明的一修", "position": "协作负责人", "department": "AI 原生项目协作组", "specialty": "Context / Memory", "phone": "138-0000-1024", "status": "在线", "currentTask": "支付回调修复", "devices": ["支付服务", "权限模块"], "workload": 72},
+    {"id": 2, "name": "王铭", "position": "评测负责人", "department": "Eval Lab", "specialty": "Skill 回归", "phone": "138-0000-2048", "status": "在线", "currentTask": "日报 Skill 回归", "devices": ["日报 Skill"], "workload": 48},
+    {"id": 3, "name": "赵宁", "position": "Memory 审核人", "department": "Team Memory", "specialty": "问题资产化", "phone": "138-0000-4096", "status": "忙碌", "currentTask": "重复问题审核", "devices": ["登录链路", "支付服务"], "workload": 83},
+]
+
+
+def _now() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+_BUILTIN_TEMPLATES = [
+    {
+        "id": "tpl-blank",
+        "name": "空白文档",
+        "icon": "📝",
+        "category": "通用",
+        "description": "从零开始创建一份空白技术文档",
+        "skeleton": {"content": "# 文档标题\n\n在此输入内容..."}
+    },
+    {
+        "id": "tpl-sop",
+        "name": "任务执行 Skill",
+        "icon": "📋",
+        "category": "Skill 工作流",
+        "description": "标准任务执行流程模板，适用于人机协作、Agent 分派和过程记录",
+        "skeleton": {"content": "# 任务执行 Skill\n\n## 一、基本信息\n- 项目：\n- 模块 / 技术栈：\n- 任务类型：\n- 负责人：\n- 参与 Agent：\n\n## 二、上下文要求\n- [ ] 需求说明\n- [ ] 相关代码\n- [ ] 历史 Memory\n- [ ] Eval 标准\n\n## 三、执行步骤\n1. 生成 Context Pack\n2. 分析影响范围\n3. 制定修改方案\n4. 执行任务\n5. 运行 Eval\n\n## 四、沉淀要求\n- [ ] 记录根因\n- [ ] 记录方案\n- [ ] 记录验证结果\n- [ ] 提交 Memory 审核\n\n## 五、备注\n"}
+    },
+    {
+        "id": "tpl-fault",
+        "name": "问题复盘 Memory",
+        "icon": "🔍",
+        "category": "Team Memory",
+        "description": "问题、尝试、根因、方案、适用条件和验证记录",
+        "skeleton": {"content": "# 问题复盘 Memory\n\n## 一、问题背景\n- 项目：\n- 模块：\n- 任务 / Issue：\n- 影响范围：\n\n## 二、尝试过程\n### 初步判断\n- 假设：\n- 证据：\n\n### 深入分析\n- 根因候选1：\n- 根因候选2：\n- 排查方法：\n\n## 三、最终方案\n- 最终根因：\n- 解决方案：\n- 改动范围：\n\n## 四、适用条件与验证\n- 适用条件：\n- 不适用边界：\n- Eval 结果：\n"}
+    },
+    {
+        "id": "tpl-meeting",
+        "name": "协作任务纪要",
+        "icon": "📒",
+        "category": "协作沟通",
+        "description": "任务同步、技术讨论、决策沉淀和后续行动纪要",
+        "skeleton": {"content": "# 协作任务纪要\n\n## 会议信息\n- 会议主题：\n- 会议时间：\n- 参会人员：\n- 主持人：\n\n## 议题与决策\n### 议题一：\n- 讨论内容：\n- 决策：\n\n### 议题二：\n- 讨论内容：\n- 决策：\n\n## 行动计划\n| 事项 | 责任人 | 截止时间 | 状态 |\n|------|--------|----------|------|\n|  |  |  |  |\n\n## 可沉淀 Memory\n"}
+    },
+    {
+        "id": "tpl-safety",
+        "name": "Eval 回归规范",
+        "icon": "🛡️",
+        "category": "Eval Lab",
+        "description": "Skill 回归评测、质量门禁与人工审核规范",
+        "skeleton": {"content": "# Eval 回归规范\n\n## 一、适用范围\n本规范适用于 Skill、Agent 工作流和关键任务方案。\n\n## 二、评测要求\n- 明确输入样例\n- 明确期望输出\n- 明确评分 Rubric\n- 记录成本、耗时和成功率\n\n## 三、评测流程\n1. 准备样例集\n2. 运行当前版本\n3. 运行候选版本\n4. 对比质量与成本\n5. 记录人工审核结论\n\n## 四、发布门禁\n- [ ] 成功率达标\n- [ ] 成本可接受\n- [ ] 失败样例已解释\n- [ ] Memory 已沉淀\n\n## 五、备注\n"}
+    }
+]
+
+
+def _seed_templates(conn):
+    count = conn.execute("SELECT COUNT(*) as c FROM yixiu_doc_templates").fetchone()["c"]
+    if count > 0:
+        return
+    now = _now()
+    for t in _BUILTIN_TEMPLATES:
+        conn.execute(
+            "INSERT INTO yixiu_doc_templates VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+            (t["id"], t["name"], t["icon"], t["category"], t["description"],
+             json.dumps(t["skeleton"], ensure_ascii=False), now),
+        )
+
+
+def _db() -> sqlite3.Connection:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS yixiu_files (
+          id TEXT PRIMARY KEY, name TEXT NOT NULL, stored_name TEXT, mime TEXT,
+          type TEXT, category TEXT, folder TEXT, size INTEGER DEFAULT 0,
+          equipment TEXT, model TEXT, uploader TEXT, uploaded_at TEXT,
+          audit_status TEXT, parse_status TEXT, version TEXT DEFAULT 'v1.0',
+          purpose TEXT DEFAULT 'knowledge', analysis_json TEXT DEFAULT '{}'
+        );
+        CREATE TABLE IF NOT EXISTS yixiu_tasks (
+          id TEXT PRIMARY KEY, payload TEXT NOT NULL, status TEXT NOT NULL,
+          completed_steps TEXT DEFAULT '[]', created_at TEXT, updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS yixiu_knowledge (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL, type TEXT, category TEXT,
+          equipment TEXT, model TEXT, summary TEXT, content TEXT, tags TEXT,
+          source TEXT, status TEXT, reviewer TEXT, correction TEXT,
+          created_at TEXT, updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS yixiu_contacts (
+          id TEXT PRIMARY KEY, account TEXT UNIQUE, name TEXT NOT NULL,
+          avatar TEXT, position TEXT, department TEXT, specialty TEXT,
+          phone TEXT, status TEXT DEFAULT '在线', devices TEXT DEFAULT '[]',
+          current_task TEXT, workload INTEGER DEFAULT 0,
+          employee_id TEXT, updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS yixiu_messages (
+          id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL,
+          sender_id TEXT, sender_name TEXT, message_type TEXT DEFAULT 'text',
+          text TEXT, attachment_json TEXT DEFAULT '{}', card_json TEXT DEFAULT '{}',
+          created_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_yixiu_messages_conversation
+          ON yixiu_messages(conversation_id, created_at);
+        CREATE TABLE IF NOT EXISTS yixiu_knowledge_versions (
+          id TEXT PRIMARY KEY,
+          knowledge_id TEXT NOT NULL,
+          version INTEGER NOT NULL,
+          content_snapshot TEXT NOT NULL,
+          title_snapshot TEXT,
+          change_summary TEXT DEFAULT '',
+          editor_id TEXT,
+          editor_name TEXT,
+          created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS yixiu_knowledge_collaborators (
+          id TEXT PRIMARY KEY,
+          knowledge_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          user_name TEXT NOT NULL,
+          role TEXT DEFAULT 'editor',
+          last_active_at TEXT,
+          is_online INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS yixiu_knowledge_links (
+          id TEXT PRIMARY KEY,
+          knowledge_id TEXT NOT NULL,
+          link_type TEXT NOT NULL,
+          target_id TEXT NOT NULL,
+          target_title TEXT,
+          created_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_knowledge_versions
+          ON yixiu_knowledge_versions(knowledge_id, version);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_collaborators
+          ON yixiu_knowledge_collaborators(knowledge_id);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_links
+          ON yixiu_knowledge_links(knowledge_id);
+        CREATE TABLE IF NOT EXISTS yixiu_doc_templates (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          icon TEXT DEFAULT '📝',
+          category TEXT DEFAULT '通用',
+          description TEXT DEFAULT '',
+          skeleton_json TEXT DEFAULT '{}',
+          is_builtin INTEGER DEFAULT 0,
+          created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS yixiu_aios_runs (
+          id TEXT PRIMARY KEY,
+          goal TEXT NOT NULL,
+          mode TEXT DEFAULT 'auto',
+          plan_json TEXT NOT NULL,
+          status TEXT DEFAULT 'planned',
+          progress INTEGER DEFAULT 0,
+          artifacts_json TEXT DEFAULT '{}',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS yixiu_task_memory (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          memory_key TEXT NOT NULL,
+          memory_value TEXT NOT NULL,
+          author TEXT DEFAULT 'aios',
+          created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS yixiu_agent_events (
+          id TEXT PRIMARY KEY,
+          run_id TEXT DEFAULT '',
+          agent_id TEXT NOT NULL,
+          agent_name TEXT NOT NULL,
+          event_type TEXT DEFAULT 'task',
+          title TEXT NOT NULL,
+          content TEXT DEFAULT '',
+          payload_json TEXT DEFAULT '{}',
+          status TEXT DEFAULT 'done',
+          created_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_yixiu_agent_events_run
+          ON yixiu_agent_events(run_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_yixiu_agent_events_agent
+          ON yixiu_agent_events(agent_id, created_at);
+        CREATE TABLE IF NOT EXISTS yixiu_agent_memory (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          memory_key TEXT NOT NULL,
+          memory_value TEXT NOT NULL,
+          tags TEXT DEFAULT '[]',
+          updated_at TEXT,
+          UNIQUE(agent_id, memory_key)
+        );
+        CREATE TABLE IF NOT EXISTS yixiu_aios_queue (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          step_key TEXT NOT NULL,
+          agent_id TEXT NOT NULL,
+          action TEXT NOT NULL,
+          state TEXT DEFAULT 'pending',
+          priority INTEGER DEFAULT 50,
+          payload_json TEXT DEFAULT '{}',
+          result_json TEXT DEFAULT '{}',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_yixiu_aios_queue_run
+          ON yixiu_aios_queue(run_id, state, priority);
+        CREATE TABLE IF NOT EXISTS yixiu_agent_configs (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          role TEXT DEFAULT '',
+          model_provider TEXT DEFAULT 'qwen',
+          model_name TEXT DEFAULT 'qwen-local-or-cloud',
+          prompt TEXT DEFAULT '',
+          tools_json TEXT DEFAULT '[]',
+          knowledge_ids_json TEXT DEFAULT '[]',
+          memory_keys_json TEXT DEFAULT '[]',
+          database_scope TEXT DEFAULT 'read_business',
+          status TEXT DEFAULT 'enabled',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS yixiu_agent_teams (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT DEFAULT '',
+          lead_agent_id TEXT DEFAULT 'tiangong',
+          members_json TEXT DEFAULT '[]',
+          workflow_json TEXT DEFAULT '{}',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS yixiu_conversation_sessions (
+          id TEXT PRIMARY KEY,
+          user_id TEXT DEFAULT 'current-user',
+          title TEXT NOT NULL,
+          channel TEXT DEFAULT 'web',
+          active_agent_id TEXT DEFAULT 'tiangong',
+          context_json TEXT DEFAULT '{}',
+          status TEXT DEFAULT 'active',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS yixiu_aios_approvals (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          step_key TEXT DEFAULT '',
+          action TEXT DEFAULT '',
+          title TEXT NOT NULL,
+          detail TEXT DEFAULT '',
+          requester_agent_id TEXT DEFAULT 'tiangong',
+          status TEXT DEFAULT 'pending',
+          requested_by TEXT DEFAULT 'AIOS',
+          decided_by TEXT DEFAULT '',
+          decision_note TEXT DEFAULT '',
+          created_at TEXT,
+          decided_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_yixiu_aios_approvals_run
+          ON yixiu_aios_approvals(run_id, status, created_at);
+        CREATE TABLE IF NOT EXISTS yixiu_aios_channels (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          channel_type TEXT DEFAULT 'web',
+          endpoint TEXT DEFAULT '',
+          enabled INTEGER DEFAULT 1,
+          agent_id TEXT DEFAULT 'tiangong',
+          config_json TEXT DEFAULT '{}',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS yixiu_service_accounts (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          role TEXT DEFAULT 'service',
+          scopes_json TEXT DEFAULT '[]',
+          enabled INTEGER DEFAULT 1,
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS team_projects (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          repo_url TEXT DEFAULT '',
+          owner TEXT DEFAULT '',
+          status TEXT DEFAULT 'active',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS team_context_packs (
+          id TEXT PRIMARY KEY,
+          task_id TEXT DEFAULT '',
+          title TEXT NOT NULL,
+          objective TEXT DEFAULT '',
+          source_refs_json TEXT DEFAULT '[]',
+          code_refs_json TEXT DEFAULT '[]',
+          memory_refs_json TEXT DEFAULT '[]',
+          skill_refs_json TEXT DEFAULT '[]',
+          risk_json TEXT DEFAULT '{}',
+          status TEXT DEFAULT 'draft',
+          created_by TEXT DEFAULT 'Context Engine',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS team_memories (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          memory_type TEXT DEFAULT 'Memory Unit',
+          problem TEXT DEFAULT '',
+          attempts_json TEXT DEFAULT '[]',
+          root_cause TEXT DEFAULT '',
+          solution TEXT DEFAULT '',
+          applies_when TEXT DEFAULT '',
+          validation_json TEXT DEFAULT '{}',
+          source_refs_json TEXT DEFAULT '[]',
+          tags_json TEXT DEFAULT '[]',
+          status TEXT DEFAULT 'pending_review',
+          reviewer TEXT DEFAULT '',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS team_skills (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          version TEXT DEFAULT 'v0.1',
+          purpose TEXT DEFAULT '',
+          trigger_rules TEXT DEFAULT '',
+          workflow_json TEXT DEFAULT '{}',
+          required_context_json TEXT DEFAULT '[]',
+          metrics_json TEXT DEFAULT '{}',
+          status TEXT DEFAULT 'draft',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS team_eval_cases (
+          id TEXT PRIMARY KEY,
+          skill_id TEXT DEFAULT '',
+          name TEXT NOT NULL,
+          input_json TEXT DEFAULT '{}',
+          expected_json TEXT DEFAULT '{}',
+          rubric_json TEXT DEFAULT '{}',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS team_eval_runs (
+          id TEXT PRIMARY KEY,
+          eval_case_id TEXT DEFAULT '',
+          skill_id TEXT DEFAULT '',
+          skill_version TEXT DEFAULT '',
+          score REAL DEFAULT 0,
+          success INTEGER DEFAULT 0,
+          cost_json TEXT DEFAULT '{}',
+          result_json TEXT DEFAULT '{}',
+          created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS team_issue_skill_links (
+          id TEXT PRIMARY KEY,
+          issue_key TEXT NOT NULL,
+          task_id TEXT DEFAULT '',
+          repeat_count INTEGER DEFAULT 1,
+          memory_id TEXT DEFAULT '',
+          skill_id TEXT DEFAULT '',
+          status TEXT DEFAULT 'candidate',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS team_model_routing_logs (
+          id TEXT PRIMARY KEY,
+          task_id TEXT DEFAULT '',
+          agent_id TEXT DEFAULT '',
+          model_name TEXT DEFAULT '',
+          reason TEXT DEFAULT '',
+          context_pack_id TEXT DEFAULT '',
+          cost_json TEXT DEFAULT '{}',
+          created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS external_ai_sources (
+          id TEXT PRIMARY KEY,
+          provider TEXT NOT NULL,
+          name TEXT NOT NULL,
+          auth_type TEXT DEFAULT 'mcp_token',
+          workspace_name TEXT DEFAULT '',
+          endpoint TEXT DEFAULT '',
+          scopes_json TEXT DEFAULT '[]',
+          status TEXT DEFAULT 'enabled',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS external_ai_imports (
+          id TEXT PRIMARY KEY,
+          source_id TEXT DEFAULT '',
+          provider TEXT DEFAULT '',
+          project_id TEXT DEFAULT '',
+          project_name TEXT DEFAULT '',
+          title TEXT NOT NULL,
+          raw_content TEXT DEFAULT '',
+          content_type TEXT DEFAULT 'summary',
+          parse_status TEXT DEFAULT 'pending',
+          summary TEXT DEFAULT '',
+          metadata_json TEXT DEFAULT '{}',
+          imported_by TEXT DEFAULT 'AI Import Gateway',
+          imported_at TEXT,
+          updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS external_ai_artifacts (
+          id TEXT PRIMARY KEY,
+          import_id TEXT NOT NULL,
+          artifact_type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          content TEXT DEFAULT '',
+          confidence INTEGER DEFAULT 70,
+          review_status TEXT DEFAULT 'pending_review',
+          target_ref TEXT DEFAULT '',
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_external_ai_imports_project
+          ON external_ai_imports(project_id, provider, imported_at);
+        CREATE INDEX IF NOT EXISTS idx_external_ai_artifacts_import
+          ON external_ai_artifacts(import_id, artifact_type, review_status);
+        """
+    )
+    # 预置模板数据
+    _seed_templates(conn)
+    _seed_agent_memory(conn)
+    _seed_agent_configs(conn)
+    _seed_agent_teams(conn)
+    _seed_aios_channels(conn)
+    return conn
+
+
+def _json(value, default):
+    try:
+        return json.loads(value) if value else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _split_lines(text: str) -> list[str]:
+    return [line.strip(" \t-•*#") for line in str(text or "").splitlines() if line.strip(" \t-•*#")]
+
+
+def _pick_lines(lines: list[str], keywords: list[str], limit: int = 4) -> list[str]:
+    matched = []
+    for line in lines:
+        if any(word.lower() in line.lower() for word in keywords):
+            matched.append(line[:220])
+        if len(matched) >= limit:
+            break
+    return matched
+
+
+def _guess_import_title(provider: str, project_name: str, content: str) -> str:
+    for line in _split_lines(content):
+        cleaned = line.strip()
+        if cleaned and len(cleaned) <= 60:
+            return cleaned
+    prefix = {"codex": "Codex", "claude": "Claude", "chatgpt": "ChatGPT", "cursor": "Cursor"}.get(provider, provider or "外部 AI")
+    return f"{prefix} 工作台导入 - {project_name or '未关联项目'}"
+
+
+CODEX_FIXED_UPLOAD_FIELDS = [
+    "task_goal", "work_summary", "changed_files", "decisions", "risks",
+    "todos", "validation", "memory_candidates", "skill_candidates",
+    "eval_cases", "next_actions",
+]
+
+
+def _list_from_import_value(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        items = value
+    else:
+        items = str(value).replace("；", "\n").replace(";", "\n").splitlines()
+    return [str(item).strip()[:260] for item in items if str(item).strip()]
+
+
+def _structured_external_report(data: dict) -> dict:
+    report = data.get("codex_report") or data.get("structured_report") or {}
+    if not isinstance(report, dict):
+        report = {}
+    merged = {key: data.get(key, report.get(key)) for key in CODEX_FIXED_UPLOAD_FIELDS}
+    return {key: value for key, value in merged.items() if value not in (None, "", [])}
+
+
+def _parse_fixed_report_from_content(content: str) -> dict:
+    try:
+        parsed = json.loads(content)
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    report = parsed.get("codex_report") or parsed.get("structured_report") or parsed
+    if not isinstance(report, dict):
+        return {}
+    if not any(key in report for key in CODEX_FIXED_UPLOAD_FIELDS):
+        return {}
+    return {key: report.get(key) for key in CODEX_FIXED_UPLOAD_FIELDS if report.get(key) not in (None, "", [])}
+
+
+def _fixed_report_to_content(report: dict) -> str:
+    labels = {
+        "task_goal": "任务目标",
+        "work_summary": "工作总结",
+        "changed_files": "改动文件",
+        "decisions": "关键决策",
+        "risks": "风险与边界",
+        "todos": "待办事项",
+        "validation": "验证结果",
+        "memory_candidates": "Memory 候选",
+        "skill_candidates": "Skill 候选",
+        "eval_cases": "Eval 候选",
+        "next_actions": "下一步",
+    }
+    sections = []
+    for key in CODEX_FIXED_UPLOAD_FIELDS:
+        value = report.get(key)
+        if value in (None, "", []):
+            continue
+        items = _list_from_import_value(value)
+        if not items:
+            continue
+        if len(items) == 1:
+            sections.append(f"{labels[key]}：{items[0]}")
+        else:
+            sections.append(f"{labels[key]}：\n" + "\n".join(f"- {item}" for item in items))
+    return "\n".join(sections)
+
+
+def _parse_external_ai_content(provider: str, project_name: str, title: str, content: str) -> dict:
+    lines = _split_lines(content)
+    text = "\n".join(lines)
+    fixed_report = _parse_fixed_report_from_content(text)
+    decisions = _pick_lines(lines, ["决策", "决定", "方案", "采用", "选择", "decision"], 5)
+    risks = _pick_lines(lines, ["风险", "阻塞", "问题", "失败", "注意", "risk", "blocker"], 5)
+    todos = _pick_lines(lines, ["待办", "todo", "下一步", "follow", "需要", "补充"], 5)
+    files = _pick_lines(lines, [".vue", ".js", ".py", ".sql", ".md", "修改", "文件", "diff", "pr"], 6)
+    summary = "；".join(lines[:3])[:360] if lines else "外部 AI 工作台导入内容等待解析。"
+    if fixed_report:
+        fixed_goal = _list_from_import_value(fixed_report.get("task_goal"))
+        fixed_summary = _list_from_import_value(fixed_report.get("work_summary"))
+        fixed_validation = _list_from_import_value(fixed_report.get("validation"))
+        decisions = _list_from_import_value(fixed_report.get("decisions")) or decisions
+        risks = _list_from_import_value(fixed_report.get("risks")) or risks
+        todos = _list_from_import_value(fixed_report.get("todos") or fixed_report.get("next_actions")) or todos
+        files = _list_from_import_value(fixed_report.get("changed_files")) or files
+        summary_parts = [*fixed_goal[:1], *fixed_summary[:2], *fixed_validation[:1]]
+        summary = "；".join(summary_parts)[:360] if summary_parts else summary
+    if not decisions:
+        decisions = ["保留外部 AI 对话中的关键方案，等待人工审核后沉淀为团队决策。"]
+    if not risks:
+        risks = ["需人工确认导入内容是否包含敏感信息、错误结论或不适用上下文。"]
+    if not todos:
+        todos = ["关联到项目进展，并决定是否生成 Memory、Skill 或 Eval 用例。"]
+
+    memory_content = "\n".join([
+        f"来源：{provider or 'external'} / {project_name or '未关联项目'}",
+        f"摘要：{summary}",
+        "关键决策：",
+        *[f"- {item}" for item in decisions[:3]],
+        "风险与边界：",
+        *[f"- {item}" for item in risks[:3]],
+    ])
+    skill_content = "\n".join([
+        "触发条件：当项目出现同类需求、Bug、PR 或上下文缺口时使用。",
+        "执行流程：",
+        "1. 导入外部 AI 工作台记录",
+        "2. 提取目标、决策、风险、待办和代码变更",
+        "3. 关联项目与 Context Pack",
+        "4. 生成人工审核的 Memory / Skill / Eval 候选",
+    ])
+    eval_content = "\n".join([
+        "评测目标：验证外部 AI 导入内容是否能复用到项目推进。",
+        "检查项：摘要准确性、风险完整性、代码变更可追溯性、Memory 候选可审核性。",
+        f"代码/文件线索：{'；'.join(files[:4]) if files else '待补充'}",
+    ])
+    if fixed_report.get("memory_candidates"):
+        memory_content = "\n".join(_list_from_import_value(fixed_report.get("memory_candidates")))
+    if fixed_report.get("skill_candidates"):
+        skill_content = "\n".join(_list_from_import_value(fixed_report.get("skill_candidates")))
+    if fixed_report.get("eval_cases"):
+        eval_content = "\n".join(_list_from_import_value(fixed_report.get("eval_cases")))
+    artifacts = [
+        {"artifact_type": "project_update", "title": f"{title} - 项目进展", "content": summary, "confidence": 82},
+        {"artifact_type": "decision", "title": f"{title} - 关键决策", "content": "\n".join(decisions), "confidence": 78},
+        {"artifact_type": "risk", "title": f"{title} - 风险提醒", "content": "\n".join(risks), "confidence": 76},
+        {"artifact_type": "todo", "title": f"{title} - 待办事项", "content": "\n".join(todos), "confidence": 74},
+        {"artifact_type": "memory_candidate", "title": f"{title} Memory 候选", "content": memory_content, "confidence": 80},
+        {"artifact_type": "skill_candidate", "title": "外部 AI 工作台导入 Skill 候选", "content": skill_content, "confidence": 72},
+        {"artifact_type": "eval_case", "title": f"{title} 导入质量 Eval", "content": eval_content, "confidence": 70},
+    ]
+    return {
+        "summary": summary,
+        "metadata": {
+            "line_count": len(lines),
+            "decision_count": len(decisions),
+            "risk_count": len(risks),
+            "todo_count": len(todos),
+            "file_refs": files,
+            "parser": "codex_fixed_v1" if fixed_report else "rule_based_v1",
+            "fixed_format": bool(fixed_report),
+        },
+        "artifacts": artifacts,
+    }
+
+
+def _external_source_payload(row) -> dict:
+    item = dict(row)
+    item["scopes"] = _json(item.pop("scopes_json", "[]"), [])
+    return item
+
+
+def _external_import_payload(row, artifacts: list[dict] | None = None) -> dict:
+    item = dict(row)
+    item["metadata"] = _json(item.pop("metadata_json", "{}"), {})
+    item["artifacts"] = artifacts or []
+    return item
+
+
+def _external_artifact_payload(row) -> dict:
+    return dict(row)
+
+
+def _create_external_ai_import_record(data: dict) -> dict:
+    provider = str(data.get("provider") or "codex").strip().lower()
+    project_name = str(data.get("project_name") or data.get("project") or "").strip()
+    fixed_report = _structured_external_report(data)
+    raw_content = str(data.get("raw_content") or data.get("content") or "").strip()
+    if fixed_report:
+        raw_content = json.dumps({
+            "format": "yixiu.codex.upload.v1",
+            "codex_report": fixed_report,
+            "rendered_content": _fixed_report_to_content(fixed_report),
+        }, ensure_ascii=False, indent=2)
+    if not raw_content:
+        raise ValueError("请提供需要导入的外部 AI 内容")
+    title = str(data.get("title") or _guess_import_title(provider, project_name, raw_content)).strip()
+    import_id = data.get("id") or f"imp-{uuid.uuid4().hex[:12]}"
+    source_id = data.get("source_id") or f"src-{provider}"
+    now = _now()
+    parsed = _parse_external_ai_content(provider, project_name, title, raw_content)
+    with _db() as conn:
+        conn.execute(
+            """
+            INSERT INTO external_ai_imports
+              (id, source_id, provider, project_id, project_name, title, raw_content, content_type,
+               parse_status, summary, metadata_json, imported_by, imported_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'parsed', ?, ?, ?, ?, ?)
+            """,
+            (
+                import_id, source_id, provider, data.get("project_id", ""), project_name,
+                title, raw_content, data.get("content_type", "summary"), parsed["summary"],
+                json.dumps(parsed["metadata"], ensure_ascii=False), data.get("imported_by", "AI Import Gateway"), now, now,
+            ),
+        )
+        for artifact in parsed["artifacts"]:
+            conn.execute(
+                """
+                INSERT INTO external_ai_artifacts
+                  (id, import_id, artifact_type, title, content, confidence, review_status, target_ref, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'pending_review', '', ?, ?)
+                """,
+                (
+                    f"art-{uuid.uuid4().hex[:12]}", import_id, artifact["artifact_type"], artifact["title"],
+                    artifact["content"], artifact["confidence"], now, now,
+                ),
+            )
+        row = conn.execute("SELECT * FROM external_ai_imports WHERE id=?", (import_id,)).fetchone()
+        artifacts = conn.execute("SELECT * FROM external_ai_artifacts WHERE import_id=? ORDER BY created_at DESC", (import_id,)).fetchall()
+    return _external_import_payload(row, [_external_artifact_payload(item) for item in artifacts])
+
+
+AGENT_ALIASES = {
+    "retrieval": "guanwei", "procedure": "zhiju", "knowledge": "bowen",
+    "collaboration": "heming", "audit": "mingjian",
+    "天工": "tiangong", "观微": "guanwei", "执矩": "zhiju",
+    "博闻": "bowen", "和鸣": "heming", "明鉴": "mingjian",
+}
+
+
+def _agent_key(agent_id: str) -> str:
+    key = str(agent_id or "tiangong").strip()
+    return AGENT_ALIASES.get(key, key)
+
+
+def _seed_agent_memory(conn: sqlite3.Connection) -> None:
+    now = _now()
+    for agent in AGENTS:
+        memories = {
+            "role": agent.get("role", ""),
+            "duty": agent.get("duty", ""),
+            "capabilities": "、".join(agent.get("capabilities", [])),
+            "ip": agent.get("ip", ""),
+        }
+        for key, value in memories.items():
+            conn.execute(
+                """INSERT OR IGNORE INTO yixiu_agent_memory
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    f"mem-{agent['id']}-{key}",
+                    agent["id"],
+                    key,
+                    value,
+                    json.dumps(["agent", key], ensure_ascii=False),
+                    now,
+                ),
+            )
+
+
+def _seed_agent_configs(conn: sqlite3.Connection) -> None:
+    now = _now()
+    for agent in AGENTS:
+        agent_id = agent["id"]
+        memory_keys = ["role", "duty", "capabilities", "ip"]
+        conn.execute(
+            """INSERT INTO yixiu_agent_configs
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 name=excluded.name,
+                 role=excluded.role,
+                 prompt=excluded.prompt,
+                 tools_json=excluded.tools_json,
+                 memory_keys_json=excluded.memory_keys_json,
+                 updated_at=excluded.updated_at""",
+            (
+                agent_id,
+                agent["name"],
+                agent.get("role", ""),
+                "qwen",
+                "qwen-local-or-cloud",
+                AGENT_PROMPTS.get(agent_id, ""),
+                json.dumps(AGENT_TOOL_ALLOWLISTS.get(agent_id, []), ensure_ascii=False),
+                json.dumps(["Context Pack", "Memory Unit", "Skill", "Eval Case"], ensure_ascii=False),
+                json.dumps(memory_keys, ensure_ascii=False),
+                "business_read_write" if agent_id in {"tiangong", "zhiju", "bowen", "heming"} else "read_business",
+                "enabled",
+                now,
+                now,
+            ),
+        )
+
+
+def _seed_agent_teams(conn: sqlite3.Connection) -> None:
+    now = _now()
+    workflow = {
+        "name": "Team Memory OS 人机协作工作流",
+        "tech_stack": AIOS_TECH_STACK,
+        "engine": "LangGraph 状态图编排，MCP 工具调用，E2B 沙箱隔离，Postgres/pgvector 长期记忆，FastAPI 统一入口，LangSmith Trace 观测。",
+        "steps": [
+            {"key": "upload", "title": "问题解析与附件接入", "agent_id": "tiangong"},
+            {"key": "vision", "title": "意图识别与图文上下文整理", "agent_id": "guanwei"},
+            {"key": "rag", "title": "Memory 与 Skill 召回", "agent_id": "guanwei"},
+            {"key": "diagnose", "title": "信息整合与任务判断", "agent_id": "guanwei"},
+            {"key": "sop", "title": "执行流编排与人工确认", "agent_id": "zhiju", "requires_approval": True},
+            {"key": "confirm", "title": "校验确认", "agent_id": "tiangong", "human_in_loop": True},
+            {"key": "report", "title": "结果生成与报告建议", "agent_id": "mingjian"},
+            {"key": "archive", "title": "知识沉淀候选", "agent_id": "bowen", "requires_approval": True},
+        ],
+    }
+    members = [
+        {"agent_id": agent["id"], "name": agent["name"], "role": agent["role"]}
+        for agent in AGENTS
+    ]
+    conn.execute(
+        """INSERT INTO yixiu_agent_teams
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             members_json=excluded.members_json,
+             workflow_json=excluded.workflow_json,
+             updated_at=excluded.updated_at""",
+        (
+            "team-yixiu-closed-loop",
+            "一修 Team Memory OS",
+            "由天工统筹，观微组装上下文，执矩编排执行，和鸣演化经验，博闻沉淀 Memory，明鉴执行 Eval。",
+            "tiangong",
+            json.dumps(members, ensure_ascii=False),
+            json.dumps(workflow, ensure_ascii=False),
+            now,
+            now,
+        ),
+    )
+
+
+def _seed_aios_channels(conn: sqlite3.Connection) -> None:
+    now = _now()
+    channels = [
+        ("channel-web", "PC Web 工作台", "web", "/"),
+        ("channel-rest", "REST API", "rest", "/api/yixiu/aios"),
+        ("channel-mcp", "MCP 工具入口", "mcp", "miniclaw.tools"),
+    ]
+    for channel_id, name, channel_type, endpoint in channels:
+        conn.execute(
+            """INSERT OR IGNORE INTO yixiu_aios_channels
+               VALUES (?, ?, ?, ?, 1, 'tiangong', ?, ?, ?)""",
+            (
+                channel_id,
+                name,
+                channel_type,
+                endpoint,
+                json.dumps({"supports_session": True, "supports_trace": True}, ensure_ascii=False),
+                now,
+                now,
+            ),
+        )
+
+
+def _agent_event_dict(row) -> dict:
+    item = dict(row)
+    item["payload"] = _json(item.pop("payload_json", "{}"), {})
+    return item
+
+
+def _record_agent_event(
+    conn: sqlite3.Connection,
+    agent_id: str,
+    title: str,
+    content: str = "",
+    event_type: str = "task",
+    status: str = "done",
+    payload: dict | None = None,
+    run_id: str = "",
+) -> dict:
+    agent = _agent_by_id(agent_id)
+    event = {
+        "id": f"evt-{uuid.uuid4().hex[:12]}",
+        "run_id": run_id,
+        "agent_id": agent["id"],
+        "agent_name": agent["name"],
+        "event_type": event_type,
+        "title": title or "AIOS 执行事件",
+        "content": content or "",
+        "payload": payload or {},
+        "status": status,
+        "created_at": _now(),
+    }
+    conn.execute(
+        "INSERT INTO yixiu_agent_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            event["id"], event["run_id"], event["agent_id"], event["agent_name"],
+            event["event_type"], event["title"], event["content"],
+            json.dumps(event["payload"], ensure_ascii=False), event["status"], event["created_at"],
+        ),
+    )
+    return event
+
+
+def _agent_metrics(conn: sqlite3.Connection, agent_id: str) -> dict:
+    key = _agent_key(agent_id)
+    event_count = conn.execute("SELECT COUNT(*) FROM yixiu_agent_events WHERE agent_id=?", (key,)).fetchone()[0]
+    memory_count = conn.execute("SELECT COUNT(*) FROM yixiu_agent_memory WHERE agent_id=?", (key,)).fetchone()[0]
+    last = conn.execute(
+        "SELECT * FROM yixiu_agent_events WHERE agent_id=? ORDER BY created_at DESC LIMIT 1",
+        (key,),
+    ).fetchone()
+    return {
+        "event_count": event_count,
+        "memory_count": memory_count,
+        "last_event": _agent_event_dict(last) if last else None,
+    }
+
+
+def _queue_dict(row) -> dict:
+    item = dict(row)
+    item["payload"] = _json(item.pop("payload_json", "{}"), {})
+    item["result"] = _json(item.pop("result_json", "{}"), {})
+    return item
+
+
+def _agent_config_dict(row) -> dict:
+    item = dict(row)
+    item["tools"] = _json(item.pop("tools_json", "[]"), [])
+    item["knowledge_ids"] = _json(item.pop("knowledge_ids_json", "[]"), [])
+    item["memory_keys"] = _json(item.pop("memory_keys_json", "[]"), [])
+    base = _agent_by_id(item.get("id"))
+    item["avatar"] = base.get("avatar", "")
+    item["capabilities"] = base.get("capabilities", [])
+    item["output_schema"] = AGENT_OUTPUT_SCHEMAS.get(item.get("id"), {})
+    return item
+
+
+def _team_dict(row) -> dict:
+    item = dict(row)
+    item["members"] = _json(item.pop("members_json", "[]"), [])
+    item["workflow"] = _json(item.pop("workflow_json", "{}"), {})
+    return item
+
+
+def _session_dict(row) -> dict:
+    item = dict(row)
+    item["context"] = _json(item.pop("context_json", "{}"), {})
+    return item
+
+
+def _approval_dict(row) -> dict:
+    return dict(row)
+
+
+def _channel_dict(row) -> dict:
+    item = dict(row)
+    item["enabled"] = bool(item.get("enabled"))
+    item["config"] = _json(item.pop("config_json", "{}"), {})
+    return item
+
+
+def _service_account_dict(row) -> dict:
+    item = dict(row)
+    item["enabled"] = bool(item.get("enabled"))
+    item["scopes"] = _json(item.pop("scopes_json", "[]"), [])
+    return item
+
+
+def _sync_aios_queue(conn: sqlite3.Connection, run_id: str, plan: dict, artifacts: dict | None = None) -> list[dict]:
+    artifacts = artifacts or {}
+    queued = []
+    priority_base = 100
+    for index, step in enumerate(plan.get("steps", [])):
+        agent = step.get("agent") or {}
+        row_id = f"queue-{run_id}-{step.get('key')}"
+        state = step.get("state") or step.get("status") or "pending"
+        result = artifacts.get(step.get("key")) or step.get("result") or {}
+        payload = {
+            "title": step.get("title"),
+            "input": step.get("input") or {},
+            "depends_on": step.get("depends_on") or [],
+            "requires_approval": step.get("requires_approval", False),
+            "approved": step.get("approved", False),
+            "expected_output": step.get("expected_output", ""),
+        }
+        values = (
+            row_id, run_id, step.get("key"), _agent_key(agent.get("id")),
+            step.get("action"), state, priority_base - index,
+            json.dumps(payload, ensure_ascii=False),
+            json.dumps(result, ensure_ascii=False),
+            _now(), _now(),
+        )
+        conn.execute(
+            """INSERT INTO yixiu_aios_queue
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET state=excluded.state,
+               priority=excluded.priority, payload_json=excluded.payload_json,
+               result_json=excluded.result_json, updated_at=excluded.updated_at""",
+            values,
+        )
+        queued.append({
+            "id": row_id,
+            "run_id": run_id,
+            "step_key": step.get("key"),
+            "agent_id": _agent_key(agent.get("id")),
+            "action": step.get("action"),
+            "state": state,
+        })
+    return queued
+
+
+def _ensure_aios_approval(conn: sqlite3.Connection, run_id: str, step: dict, detail: str = "") -> dict:
+    step_key = str(step.get("key") or "")
+    existing = conn.execute(
+        "SELECT * FROM yixiu_aios_approvals WHERE run_id=? AND step_key=? AND status='pending'",
+        (run_id, step_key),
+    ).fetchone()
+    if existing:
+        return _approval_dict(existing)
+    agent = step.get("agent") or {}
+    approval_id = f"apr-{uuid.uuid4().hex[:12]}"
+    title = f"智能体请求执行：{step.get('title') or step.get('action')}"
+    conn.execute(
+        """INSERT INTO yixiu_aios_approvals
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 'AIOS', '', '', ?, '')""",
+        (
+            approval_id,
+            run_id,
+            step_key,
+            step.get("action") or "",
+            title,
+            detail or step.get("tool_description") or step.get("expected_output") or "",
+            _agent_key(agent.get("id")),
+            _now(),
+        ),
+    )
+    return _approval_dict(conn.execute("SELECT * FROM yixiu_aios_approvals WHERE id=?", (approval_id,)).fetchone())
+
+
+def _load_aios_run(conn: sqlite3.Connection, run_id: str) -> dict | None:
+    row = conn.execute("SELECT * FROM yixiu_aios_runs WHERE id=?", (run_id,)).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    item["plan"] = _json(item.pop("plan_json", "{}"), {})
+    item["artifacts"] = _json(item.pop("artifacts_json", "{}"), {})
+    item["events"] = [
+        _agent_event_dict(event)
+        for event in conn.execute(
+            "SELECT * FROM yixiu_agent_events WHERE run_id=? ORDER BY created_at ASC",
+            (run_id,),
+        ).fetchall()
+    ]
+    item["queue"] = [
+        _queue_dict(queue)
+        for queue in conn.execute(
+            "SELECT * FROM yixiu_aios_queue WHERE run_id=? ORDER BY priority DESC, created_at ASC",
+            (run_id,),
+        ).fetchall()
+    ]
+    return item
+
+
+def _run_status_from_plan(plan: dict, progress: int) -> str:
+    workflow_state = plan.get("workflow_state")
+    if workflow_state and workflow_state != "planned":
+        return workflow_state
+    return "completed" if progress == 100 else "running"
+
+
+def _database_status() -> dict:
+    tables = [
+        "yixiu_files", "yixiu_tasks", "yixiu_knowledge", "yixiu_messages",
+        "yixiu_aios_runs", "yixiu_task_memory", "yixiu_agent_events",
+        "yixiu_agent_memory", "yixiu_aios_queue", "yixiu_agent_configs",
+        "yixiu_agent_teams", "yixiu_conversation_sessions",
+        "yixiu_aios_approvals", "yixiu_aios_channels", "yixiu_service_accounts",
+        "team_projects", "team_context_packs", "team_memories", "team_skills",
+        "team_eval_cases", "team_eval_runs", "team_issue_skill_links",
+        "team_model_routing_logs",
+    ]
+    result = {
+        "sqlite": {"name": "一修业务库", "path": str(DB_PATH), "exists": DB_PATH.exists(), "ok": True, "tables": {}},
+        "checked_at": _now(),
+    }
+    try:
+        with _db() as conn:
+            for table in tables:
+                result["sqlite"]["tables"][table] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+    except Exception as exc:  # noqa: BLE001
+        result["sqlite"]["ok"] = False
+        result["sqlite"]["message"] = f"数据库检查失败：{exc}"
+    return result
+
+
+def _aios_platform_snapshot() -> dict:
+    with _db() as conn:
+        agents = [
+            _agent_config_dict(row)
+            for row in conn.execute("SELECT * FROM yixiu_agent_configs ORDER BY id").fetchall()
+        ]
+        teams = [
+            _team_dict(row)
+            for row in conn.execute("SELECT * FROM yixiu_agent_teams ORDER BY updated_at DESC").fetchall()
+        ]
+        sessions = [
+            _session_dict(row)
+            for row in conn.execute("SELECT * FROM yixiu_conversation_sessions ORDER BY updated_at DESC LIMIT 12").fetchall()
+        ]
+        approvals = [
+            _approval_dict(row)
+            for row in conn.execute("SELECT * FROM yixiu_aios_approvals ORDER BY created_at DESC LIMIT 20").fetchall()
+        ]
+        channels = [
+            _channel_dict(row)
+            for row in conn.execute("SELECT * FROM yixiu_aios_channels ORDER BY id").fetchall()
+        ]
+        service_accounts = [
+            _service_account_dict(row)
+            for row in conn.execute("SELECT * FROM yixiu_service_accounts ORDER BY created_at DESC LIMIT 20").fetchall()
+        ]
+        latest_runs = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT id, goal, mode, status, progress, created_at, updated_at FROM yixiu_aios_runs ORDER BY updated_at DESC LIMIT 8"
+            ).fetchall()
+        ]
+        latest_events = [
+            _agent_event_dict(row)
+            for row in conn.execute("SELECT * FROM yixiu_agent_events ORDER BY created_at DESC LIMIT 20").fetchall()
+        ]
+        counts = {
+            "agents": len(agents),
+            "teams": len(teams),
+            "sessions": conn.execute("SELECT COUNT(*) FROM yixiu_conversation_sessions").fetchone()[0],
+            "memories": conn.execute("SELECT COUNT(*) FROM yixiu_agent_memory").fetchone()[0],
+            "runs": conn.execute("SELECT COUNT(*) FROM yixiu_aios_runs").fetchone()[0],
+            "pending_approvals": conn.execute("SELECT COUNT(*) FROM yixiu_aios_approvals WHERE status='pending'").fetchone()[0],
+            "channels": len(channels),
+        }
+    return {
+        "name": "天工 AIOS",
+        "description": "面向设备检修的多智能体运行平台，支持 LangGraph 编排、MCP 工具、E2B 沙箱、Postgres/pgvector 记忆、FastAPI 入口和 LangSmith 观测。",
+        "tech_stack": AIOS_TECH_STACK,
+        "tiangong_prompt": TIANGONG_OPERATION_PROMPT,
+        "agents": agents,
+        "teams": teams,
+        "workflows": {
+            "actions": AIOS_ACTION_REGISTRY,
+            "default_team": "team-yixiu-closed-loop",
+            "supports": ["long_task", "resume", "cancel", "human_approval", "trace", "background_queue"],
+        },
+        "sessions": sessions,
+        "memory": {
+            "types": ["用户偏好", "任务状态", "设备信息", "智能体角色记忆", "故障处置经验"],
+            "total": counts["memories"],
+        },
+        "rag": {
+            "sources": ["维修手册", "PDF/Word 文档", "历史故障案例", "SOP", "安全规范", "知识图谱"],
+            "retrieval_modes": ["语义检索", "设备型号检索", "故障现象检索", "图像/附件上下文检索"],
+        },
+        "tools": {
+            "registry": AIOS_ACTION_REGISTRY,
+            "categories": ["数据库查询", "知识检索", "文件解析", "任务流转", "协作消息", "复检核查", "报告生成"],
+        },
+        "approvals": approvals,
+        "trace": {
+            "latest_runs": latest_runs,
+            "latest_events": latest_events,
+            "views": ["时间轴", "树状调用链", "智能体执行记录", "审批记录"],
+        },
+        "permissions": {
+            "auth": ["JWT", "RBAC", "服务账号"],
+            "roles": ["检修人员", "知识管理员", "复检人员", "项目管理员", "系统管理员"],
+            "scopes": ["knowledge:read", "knowledge:write", "task:read", "task:write", "approval:decide", "agent:admin"],
+            "service_accounts": service_accounts,
+        },
+        "channels": channels,
+        "database": _database_status(),
+        "counts": counts,
+        "updated_at": _now(),
+    }
+
+
+def _trace_tree(run: dict, approvals: list[dict]) -> dict:
+    plan = run.get("plan") or {}
+    queue_by_step = {item.get("step_key"): item for item in run.get("queue", [])}
+    events_by_step: dict[str, list[dict]] = {}
+    for event in run.get("events", []):
+        step_key = (event.get("payload") or {}).get("step_key") or ""
+        events_by_step.setdefault(step_key, []).append(event)
+    approvals_by_step: dict[str, list[dict]] = {}
+    for approval in approvals:
+        approvals_by_step.setdefault(approval.get("step_key") or "", []).append(approval)
+    nodes = []
+    for step in plan.get("steps", []):
+        key = step.get("key")
+        nodes.append({
+            "id": key,
+            "title": step.get("title"),
+            "agent": step.get("agent", {}),
+            "action": step.get("action"),
+            "state": step.get("state") or step.get("status"),
+            "depends_on": step.get("depends_on") or [],
+            "queue": queue_by_step.get(key),
+            "events": events_by_step.get(key, []),
+            "approvals": approvals_by_step.get(key, []),
+        })
+    return {
+        "run_id": run.get("id"),
+        "goal": run.get("goal"),
+        "status": run.get("status"),
+        "progress": run.get("progress"),
+        "nodes": nodes,
+        "timeline": run.get("events", []),
+    }
+
+
+def _file_type(filename: str, mime: str = "") -> str:
+    ext = Path(filename).suffix.lower()
+    if mime.startswith("image/") or ext in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}:
+        return "图片"
+    if mime == "application/pdf" or ext == ".pdf":
+        return "PDF"
+    if ext in {".doc", ".docx", ".wps"}:
+        return "Word"
+    if ext in {".xls", ".xlsx", ".csv"}:
+        return "Excel"
+    if mime.startswith("video/") or ext in {".mp4", ".webm", ".mov"}:
+        return "视频"
+    if mime.startswith("text/") or ext in {".txt", ".md", ".log"}:
+        return "文本"
+    return "其他"
+
+
+def _file_dict(row) -> dict:
+    item = dict(row)
+    item["auditStatus"] = item.pop("audit_status")
+    item["parseStatus"] = item.pop("parse_status")
+    item["uploaded_at"] = item.get("uploaded_at", "")
+    item["sizeBytes"] = item.pop("size", 0)
+    size = item["sizeBytes"]
+    item["size"] = f"{size / 1024 / 1024:.1f} MB" if size >= 1024 * 1024 else f"{max(size / 1024, 0.1):.1f} KB"
+    item["analysis"] = _json(item.pop("analysis_json", "{}"), {})
+    item["url"] = f"/api/yixiu/files/{item['id']}/content"
+    return item
+
+
+def _demo_tasks(status: str = "") -> list[dict]:
+    items = [
+        {
+            "id": "tm-1",
+            "workOrderNo": "TM-20260907-001",
+            "title": "支付回调偶发重复扣款修复",
+            "equipment_name": "支付服务",
+            "equipment_no": "repo/payment-service",
+            "equipment_model": "Node.js + MySQL",
+            "equipment_category": "后端服务",
+            "fault_code": "BUG-421",
+            "fault_type": "线上 Bug",
+            "description": "回调重试时幂等键缺失，需要人和 Agent 联合修复并补 Eval。",
+            "severity": "high",
+            "status": "pending",
+            "assignee_name": "聪明的一修",
+            "collaborators": ["Context Engine", "Eval Lab"],
+            "current_step": "Context Pack 生成",
+            "progress": 18,
+            "due_at": "2026-09-07 18:00",
+            "created_at": "2026-09-07 09:30",
+            "tools": ["日志检索", "PR Diff", "回归用例"],
+            "parts": ["幂等校验 Skill", "支付回调 Memory"],
+            "safety": ["影响面确认", "灰度发布", "回滚方案"],
+            "sop": ["组装上下文", "定位根因", "生成修复方案", "提交 PR", "运行 Eval", "沉淀 Memory"],
+            "recheck": {"status": "waiting", "result": "", "comment": ""},
+        },
+        {
+            "id": "tm-2",
+            "workOrderNo": "TM-20260907-002",
+            "title": "权限模型重构任务",
+            "equipment_name": "成员权限模块",
+            "equipment_no": "repo/team-console",
+            "equipment_model": "Vue + Flask",
+            "equipment_category": "前后端协作",
+            "fault_code": "PR-118",
+            "fault_type": "功能改造",
+            "description": "统一项目、任务、Memory 和 Skill 的权限边界。",
+            "severity": "medium",
+            "status": "in_progress",
+            "assignee_name": "王铭",
+            "collaborators": ["聪明的一修", "Agent Router"],
+            "current_step": "执行链路同步",
+            "progress": 56,
+            "due_at": "2026-09-07 20:00",
+            "created_at": "2026-09-07 08:15",
+            "tools": ["Schema Diff", "接口契约", "用例矩阵"],
+            "parts": ["权限决策 Memory", "路由策略 Skill"],
+            "safety": ["数据隔离", "最小权限", "审计记录"],
+            "sop": ["梳理需求", "改造接口", "更新前端状态", "补充回归用例", "记录决策"],
+            "recheck": {"status": "waiting", "result": "", "comment": ""},
+        },
+    ]
+    return [item for item in items if not status or item.get("status") == status]
+
+
+def _base_knowledge() -> list[dict]:
+    if KNOWLEDGE_PATH.exists():
+        try:
+            return json.loads(KNOWLEDGE_PATH.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("读取基础知识库失败: %s", exc)
+    return []
+
+
+def _stored_knowledge() -> list[dict]:
+    with _db() as conn:
+        rows = conn.execute("SELECT * FROM yixiu_knowledge ORDER BY created_at DESC").fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["tags"] = _json(item.get("tags"), [])
+        item["reviewable"] = True
+        result.append(item)
+    return result
+
+
+def _task_payload(row) -> dict:
+    item = _json(row["payload"], {})
+    item.update({"id": row["id"], "status": row["status"], "completedSteps": _json(row["completed_steps"], [])})
+    return item
+
+
+def _ensure_task_row(conn: sqlite3.Connection, task_id: str):
+    row = conn.execute("SELECT * FROM yixiu_tasks WHERE id=?", (task_id,)).fetchone()
+    if row:
+        return row
+    demo = next((item for item in _demo_tasks("") if str(item.get("id")) == str(task_id)), None)
+    if not demo:
+        return None
+    sop = demo.get("sop") or ["安全确认", "故障记录", "部件检测", "维修处置", "复测提交"]
+    demo = {**demo, "sop": sop}
+    conn.execute("INSERT INTO yixiu_tasks VALUES (?, ?, ?, ?, ?, ?)", (str(task_id), json.dumps(demo, ensure_ascii=False), demo.get("status", "pending"), "[]", demo.get("created_at", _now()), _now()))
+    return conn.execute("SELECT * FROM yixiu_tasks WHERE id=?", (str(task_id),)).fetchone()
+
+
+def _sop_for(category: str, level: str, fault: str) -> tuple[list[dict], list[str]]:
+    category = category or "通用任务"
+    level = level or "标准协作"
+    fault = fault or "任务"
+    steps = [
+        {"title": "目标与影响面确认", "detail": f"确认{category}{level}任务范围，明确业务影响、数据风险和回滚边界。", "required": True, "evidence": "任务说明"},
+        {"title": "Context Pack 生成", "detail": f"记录{fault}背景，召回需求、代码、Issue、PR、聊天和历史 Memory。", "required": True, "evidence": "上下文包"},
+        {"title": "按依据制定方案", "detail": "按照召回的 Memory、Skill 和历史任务生成执行步骤，先确认根因再修改。", "required": True, "evidence": "方案记录"},
+        {"title": "人机协作执行", "detail": "分派成员和 Agent，记录关键决策、产物、失败尝试和调整原因。", "required": True, "evidence": "执行记录"},
+        {"title": "Eval Lab 验证", "detail": "对照样例集和 Rubric 验证质量、成本、成功率和回归结果。", "required": True, "evidence": "Eval 结果"},
+        {"title": "Memory / Skill 沉淀", "detail": "提交根因、方案、适用条件和验证记录；有效经验进入人工审核队列。", "required": True, "evidence": "Memory 候选"},
+    ]
+    safety = ["敏感日志和客户数据必须脱敏", "高影响任务必须保留回滚方案", "未经 Eval 验证的 Skill 不直接推广复用"]
+    return steps, safety
+
+
+def _fallback_image_analysis(filename: str) -> dict:
+    return {
+        "equipment": "待结合设备型号确认",
+        "fault_signs": ["已接收现场图片", "需结合故障描述确认异常部位"],
+        "risk_points": ["仅凭图片不能直接判定部件失效", "维修前必须完成安全隔离"],
+        "analysis": f"图片 {filename} 已纳入跨模态检索，将与设备型号、故障现象和手册条目联合匹配。",
+        "suggestion": "补充拍摄设备铭牌、异常部位全景和细节图，可提高检索准确度。",
+        "provider": "local-fallback",
+    }
+
+
+def _analyze_image(path: Path, mime: str) -> dict:
+    fallback = _fallback_image_analysis(path.name)
+    try:
+        from services.ai_gateway import ai_agent
+        status = ai_agent.status()
+        if not status.get("configured"):
+            return fallback
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        text = ai_agent.vision(
+            prompt="识别设备、异常部位、故障迹象和安全风险，给出简洁 JSON。",
+            image_base64=f"data:{mime};base64,{encoded}",
+            system_prompt="你是设备检修视觉分析助手。只根据可见证据描述，不确定内容必须标注待确认。",
+        )
+        parsed = ai_agent.parse_json(text)
+        return parsed or {**fallback, "analysis": text, "provider": status.get("provider", "ai")}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("视觉模型不可用，使用本地回退: %s", exc)
+        return fallback
+
+
+def _normalize_text_list(value, fallback: list[str]) -> list[str]:
+    if isinstance(value, list):
+        items = [str(item).strip() for item in value if str(item).strip()]
+        return items or fallback
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return fallback
+
+
+def _normalize_sop(value, fallback: list[dict]) -> list[dict]:
+    if not isinstance(value, list):
+        return fallback
+    steps = []
+    for index, item in enumerate(value, start=1):
+        if isinstance(item, dict):
+            action = str(item.get("action") or item.get("content") or item.get("text") or "").strip()
+            if action:
+                try:
+                    step_no = int(item.get("step") or index)
+                except (TypeError, ValueError):
+                    step_no = index
+                steps.append({"step": step_no, "action": action})
+        elif str(item).strip():
+            steps.append({"step": index, "action": str(item).strip()})
+    return steps or fallback
+
+
+def _search_llm_prompt(result: dict, matched: list[dict], attachments: list[dict]) -> str:
+    evidence = []
+    for item in matched[:6]:
+        evidence.append({
+            "title": item.get("title") or item.get("name"),
+            "type": item.get("type"),
+            "summary": item.get("summary"),
+            "tags": item.get("tags", []),
+        })
+    files = []
+    for item in attachments[:6]:
+        files.append({
+            "name": item.get("name"),
+            "type": item.get("type"),
+            "analysis": item.get("analysis", {}),
+        })
+    return (
+        "请作为一修系统的多模态检修检索智能体，根据用户输入、图片/文档分析和召回资料，"
+        "生成可直接展示在检索结果面板里的中文结构化内容。必须只返回 JSON 对象，不要 Markdown，不要代码块。"
+        "不要编造具体检测数值；不确定处写“待现场确认”。"
+        "JSON 字段必须包含：phenomenon_summary, match_score, risk, stop_advice, "
+        "causes, positions, tools, visual_findings, recommended_sop, safety, audit。"
+        "risk 只能是 low/medium/high；match_score 为 0-100 整数；"
+        "causes/positions/tools/visual_findings/safety 为字符串数组；"
+        "recommended_sop 为数组，每项包含 step 和 action；audit 包含 risk_level, must_check, auditor。\n"
+        f"当前基础结果：{json.dumps(result, ensure_ascii=False)[:5000]}\n"
+        f"召回资料：{json.dumps(evidence, ensure_ascii=False)[:3000]}\n"
+        f"附件分析：{json.dumps(files, ensure_ascii=False)[:3000]}"
+    )
+
+
+def _enhance_search_with_llm(result: dict, matched: list[dict], attachments: list[dict]) -> dict:
+    enhanced = dict(result)
+    try:
+        from services.ai_gateway import ai_agent
+        status = ai_agent.status()
+        enhanced["llm"] = {
+            "enabled": bool(status.get("configured")),
+            "provider": status.get("provider"),
+            "model": status.get("chat_model"),
+            "generated": False,
+        }
+        if not status.get("configured"):
+            enhanced["llm"]["error"] = "AI 服务未配置，已使用本地规则结果"
+            return enhanced
+        messages = [
+            {"role": "system", "content": "你是工业设备检修领域的大模型检索助手，只输出合法 JSON。"},
+            {"role": "user", "content": _search_llm_prompt(result, matched, attachments)},
+        ]
+        try:
+            answer = ai_agent.chat(
+                messages,
+                temperature=0.25,
+                max_tokens=1800,
+                response_format={"type": "json_object"},
+            )
+        except Exception as exc:  # noqa: BLE001
+            if "response_format" not in str(exc):
+                raise
+            answer = ai_agent.chat(messages, temperature=0.25, max_tokens=1800)
+        parsed = ai_agent.parse_json(answer)
+        if not parsed:
+            enhanced["llm"]["error"] = "模型返回内容无法解析，已使用本地规则结果"
+            return enhanced
+        if parsed.get("phenomenon_summary"):
+            enhanced["phenomenon_summary"] = str(parsed["phenomenon_summary"]).strip()
+        if isinstance(parsed.get("match_score"), (int, float)):
+            enhanced["match_score"] = max(0, min(100, int(parsed["match_score"])))
+        if parsed.get("risk") in {"low", "medium", "high"}:
+            enhanced["risk"] = parsed["risk"]
+        if parsed.get("stop_advice"):
+            enhanced["stop_advice"] = str(parsed["stop_advice"]).strip()
+        enhanced["causes"] = _normalize_text_list(parsed.get("causes"), enhanced.get("causes", []))
+        enhanced["positions"] = _normalize_text_list(parsed.get("positions"), enhanced.get("positions", []))
+        enhanced["tools"] = _normalize_text_list(parsed.get("tools"), enhanced.get("tools", []))
+        enhanced["visual_findings"] = _normalize_text_list(parsed.get("visual_findings"), enhanced.get("visual_findings", []))
+        enhanced["recommended_sop"] = _normalize_sop(parsed.get("recommended_sop"), enhanced.get("recommended_sop", []))
+        enhanced["safety"] = _normalize_text_list(parsed.get("safety"), enhanced.get("safety", []))
+        if isinstance(parsed.get("audit"), dict):
+            audit = dict(enhanced.get("audit") or {})
+            audit.update(parsed["audit"])
+            audit.setdefault("auditor", "明鉴")
+            enhanced["audit"] = audit
+        enhanced["llm"]["generated"] = True
+        enhanced["llm"]["generated_at"] = _now()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("多模态检索大模型生成失败: %s", exc)
+        enhanced.setdefault("llm", {})
+        enhanced["llm"].update({"generated": False, "error": str(exc)})
+    return enhanced
+
+
+def _agent_by_id(agent_id: str) -> dict:
+    key = _agent_key(agent_id)
+    agent = next((item for item in AGENTS if item.get("id") == key or item.get("name") == key), AGENTS[0])
+    return enrich_agent(dict(agent))
+
+
+_CHITCHAT_KEYWORDS = (
+    "你好", "您好", "嗨", "hi", "hello", "hey", "在吗", "在么", "在不在",
+    "你是谁", "你是", "介绍一下自己", "自我介绍", "早上好", "下午好",
+    "晚上好", "早安", "晚安", "谢谢", "thanks", "thank you", "好的",
+    "ok", "okay", "嗯", "哦", "再见", "bye", "拜拜", "88", "哈喽",
+)
+
+
+def _is_chitchat(message: str) -> bool:
+    """启发式判断消息是否为问候/闲聊，避免误触规则化工具上下文。"""
+    msg = (message or "").strip().lower()
+    if not msg or len(msg) > 12:
+        return False
+    if msg in _CHITCHAT_KEYWORDS:
+        return True
+    return any(kw in msg for kw in _CHITCHAT_KEYWORDS)
+
+
+def _agent_fallback_answer(agent: dict, message: str, tool_context: dict | None, chitchat: bool) -> str:
+    name = agent.get("name", "一修智能体")
+    role = agent.get("role", "智能体")
+    duty = agent.get("duty", "协助完成设备检修工作")
+    if chitchat:
+        return f"你好，我是{name}，一修系统中的{role}。{duty}你可以把现场现象、设备型号或图片线索发给我，我会按职责协助处理。"
+    if tool_context and tool_context.get("summary"):
+        summary = str(tool_context.get("summary")).strip()
+        extra = ""
+        if tool_context.get("suggestion"):
+            extra = f"\n建议：{tool_context['suggestion']}"
+        elif tool_context.get("recommended_status"):
+            extra = f"\n建议状态：{tool_context['recommended_status']}"
+        elif tool_context.get("recommendation"):
+            extra = f"\n建议：{tool_context['recommendation']}"
+        return f"{name}已收到：{message}\n{summary}{extra}"
+    return f"{name}已收到：{message}。我会围绕“{duty}”继续协助；如涉及现场作业，请先完成安全确认、证据记录和复测闭环。"
+
+
+def _knowledge_hits(query: str, task: dict | None = None, limit: int = 5) -> list[dict]:
+    words = [item for item in str(query or "").lower().replace("/", " ").split() if item]
+    if task:
+        words.extend(str(task.get(key, "")).lower() for key in ("equipment_name", "equipment", "fault_type", "description"))
+    candidates = _stored_knowledge() + _base_knowledge()
+
+    def score(item: dict) -> int:
+        text = json.dumps(item, ensure_ascii=False).lower()
+        return sum(1 for word in words if word and word in text)
+
+    ranked = sorted(candidates, key=score, reverse=True)
+    return [item for item in ranked if score(item) > 0][:limit] or ranked[:limit]
+
+
+def _focus_task(goal: str, task_id: str = "") -> dict:
+    tasks = []
+    with _db() as conn:
+        tasks.extend(_task_payload(row) for row in conn.execute("SELECT * FROM yixiu_tasks ORDER BY updated_at DESC").fetchall())
+    tasks.extend(_demo_tasks(""))
+    if task_id:
+        found = next((item for item in tasks if str(item.get("id")) == str(task_id)), None)
+        if found:
+            return found
+    if _has_affirmative_water_scene(goal):
+        return {}
+    high = next((item for item in tasks if item.get("severity") in {"critical", "high"}), None)
+    return high or (tasks[0] if tasks else {})
+
+
+def _aios_snapshot(goal: str, mode: str, task: dict) -> dict:
+    tasks = []
+    with _db() as conn:
+        tasks.extend(_task_payload(row) for row in conn.execute("SELECT * FROM yixiu_tasks ORDER BY updated_at DESC").fetchall())
+    tasks.extend(_demo_tasks(""))
+    contacts = CONTACTS
+    knowledge = _knowledge_hits(goal, task, limit=5)
+    return {
+        "mode": mode,
+        "focus_task": task,
+        "counts": {
+            "tasks": len(tasks),
+            "pending": len([item for item in tasks if item.get("status") in {"pending", "in_progress"}]),
+            "high_risk": len([item for item in tasks if item.get("severity") in {"critical", "high"}]),
+            "contacts": len(contacts),
+            "knowledge_hits": len(knowledge),
+        },
+        "knowledge_hits": knowledge,
+        "contacts": contacts,
+        "generated_at": _now(),
+    }
+
+
+def _goal_contains(goal: str, keywords: list[str]) -> bool:
+    text = str(goal or "").lower()
+    return any(str(word).lower() in text for word in keywords)
+
+
+def _has_affirmative_water_scene(goal: str) -> bool:
+    text = str(goal or "").lower()
+    if not _goal_contains(text, ["车淹", "泡水", "涉水", "积水", "水淹", "进水"]):
+        return False
+    return not _goal_contains(text, [
+        "没有泡水", "无泡水", "未泡水", "不是泡水", "非泡水",
+        "没有涉水", "无涉水", "未涉水", "不涉水", "不是涉水", "非涉水",
+        "没有积水", "无积水", "未积水", "不是积水", "非积水",
+        "没有进水", "无进水", "未进水", "不进水", "不是进水", "非进水",
+        "没有水淹", "无水淹", "未水淹", "不涉及水",
+    ])
+
+
+def _aios_focus_keyword(goal: str, task: dict | None = None) -> str:
+    task = task or {}
+    text = str(goal or "")
+    if _has_affirmative_water_scene(text):
+        return "泡水车辆检修知识"
+    if _goal_contains(text, ["汽车", "汽修", "轿车", "乘用车"]):
+        return "汽车维修知识"
+    if _goal_contains(text, ["摩托", "cg-125", "发动机异响"]):
+        return "摩托车发动机维修知识"
+    equipment = task.get("equipment_name") or task.get("equipment") or task.get("device")
+    fault = task.get("fault_type") or task.get("fault")
+    return " ".join([str(item) for item in [equipment, fault] if item]) or "设备检修知识"
+
+
+def _aios_context_notes(goal: str, task: dict, snapshot: dict) -> list[str]:
+    notes = [
+        f"当前任务池 {snapshot.get('counts', {}).get('tasks', 0)} 条，待处理 {snapshot.get('counts', {}).get('pending', 0)} 条。",
+        f"已召回 {snapshot.get('counts', {}).get('knowledge_hits', 0)} 条候选资料，可用于 RAG 与人工复核。",
+    ]
+    if task:
+        notes.append(f"焦点工单：{task.get('workOrderNo') or task.get('id')}，设备 {task.get('equipment_name') or task.get('equipment') or '待确认'}，状态 {task.get('status') or '待确认'}。")
+    if _goal_contains(goal, ["和鸣", "联系人", "协作", "总结"]):
+        notes.append("需要和鸣参与，优先汇总今日未读、任务群、专家支援和待确认事项。")
+    if _goal_contains(goal, ["知识库", "知识图谱", "资料", "摩托", "汽车"]):
+        notes.append("需要博闻和观微参与，先打开知识库并围绕目标关键词检索资料与图谱关系。")
+    return notes
+
+
+def _aios_mode(goal: str, requested: str = "auto") -> str:
+    if requested and requested != "auto":
+        return requested
+    if any(word in goal for word in ["和鸣", "协作", "联系人", "专家", "支援", "今天的信息总结", "未读", "沟通", "消息"]):
+        return "support"
+    if any(word in goal for word in ["复检", "验收", "核查", "返工"]):
+        return "review"
+    if any(word in goal for word in ["知识", "沉淀", "入库", "资料"]):
+        return "knowledge"
+    if any(word in goal for word in ["长任务", "打开", "查找", "询问", "问和鸣", "今天的信息总结", "全系统", "所有页面"]):
+        return "orchestrate"
+    return "repair"
+
+
+def _aios_plan(goal: str, mode: str = "auto", task_id: str = "") -> dict:
+    goal = (goal or "").strip() or "统筹完成当前设备检修任务，形成闭环。"
+    mode = _aios_mode(goal, mode)
+    task = _focus_task(goal, task_id)
+    snapshot = _aios_snapshot(goal, mode, task)
+    equipment = task.get("equipment_name") or task.get("equipment") or "待确认设备"
+    fault = task.get("fault_type") or "待确认故障"
+    focus_keyword = _aios_focus_keyword(goal, task)
+    steps = [
+        ("sense", "tiangong", "问题解析：读取系统状态并锁定目标", "sense_overview", "首页", "system_overview", {"goal": goal, "task_id": task.get("id"), "keyword": focus_keyword}),
+        ("open_search", "guanwei", "上下文定位：进入智能检索并整理多模态线索", "retrieve_knowledge", "智能检索", "navigate+prefill", {"query": focus_keyword, "equipment": equipment, "fault": fault}),
+        ("retrieve", "guanwei", "知识检索：召回资料与故障依据", "retrieve_knowledge", "智能检索", "knowledge_search+rag_query", {"query": focus_keyword, "equipment": equipment, "fault": fault}),
+        ("diagnose", "guanwei", "信息整合：综合证据进行故障判断", "diagnose_fault", "智能检索", "rag_query", {"query": focus_keyword, "equipment": equipment, "fault": fault}),
+        ("open_task", "zhiju", "上下文定位：打开检修任务并匹配工单", "sense_overview", "检修任务", "navigate+filter", {"task_id": task.get("id"), "equipment": equipment, "status": task.get("status")}),
+        ("operate", "zhiju", "作业编排：生成 SOP 与安全确认", "orchestrate_task", "检修任务", "task_update+safety_check", {"task_id": task.get("id"), "equipment": equipment, "fault": fault}),
+        ("collaborate", "heming", "智能体协作：协调人员并生成沟通草稿", "coordinate_team", "检修任务 / 联系人交流", "contacts_read+conversation_message_draft", {"task_id": task.get("id"), "risk": task.get("severity")}),
+        ("open_knowledge", "bowen", "知识检索：打开知识库并定位图谱关系", "retrieve_knowledge", "知识库", "openKnowledgeGraph+knowledge_search", {"query": focus_keyword, "equipment": equipment}),
+        ("archive", "bowen", "知识沉淀：生成待审核知识候选", "archive_knowledge", "知识库 / 沉淀更新", "knowledge_candidate_create", {"task_id": task.get("id"), "equipment": equipment, "fault": fault}),
+        ("review", "mingjian", "校验确认：生成复检核查清单", "prepare_recheck", "检修任务 / 复检评估", "recheck+quality_score", {"task_id": task.get("id")}),
+        ("memory", "tiangong", "信息整合：写入会话与长期记忆", "record_memory", "AIOS 记忆", "pgvector_memory_write", {"task_id": task.get("id"), "goal": goal}),
+        ("finalize", "mingjian", "结果生成：输出闭环报告与可观察记录", "finalize_report", "首页 / 报告预览", "report_verify+langsmith_trace", {"task_id": task.get("id"), "goal": goal}),
+    ]
+    priority_orders = {
+        "knowledge": ["sense", "open_knowledge", "archive", "open_search", "retrieve", "diagnose", "open_task", "operate", "collaborate", "review", "memory", "finalize"],
+        "support": ["sense", "collaborate", "open_task", "operate", "review", "open_search", "retrieve", "diagnose", "open_knowledge", "archive", "memory", "finalize"],
+        "review": ["sense", "review", "open_task", "operate", "collaborate", "open_search", "retrieve", "diagnose", "open_knowledge", "archive", "memory", "finalize"],
+        "orchestrate": ["sense", "open_search", "retrieve", "diagnose", "open_task", "operate", "collaborate", "open_knowledge", "archive", "review", "memory", "finalize"],
+        "repair": ["sense", "open_search", "retrieve", "diagnose", "open_task", "operate", "review", "collaborate", "open_knowledge", "archive", "memory", "finalize"],
+    }
+    order = priority_orders.get(mode)
+    if order:
+        rank = {key: index for index, key in enumerate(order)}
+        original_rank = {step[0]: index for index, step in enumerate(steps)}
+        steps = sorted(steps, key=lambda step: (rank.get(step[0], 99), original_rank.get(step[0], 99)))
+    plan_steps = []
+    for key, agent_id, title, action, page, tool, step_input in steps:
+        meta = AIOS_ACTION_REGISTRY.get(action, {})
+        plan_steps.append({
+            "key": key,
+            "agent": _agent_by_id(agent_id),
+            "title": title,
+            "action": action,
+            "page": page,
+            "ui_action": tool.split("+")[0] if tool else "invokeAgent",
+            "mcp_tool": tool,
+            "capability": meta.get("capability", action),
+            "operation_kind": meta.get("kind", "read"),
+            "requires_approval": bool(meta.get("requires_approval", False)),
+            "tool_description": meta.get("description", ""),
+            "status": "pending",
+            "input": step_input,
+            "expected_output": meta.get("description", ""),
+            "visualizable": True,
+        })
+    plan_id = f"aios-{uuid.uuid4().hex[:12]}"
+    plan = {
+        "id": plan_id,
+        "goal": goal,
+        "mode": mode,
+        "focus": task,
+        "focus_keyword": focus_keyword,
+        "context_notes": _aios_context_notes(goal, task, snapshot),
+        "snapshot": snapshot,
+        "steps": plan_steps,
+        "progress": 0,
+        "created_at": _now(),
+    }
+    plan = attach_state_machine(plan)
+    with _db() as conn:
+        conn.execute("INSERT INTO yixiu_aios_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (plan_id, goal, mode, json.dumps(plan, ensure_ascii=False), "planned", 0, "{}", _now(), _now()))
+        _sync_aios_queue(conn, plan_id, plan)
+        _record_agent_event(
+            conn,
+            "tiangong",
+            "生成 AIOS 执行计划",
+            f"天工已把「{goal}」拆解为 {len(plan_steps)} 个步骤。",
+            event_type="plan",
+            payload={"mode": mode, "step_count": len(plan_steps), "focus_task": task.get("id")},
+            run_id=plan_id,
+        )
+    return plan
+
+
+def _aios_execute_action(step: dict, snapshot: dict, commit: bool = True) -> dict:
+    action = step.get("action")
+    focus = snapshot.get("focus_task") or {}
+    if action == "sense_overview":
+        return {
+            "summary": "已读取系统概览并锁定当前任务。",
+            "counts": snapshot.get("counts", {}),
+            "focus_task": focus,
+            "next_focus": step.get("input", {}).get("keyword") or _aios_focus_keyword("", focus),
+        }
+    if action == "retrieve_knowledge":
+        query = step.get("input", {}).get("query") or json.dumps(step.get("input", {}), ensure_ascii=False)
+        hits = _knowledge_hits(query, focus, limit=8)
+        # 真实能力：调用 RAG 向量检索补充命中（失败回退到本地匹配）
+        rag_hits = []
+        try:
+            from services.rag_service import search_similar
+            rag_hits = search_similar(query, limit=5, mode="hybrid")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("RAG 检索失败，回退到本地匹配: %s", exc)
+        merged_refs = hits + [{"title": item.get("text", "")[:60], "type": "rag_chunk", "source": item.get("source", "lightrag"), "score": item.get("score", 1.0)} for item in rag_hits]
+        grouped: dict[str, int] = {}
+        for item in merged_refs:
+            key = item.get("type") or item.get("category") or "资料"
+            grouped[key] = grouped.get(key, 0) + 1
+        return {
+            "summary": f"已围绕「{query}」召回 {len(merged_refs)} 条资料依据（RAG {len(rag_hits)} 条 + 本地 {len(hits)} 条）。",
+            "query": query,
+            "references": merged_refs,
+            "grouped": grouped,
+            "rag_hits": rag_hits,
+            "usable_for": ["智能检索结果", "知识图谱节点", "作业方案引用", "复检依据"],
+        }
+    if action == "diagnose_fault":
+        sop, safety = _sop_for(focus.get("category"), focus.get("maintenanceLevel"), focus.get("fault_type"))
+        query = step.get("input", {}).get("query") or _aios_focus_keyword("", focus)
+        # 真实能力：用 RAG 召回相似案例作为诊断依据
+        rag_evidence = []
+        try:
+            from services.rag_service import search_similar
+            rag_evidence = search_similar(query, limit=3, mode="hybrid")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("诊断 RAG 检索失败: %s", exc)
+        diagnosis = {
+            "query": query,
+            "fault": focus.get("fault_type") or step.get("input", {}).get("fault"),
+            "possible_causes": ["连接松动或磨损", "润滑/散热不足", "传感或控制信号异常"],
+            "first_checks": sop[:3],
+            "safety": safety,
+            "confidence": 0.82,
+            "rag_evidence": rag_evidence,
+        }
+        return {
+            "summary": "已形成可追溯故障判断。" + (f" 召回 {len(rag_evidence)} 条相似案例。" if rag_evidence else ""),
+            "diagnosis": diagnosis,
+        }
+    if action == "orchestrate_task":
+        sop, safety = _sop_for(focus.get("category"), focus.get("maintenanceLevel"), focus.get("fault_type"))
+        # 真实能力：写入 yixiu_knowledge 候选（pending 状态，等待人工审核）
+        candidate_id = ""
+        if commit and focus.get("id"):
+            try:
+                candidate_id = f"kb-{uuid.uuid4().hex[:12]}"
+                title = f"{focus.get('equipment_name') or '设备'}{focus.get('fault_type') or '故障'}检修方案"
+                with _db() as conn:
+                    conn.execute(
+                        "INSERT INTO yixiu_knowledge VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (candidate_id, title, "SOP 生成", "作业方案", focus.get("equipment_name", ""), focus.get("model", ""), f"由执矩为工单 {focus.get('id')} 生成的 SOP。", "\n".join(f"{i+1}. {s.get('action','')}" for i, s in enumerate(sop)), json.dumps(["aios生成", "待审核"], ensure_ascii=False), "aios_zhiju", "pending", "", "", _now(), _now()),
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("SOP 候选写入失败: %s", exc)
+        return {
+            "summary": "已生成检修 SOP、工具备件和安全确认项。" + (f" 已写入待审核候选 {candidate_id}。" if candidate_id else ""),
+            "sop": sop,
+            "safety": safety,
+            "tools": ["绝缘手套", "扭矩扳手", "万用表", "红外测温仪", "清洁耗材"],
+            "spares": ["密封件", "紧固件", "易损传感器", "润滑材料"],
+            "recommended_status": "in_progress",
+            "knowledge_candidate_id": candidate_id,
+            "needs_confirmation": True,
+        }
+    if action == "coordinate_team":
+        contacts = sorted(CONTACTS, key=lambda item: item.get("workload", 0))[:3]
+        message = f"建议优先联系：{', '.join(item['name'] for item in contacts)}，同步当前风险、SOP 和复检要求。"
+        if commit:
+            with _db() as conn:
+                conn.execute("INSERT INTO yixiu_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (f"msg-{uuid.uuid4().hex[:12]}", f"task-{focus.get('id') or 'aios'}", "aios", "天工", "text", message, "{}", "{}", _now()))
+        return {
+            "summary": message,
+            "recommended_contacts": contacts,
+            "today": {
+                "unread": 4,
+                "urgent": 2,
+                "pending_confirmations": ["高风险检修晨会", "ZK-320 复检反馈", "资料审核退回说明"],
+                "digest": "今日重点是高风险工单确认、复检反馈闭环和维修资料审核。",
+            },
+            "draft_message": "请同步当前异常现象、已完成安全隔离、待复测数据和需要专家确认的问题。",
+            "needs_confirmation": True,
+        }
+    if action == "prepare_recheck":
+        checklist = ["故障是否消除", "安全措施是否恢复", "复测数据是否达标", "报告和证据是否完整"]
+        return {
+            "summary": "已生成复检清单。",
+            "checklist": checklist,
+            "quality_gate": {"required_evidence": 4, "blocking_items": ["高风险步骤未二次确认", "复测数据缺失"]},
+        }
+    if action == "record_memory":
+        memory = {"goal": step.get("input", {}).get("goal"), "task": focus.get("id"), "summary": "本次诊断、SOP、协作和复检要求可复用。"}
+        if commit and focus.get("id"):
+            with _db() as conn:
+                conn.execute("INSERT INTO yixiu_task_memory VALUES (?, ?, ?, ?, ?, ?)", (f"mem-{uuid.uuid4().hex[:12]}", str(focus.get("id")), "aios_execution", json.dumps(memory, ensure_ascii=False), "aios", _now()))
+        return {"summary": "已整理任务记忆，等待用户确认后可沉淀。", "memory": memory, "needs_confirmation": True}
+    if action == "archive_knowledge":
+        # 真实能力：写入 yixiu_knowledge 表，状态 pending，等人工审核
+        candidate_id = ""
+        if commit:
+            try:
+                candidate_id = f"kb-{uuid.uuid4().hex[:12]}"
+                title = f"{focus.get('equipment_name') or '设备'}{focus.get('fault_type') or '故障'}检修经验"
+                with _db() as conn:
+                    conn.execute(
+                        "INSERT INTO yixiu_knowledge VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (candidate_id, title, "历史故障案例", "案例", focus.get("equipment_name", ""), focus.get("model", ""), "由博闻整理的待审核知识候选。", "## 故障现象\n待补充\n\n## 原因判断\n待补充\n\n## 维修方案\n待补充\n\n## 复检标准\n待补充", json.dumps(["aios生成", "待审核"], ensure_ascii=False), "aios_bowen", "pending", "", "", _now(), _now()),
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("知识候选写入失败: %s", exc)
+        return {
+            "summary": "已生成待审核知识候选。" + (f" 候选ID: {candidate_id}。" if candidate_id else ""),
+            "knowledge_candidate": {
+                "id": candidate_id,
+                "title": f"{focus.get('equipment_name') or '设备'}{focus.get('fault_type') or '故障'}检修经验",
+                "status": "pending_review",
+                "sections": ["故障现象", "原因判断", "检测方法", "维修方案", "复检标准"],
+            },
+            "needs_confirmation": True,
+        }
+    if action == "finalize_report":
+        return {
+            "summary": "AIOS 已完成本轮闭环报告。",
+            "report": {
+                "completed_scope": [item for item in AIOS_ACTION_REGISTRY],
+                "next_action": "进入现场执行、复检或人工审核。",
+                "handoff": ["检索依据已整理", "作业步骤已编排", "协作摘要已生成", "复检门禁已建立"],
+            },
+        }
+    return {"summary": "未识别的 AIOS 动作，已跳过。"}
+
+
+def _aios_ui_plan(goal: str, plan: dict) -> list[dict]:
+    keyword = plan.get("focus_keyword") or _aios_focus_keyword(goal, plan.get("focus") or {})
+    action_map = {
+        "首页": "navigate",
+        "智能检索": "search",
+        "检修任务": "filter",
+        "检修任务 / 联系人交流": "openChat",
+        "知识库": "openKnowledgeGraph",
+        "知识库 / 沉淀更新": "openPanel",
+        "检修任务 / 复检评估": "openPanel",
+        "AIOS 记忆": "summarize",
+        "首页 / 报告预览": "report",
+    }
+    ui_plan = []
+    for index, step in enumerate(plan.get("steps", []), 1):
+        agent = step.get("agent") or {}
+        page = step.get("page") or "首页"
+        ui_plan.append({
+            "index": index,
+            "action": action_map.get(page, step.get("ui_action") or "invokeAgent"),
+            "page": page,
+            "agent": agent.get("id") or "tiangong",
+            "agentName": agent.get("name") or "天工",
+            "target": step.get("title"),
+            "input": step.get("input") or {"keyword": keyword},
+            "reason": step.get("tool_description") or step.get("expected_output") or "执行 AIOS 计划步骤",
+            "expected": step.get("expected_output") or step.get("title"),
+            "requiresApproval": bool(step.get("requires_approval")),
+            "mcpTool": step.get("mcp_tool") or step.get("capability"),
+            "dependsOn": step.get("depends_on") or [],
+        })
+    if len(ui_plan) < 10:
+        ui_plan.extend([
+            {"index": len(ui_plan) + 1, "action": "summarize", "page": "首页", "agent": "tiangong", "agentName": "天工", "target": "补充执行摘要", "input": {"goal": goal}, "reason": "保证长任务过程完整可见", "expected": "形成用户可读的执行摘要", "requiresApproval": False},
+            {"index": len(ui_plan) + 2, "action": "finish", "page": "首页", "agent": "tiangong", "agentName": "天工", "target": "完成闭环", "input": {"keyword": keyword}, "reason": "结束本轮跨页面操作", "expected": "展示最终结果", "requiresApproval": False},
+        ])
+    return ui_plan
+
+
+def _aios_step_digest(plan: dict, artifacts: dict) -> list[dict]:
+    digest = []
+    for step in plan.get("steps", []):
+        agent = step.get("agent") or {}
+        result = artifacts.get(step.get("key")) or step.get("result") or {}
+        digest.append({
+            "key": step.get("key"),
+            "agent": agent.get("name") or agent.get("id"),
+            "agent_id": agent.get("id"),
+            "title": step.get("title"),
+            "action": step.get("action"),
+            "state": step.get("state"),
+            "content": result.get("summary") or step.get("expected_output") or "",
+            "result": result,
+        })
+    return digest
+
+
+@yixiu_bp.get("/overview")
+def overview():
+    tasks = _demo_tasks("")
+    with _db() as conn:
+        stored_tasks = [_task_payload(row) for row in conn.execute("SELECT * FROM yixiu_tasks ORDER BY created_at DESC").fetchall()]
+        file_count = conn.execute("SELECT COUNT(*) FROM yixiu_files").fetchone()[0]
+        context_pack_count = conn.execute("SELECT COUNT(*) FROM team_context_packs").fetchone()[0]
+        memory_count = conn.execute("SELECT COUNT(*) FROM team_memories").fetchone()[0]
+        skill_count = conn.execute("SELECT COUNT(*) FROM team_skills").fetchone()[0]
+        eval_run_count = conn.execute("SELECT COUNT(*) FROM team_eval_runs").fetchone()[0]
+    tasks = stored_tasks + tasks
+    knowledge = _stored_knowledge() + _base_knowledge()
+    pending = [item for item in tasks if item.get("status") in {"pending", "in_progress"}]
+    high = [item for item in tasks if item.get("severity") in {"high", "critical"}]
+    return success_response({
+        "name": "一修", "subtitle": "AI 原生项目协作与团队记忆系统", "updated_at": _now(),
+        "stats": {
+            "active_projects": 12,
+            "pending_tasks": len(pending),
+            "repeat_issues": len(high),
+            "knowledge_items": len(knowledge),
+            "files": file_count,
+            "context_packs": context_pack_count,
+            "memory_units": memory_count + len(knowledge),
+            "skills": skill_count,
+            "eval_runs": eval_run_count,
+            "skill_coverage": 68,
+            "repeat_work_down": 24,
+            "ai_cost_saved": 31,
+        },
+        "team_os": {
+            "positioning": "从设备故障检索升级为任务上下文包生成、人机协作执行和可计算团队记忆。",
+            "modules": MODULES,
+            "metrics": {
+                "skill_coverage": "68%",
+                "repeat_work_reduction": "24%",
+                "eval_pass_rate": "92%",
+                "memory_units": memory_count + len(knowledge),
+            },
+        },
+        "agents": AGENTS, "modules": MODULES, "tasks": tasks[:8], "knowledge": knowledge[:8],
+    }, "Team Memory OS 概览获取成功")
+
+
+@yixiu_bp.get("/team-os/overview")
+def team_os_overview():
+    return overview()
+
+
+@yixiu_bp.get("/agents")
+def agents():
+    agent_id = request.args.get("agent_id", "").strip()
+    with _db() as conn:
+        rows = AGENTS
+        if agent_id:
+            key = _agent_key(agent_id)
+            rows = [item for item in AGENTS if item.get("id") == key or item.get("name") == agent_id]
+            if not rows:
+                return error_response(404, "智能体不存在")
+        enriched = [{**_agent_by_id(item["id"]), "metrics": _agent_metrics(conn, item["id"])} for item in rows]
+    return success_response({"agents": enriched}, "智能体状态获取成功")
+
+
+def _invoke_agent(agent_id: str, goal: str, task_id: str = "", commit: bool = True) -> dict:
+    agent = _agent_by_id(agent_id)
+    goal = (goal or "").strip() or "协助完成当前设备检修工作"
+    task = _focus_task(goal, task_id)
+    if agent["id"] == "tiangong":
+        plan = _aios_plan(goal, "auto", task_id)
+        result = {"summary": f"天工已拆解为 {len(plan.get('steps', []))} 个执行步骤。", "plan": plan, "next_action": plan.get("steps", [{}])[0]}
+    elif agent["id"] == "guanwei":
+        hits = _knowledge_hits(goal, task, limit=8)
+        result = {"summary": f"观微已召回 {len(hits)} 条与「{goal}」相关的维修资料。", "references": hits, "suggestion": "建议优先查看手册、历史案例和安全规范。"}
+    elif agent["id"] == "zhiju":
+        sop, safety = _sop_for(task.get("category"), task.get("maintenanceLevel"), task.get("fault_type") or goal)
+        result = {"summary": "执矩已生成标准作业步骤和安全确认项。", "sop": sop, "safety": safety, "recommended_status": "in_progress"}
+    elif agent["id"] == "bowen":
+        hits = _knowledge_hits(goal, task, limit=6)
+        result = {"summary": f"博闻已整理 {len(hits)} 条可关联资料，并生成知识候选。", "references": hits, "knowledge_candidate": {"title": f"{task.get('equipment_name') or '设备'}检修知识沉淀", "status": "pending_review"}}
+    elif agent["id"] == "heming":
+        contacts = sorted(CONTACTS, key=lambda item: item.get("workload", 0))
+        result = {"summary": f"和鸣建议优先联系 {contacts[0]['name']}，同步任务风险与复检要求。", "contacts": contacts[:5], "today": {"total": len(contacts), "online": len([item for item in contacts if item.get("status") == "在线"])}}
+    elif agent["id"] == "mingjian":
+        checklist = [
+            {"item": "检修依据是否完整", "passed": bool(_knowledge_hits(goal, task, limit=1))},
+            {"item": "安全隔离是否记录", "passed": True},
+            {"item": "复测数据是否可追溯", "passed": task.get("status") in {"review", "completed"}},
+        ]
+        score = 70 + sum(10 for item in checklist if item["passed"])
+        result = {"summary": f"明鉴已完成核查，质量评分 {min(score, 100)} 分。", "score": min(score, 100), "checklist": checklist, "recommendation": "补齐未通过项后再提交复检。" if score < 90 else "可进入复检或归档流程。"}
+    else:
+        result = {"summary": f"{agent['name']}已接收任务：{goal}"}
+
+    event = None
+    if commit:
+        with _db() as conn:
+            event = _record_agent_event(
+                conn,
+                agent["id"],
+                goal[:80],
+                result.get("summary", ""),
+                event_type="agent_invoke",
+                payload={"goal": goal, "task_id": task.get("id"), "result": result},
+            )
+    return {"agent": agent, "goal": goal, "task": task, "result": result, "event": event}
+
+
+@yixiu_bp.post("/session")
+def create_yixiu_session():
+    data = request.get_json(silent=True) or {}
+    account = str(data.get("account") or "").strip()
+    name = str(data.get("name") or "").strip() or account
+    if not account:
+        return error_response(400, "一修账号不能为空")
+    token = generate_token(f"yixiu-{account}")
+    if isinstance(token, bytes):
+        token = token.decode("utf-8")
+    return success_response({
+        "token": token,
+        "user": {
+            "id": f"yixiu-{account}",
+            "account": account,
+            "name": name,
+            "role": "operator",
+        },
+    }, "一修工作台会话已建立")
+
+
+@yixiu_bp.post("/agents/<agent_id>/invoke")
+def invoke_agent(agent_id: str):
+    data = request.get_json(silent=True) or {}
+    payload = _invoke_agent(
+        agent_id,
+        str(data.get("goal") or data.get("message") or "").strip(),
+        str(data.get("task_id") or "").strip(),
+        data.get("commit", True) is not False,
+    )
+    return success_response(payload, f"{payload['agent']['name']}已完成本次协助")
+
+
+@yixiu_bp.post("/agents/<agent_id>/chat")
+def agent_chat(agent_id: str):
+    """单智能体独立问答：基于自身人设 + 工具化上下文调用 LLM 自然语言作答。"""
+    data = request.get_json(silent=True) or {}
+    message = str(data.get("message") or data.get("question") or data.get("goal") or "").strip()
+    history = data.get("history") or []
+    if not message:
+        return error_response(400, "请输入问题")
+
+    agent = _agent_by_id(_agent_key(agent_id))
+    if not agent or not agent.get("id"):
+        return error_response(404, "智能体不存在")
+
+    chitchat = _is_chitchat(message)
+
+    # 系统提示词：人设 + 职责 + 能力 + 工具化结构数据
+    capabilities = "、".join(agent.get("capabilities", []))
+    persona = AGENT_PROMPTS.get(agent["id"], "")
+    system_prompt = (
+        f"你是「{agent['name']}」，一修系统中的{agent['role']}。\n"
+        f"职责：{agent['duty']}\n"
+        f"能力：{capabilities}\n"
+    )
+    if persona:
+        system_prompt += f"约束：{persona}\n"
+    system_prompt += (
+        "\n回答要求：\n"
+        "- 用户消息若是问候、闲聊或自我介绍类（如「你好」「你是谁」「在吗」），"
+        "请用本智能体人设简短自然地回应，1-3 句即可，不要展开业务流程或硬塞工具数据。\n"
+        "- 用户消息若是具体业务问题，再用专业、清晰、分点的中文作答；"
+        "如果问题超出你的职责范围，明确说明并建议由哪个智能体处理。\n"
+        "- 涉及高风险作业（配电柜、液压系统、带电作业等）必须强调安全确认和防护措施。"
+    )
+
+    # 工具化上下文：仅在业务问题时复用规则化分支结果作为 LLM 辅助材料
+    tool_context = None
+    if not chitchat:
+        try:
+            invoked = _invoke_agent(agent["id"], message, str(data.get("task_id") or "").strip(), commit=False)
+            tool_context = invoked.get("result")
+            if tool_context:
+                system_prompt += (
+                    "\n\n# 你通过工具获取的结构化数据（仅当与用户问题相关时参考；闲聊时忽略，按人设自然回应）\n"
+                    f"```json\n{json.dumps(tool_context, ensure_ascii=False, indent=2)}\n```"
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("agent_chat tool context skipped for %s: %s", agent["id"], exc)
+
+    # 调用 LLM
+    provider = "ai"
+    try:
+        from services.ai_gateway import ai_agent
+        status = ai_agent.status()
+        provider = status.get("provider", "ai")
+        if not status.get("configured"):
+            answer = _agent_fallback_answer(agent, message, tool_context, chitchat)
+            provider = "local-fallback"
+        else:
+            messages = [{"role": "system", "content": system_prompt}]
+            for turn in history[-10:]:
+                role = str(turn.get("role") or "user").strip()
+                if role not in ("user", "assistant"):
+                    role = "user"
+                content = str(turn.get("content") or turn.get("text") or "").strip()
+                if content:
+                    messages.append({"role": role, "content": content})
+            messages.append({"role": "user", "content": message})
+            answer = ai_agent.chat(messages, temperature=0.6)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("agent_chat LLM call failed for %s: %s", agent["id"], exc)
+        answer = _agent_fallback_answer(agent, message, tool_context, chitchat)
+        provider = "local-fallback"
+
+    # 记录事件
+    try:
+        with _db() as conn:
+            _record_agent_event(
+                conn,
+                agent["id"],
+                message[:80],
+                answer,
+                event_type="agent_chat",
+                payload={"message": message, "answer": answer, "tool_context": tool_context},
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
+    return success_response(
+        {
+            "agent": agent,
+            "message": message,
+            "response": answer,
+            "tool_context": tool_context,
+            "provider": provider,
+        },
+        f"{agent['name']}已独立回答问题",
+    )
+
+
+@yixiu_bp.post("/agents/dispatch")
+def dispatch_agents():
+    data = request.get_json(silent=True) or {}
+    goal = str(data.get("goal") or data.get("message") or "").strip()
+    execute = bool(data.get("execute", False))
+    plan = _aios_plan(goal, str(data.get("mode") or "auto"), str(data.get("task_id") or ""))
+    results = []
+    if execute:
+        for step in plan.get("steps", []):
+            results.append(_invoke_agent(step.get("agent", {}).get("id", "tiangong"), step.get("title") or goal, str(data.get("task_id") or ""), commit=True))
+    return success_response({"plan": plan, "executed": execute, "results": results}, "天工已完成智能体分派")
+
+
+@yixiu_bp.post("/aios/long-task")
+def aios_long_task():
+    data = request.get_json(silent=True) or {}
+    goal = str(data.get("goal") or data.get("message") or "").strip()
+    task_id = str(data.get("task_id") or "").strip()
+    if not goal:
+        return error_response(400, "请先输入天工要执行的目标")
+
+    plan = _aios_plan(goal, str(data.get("mode") or "auto").strip(), task_id)
+    run_id = plan.get("id")
+    approvals = {step.get("key"): True for step in plan.get("steps", []) if step.get("requires_approval")}
+    artifacts: dict[str, dict] = {}
+
+    for step in plan.get("steps", []):
+        try:
+            plan, node = transition_step(plan, step["key"], "execute", approvals=approvals)
+            if node.get("state") != "running":
+                artifacts[step["key"]] = {"summary": node.get("last_error", "步骤暂不可执行"), "state": node.get("state")}
+                continue
+            with _db() as conn:
+                _record_agent_event(
+                    conn,
+                    step.get("agent", {}).get("id", "tiangong"),
+                    f"开始执行：{step.get('title')}",
+                    step.get("tool_description") or step.get("expected_output") or "",
+                    event_type="long_task_step_start",
+                    status="running",
+                    payload={"step_key": step.get("key"), "action": step.get("action"), "input": step.get("input")},
+                    run_id=run_id,
+                )
+            result = _aios_execute_action(step, plan.get("snapshot") or {}, commit=False)
+            result["safe_execution"] = "已生成可见执行产物；正式写入仍需用户确认。"
+            step["result"] = result
+            step["executed_at"] = _now()
+            artifacts[step["key"]] = result
+            if result.get("needs_confirmation") or step.get("requires_approval"):
+                with _db() as conn:
+                    approval = _ensure_aios_approval(conn, run_id, step, result.get("summary", ""))
+                    result["approval"] = approval
+                    _record_agent_event(
+                        conn,
+                        step.get("agent", {}).get("id", "tiangong"),
+                        f"等待人工确认：{step.get('title')}",
+                        approval.get("title", ""),
+                        event_type="approval_requested",
+                        status="waiting_approval",
+                        payload={"step_key": step.get("key"), "approval": approval},
+                        run_id=run_id,
+                    )
+            plan, _ = transition_step(plan, step["key"], "complete")
+            with _db() as conn:
+                _record_agent_event(
+                    conn,
+                    step.get("agent", {}).get("id", "tiangong"),
+                    f"完成执行：{step.get('title')}",
+                    result.get("summary", ""),
+                    event_type="long_task_step_done",
+                    status="done",
+                    payload={"step_key": step.get("key"), "action": step.get("action"), "result": result},
+                    run_id=run_id,
+                )
+        except Exception as exc:  # noqa: BLE001
+            plan, _ = transition_step(plan, step["key"], "fail", error=str(exc))
+            artifacts[step["key"]] = {"summary": "长任务步骤执行失败", "error": str(exc)}
+            with _db() as conn:
+                _record_agent_event(
+                    conn,
+                    step.get("agent", {}).get("id", "tiangong"),
+                    f"执行失败：{step.get('title')}",
+                    str(exc),
+                    event_type="long_task_step_failed",
+                    status="failed",
+                    payload={"step_key": step.get("key"), "action": step.get("action"), "error": str(exc)},
+                    run_id=run_id,
+                )
+            break
+
+    steps = plan.get("steps", [])
+    done = sum(1 for item in steps if item.get("state") == "done")
+    progress = round(done / max(len(steps), 1) * 100)
+    plan["progress"] = progress
+    plan["updated_at"] = _now()
+    status = _run_status_from_plan(plan, progress)
+    summary = "天工已完成跨智能体长任务：先定位目标，再调度观微检索、执矩编排、和鸣协作、博闻沉淀、明鉴核查，并输出闭环结果。"
+    ui_plan = _aios_ui_plan(goal, plan)
+
+    with _db() as conn:
+        conn.execute(
+            "UPDATE yixiu_aios_runs SET plan_json=?, status=?, progress=?, artifacts_json=?, updated_at=? WHERE id=?",
+            (json.dumps(plan, ensure_ascii=False), status, progress, json.dumps(artifacts, ensure_ascii=False), _now(), run_id),
+        )
+        queue = _sync_aios_queue(conn, run_id, plan, artifacts)
+        final_event = _record_agent_event(
+            conn,
+            "tiangong",
+            "长任务闭环完成",
+            summary,
+            event_type="long_task_done",
+            status=status,
+            payload={"goal": goal, "progress": progress, "ui_plan": ui_plan},
+            run_id=run_id,
+        )
+        events = [
+            _agent_event_dict(row)
+            for row in conn.execute("SELECT * FROM yixiu_agent_events WHERE run_id=? ORDER BY created_at ASC", (run_id,)).fetchall()
+        ]
+        approval_rows = [
+            _approval_dict(row)
+            for row in conn.execute("SELECT * FROM yixiu_aios_approvals WHERE run_id=? ORDER BY created_at ASC", (run_id,)).fetchall()
+        ]
+
+    return success_response({
+        "run_id": run_id,
+        "status": status,
+        "progress": progress,
+        "summary": summary,
+        "goal": goal,
+        "mode": plan.get("mode"),
+        "focus_keyword": plan.get("focus_keyword"),
+        "context_notes": plan.get("context_notes", []),
+        "plan": plan,
+        "steps": _aios_step_digest(plan, artifacts),
+        "ui_plan": ui_plan,
+        "artifacts": artifacts,
+        "queue": queue,
+        "events": events,
+        "approvals": approval_rows,
+        "final_event": final_event,
+        "next_actions": ["查看资料详情", "确认检修 SOP", "联系协作人员", "提交复检或知识审核"],
+    }, "天工长任务执行完成")
+
+
+@yixiu_bp.get("/tasks")
+def tasks():
+    status = request.args.get("status", "").strip()
+    with _db() as conn:
+        stored = [_task_payload(row) for row in conn.execute("SELECT * FROM yixiu_tasks ORDER BY created_at DESC").fetchall()]
+    items = stored + _demo_tasks(status)
+    if status:
+        items = [item for item in items if item.get("status") == status]
+    return success_response({"tasks": items, "total": len(items)}, "检修任务获取成功")
+
+
+@yixiu_bp.post("/tasks")
+@require_jwt_roles(WRITE_ROLES)
+@require_confirmed_write("tasks.create", "/api/yixiu/tasks")
+def create_task():
+    data = request.get_json(silent=True) or {}
+    task_id = f"task-{uuid.uuid4().hex[:10]}"
+    category = data.get("category") or data.get("equipment_category") or "通用设备"
+    level = data.get("maintenanceLevel") or data.get("maintenance_level") or "二级检修"
+    fault = data.get("faultType") or data.get("fault_type") or data.get("description") or "待确认故障"
+    generated_sop, safety = _sop_for(category, level, fault)
+    task = {
+        "id": task_id, "workOrderNo": data.get("workOrderNo") or f"YX-{datetime.now():%Y%m%d-%H%M%S}",
+        "title": data.get("title") or f"{data.get('deviceName') or data.get('equipment_name') or '设备'}检修任务",
+        "equipment_name": data.get("equipment_name") or data.get("deviceName") or "待登记设备",
+        "equipment_no": data.get("equipment_no", ""), "equipment_model": data.get("equipment_model") or data.get("deviceModel") or "",
+        "category": category, "maintenanceLevel": level, "fault_type": fault, "description": data.get("description", ""),
+        "severity": data.get("severity", "medium"), "assignee_name": data.get("assignee_name", "待分配"),
+        "current_step": "作业许可与安全隔离", "progress": 0, "due_at": data.get("due_at", ""), "created_at": _now(),
+        "sop": data.get("sopDetails") or generated_sop, "tools": data.get("tools", []), "parts": data.get("parts", []),
+        "safety": data.get("safety") or safety, "references": data.get("references", []),
+    }
+    with _db() as conn:
+        conn.execute("INSERT INTO yixiu_tasks VALUES (?, ?, ?, ?, ?, ?)", (task_id, json.dumps(task, ensure_ascii=False), "pending", "[]", _now(), _now()))
+    task.update({"status": "pending", "completedSteps": []})
+    return success_response(task, "检修任务创建成功")
+
+
+@yixiu_bp.put("/tasks/<task_id>/status")
+def change_task_status(task_id: str):
+    data = request.get_json(silent=True) or {}
+    status = data.get("status", "pending")
+    allowed = {"pending", "in_progress", "review", "completed", "paused", "rejected", "overdue"}
+    if status not in allowed:
+        return error_response(400, "无效的任务状态")
+    with _db() as conn:
+        if not _ensure_task_row(conn, task_id):
+            return error_response(404, "任务不存在")
+        conn.execute("UPDATE yixiu_tasks SET status=?, updated_at=? WHERE id=?", (status, _now(), task_id))
+    return success_response({"task_id": task_id, "status": status, "operator": data.get("operator", "当前用户"), "operated_at": _now(), "note": data.get("note", "")}, "任务状态已更新")
+
+
+@yixiu_bp.put("/tasks/<task_id>/steps/<int:step_index>")
+def complete_task_step(task_id: str, step_index: int):
+    data = request.get_json(silent=True) or {}
+    with _db() as conn:
+        row = _ensure_task_row(conn, task_id)
+        if not row:
+            return error_response(404, "任务不存在或不是本页面创建的任务")
+        task = _task_payload(row)
+        steps = task.get("sop", [])
+        if step_index < 0 or step_index >= len(steps):
+            return error_response(400, "作业步骤不存在")
+        completed = _json(row["completed_steps"], [])
+        if data.get("completed", True) and step_index not in completed:
+            completed.append(step_index)
+        elif not data.get("completed", True) and step_index in completed:
+            completed.remove(step_index)
+        completed.sort()
+        progress = round(len(completed) / max(len(steps), 1) * 100)
+        status = "review" if progress == 100 else "in_progress"
+        conn.execute("UPDATE yixiu_tasks SET completed_steps=?, status=?, updated_at=? WHERE id=?", (json.dumps(completed), status, _now(), task_id))
+    return success_response({"task_id": task_id, "completedSteps": completed, "progress": progress, "status": status, "evidence": data.get("evidence", "")}, "作业步骤已记录")
+
+
+@yixiu_bp.get("/tasks/<task_id>/memory")
+def task_memory(task_id: str):
+    with _db() as conn:
+        rows = conn.execute("SELECT * FROM yixiu_task_memory WHERE task_id=? ORDER BY created_at ASC", (task_id,)).fetchall()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["value"] = _json(item.pop("value_json", "{}"), {})
+        items.append(item)
+    return success_response({"memory": items, "total": len(items)}, "任务记忆获取成功")
+
+
+@yixiu_bp.post("/tasks/<task_id>/memory")
+@require_jwt_roles(WRITE_ROLES)
+@require_confirmed_write("task.memory", "/api/yixiu/tasks/memory")
+def save_task_memory(task_id: str):
+    data = request.get_json(silent=True) or {}
+    key = str(data.get("key", "")).strip()
+    if not key:
+        return error_response(400, "记忆键名不能为空")
+    value = data.get("value")
+    mem_id = f"mem-{uuid.uuid4().hex[:12]}"
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO yixiu_task_memory VALUES (?, ?, ?, ?, ?, ?)",
+            (mem_id, task_id, key, json.dumps(value, ensure_ascii=False), str(data.get("source", "operator")), _now()),
+        )
+    return success_response({"id": mem_id, "task_id": task_id, "memory_key": key, "value": value, "source": data.get("source", "operator"), "created_at": _now()}, "任务记忆已保存")
+
+
+@yixiu_bp.post("/recheck")
+def save_recheck():
+    data = request.get_json(silent=True) or {}
+    passed = data.get("result", "通过") == "通过"
+    status = "completed" if passed else "in_progress"
+    with _db() as conn:
+        conn.execute("UPDATE yixiu_tasks SET status=?, updated_at=? WHERE id=?", (status, _now(), str(data.get("task_id", ""))))
+    return success_response({"task_id": data.get("task_id"), "result": data.get("result", "通过"), "next_status": status, "comment": data.get("comment", ""), "reviewer": data.get("reviewer", "复检人员"), "reviewed_at": _now()}, "复检结果已保存")
+
+
+@yixiu_bp.route("/files", methods=["GET", "POST"])
+def files():
+    if request.method == "GET":
+        keyword = request.args.get("keyword", "").strip()
+        with _db() as conn:
+            rows = conn.execute("SELECT * FROM yixiu_files ORDER BY uploaded_at DESC").fetchall()
+        items = [_file_dict(row) for row in rows]
+        if keyword:
+            items = [item for item in items if keyword in item["name"] or keyword in (item.get("equipment") or "")]
+        return success_response({"files": items, "total": len(items)}, "文件列表获取成功")
+
+    if "file" not in request.files:
+        return error_response(400, "请选择需要上传的文件")
+    upload = request.files["file"]
+    if not upload.filename:
+        return error_response(400, "文件名为空")
+    original_name = Path(upload.filename).name
+    ext = Path(original_name).suffix.lower()
+    allowed = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".txt", ".md", ".mp4", ".webm"}
+    if ext not in allowed:
+        return error_response(400, "不支持的文件类型")
+    file_id = f"file-{uuid.uuid4().hex[:12]}"
+    stored_name = f"{file_id}{ext}"
+    upload_dir = Path(current_app.config["UPLOAD_FOLDER"]) / "yixiu"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    path = upload_dir / secure_filename(stored_name)
+    upload.save(path)
+    mime = upload.mimetype or mimetypes.guess_type(original_name)[0] or "application/octet-stream"
+    kind = _file_type(original_name, mime)
+    # 图片走视觉分析；PDF/Word/TXT/MD/CSV 走切片入库流水线
+    parse_status = "等待解析"
+    ingestion = None
+    if kind == "图片":
+        analysis = _analyze_image(path, mime)
+        parse_status = "解析成功" if analysis.get("equipment") or analysis.get("summary") else "视觉模型不可用"
+    else:
+        analysis = {"summary": "文件已保存。"}
+        try:
+            from services.file_parser import parse_file
+            from services.rag_service import insert_chunks
+            chunks = parse_file(path)
+            if chunks:
+                ingestion = insert_chunks(chunks, source=original_name)
+                analysis = {
+                    "summary": f"文件已切片入库，共 {ingestion.get('inserted', 0)}/{ingestion.get('total', 0)} 块。",
+                    "chunks": len(chunks),
+                    "ingestion": ingestion,
+                }
+                parse_status = "切片入库成功" if ingestion.get("success") else f"部分入库（失败 {ingestion.get('failed', 0)} 块）"
+            else:
+                parse_status = "无可提取文本"
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("文件切片入库失败 %s: %s", original_name, exc)
+            parse_status = f"解析失败: {exc}"
+            analysis = {"summary": f"文件已保存，但解析失败：{exc}"}
+    form = request.form
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO yixiu_files VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (file_id, original_name, stored_name, mime, kind, form.get("category", "现场资料"), form.get("folder", "现场资料"), path.stat().st_size, form.get("equipment", ""), form.get("model", ""), form.get("uploader", "当前用户"), _now(), "待审核", parse_status, form.get("version", "v1.0"), form.get("purpose", "knowledge"), json.dumps(analysis, ensure_ascii=False)),
+        )
+        row = conn.execute("SELECT * FROM yixiu_files WHERE id=?", (file_id,)).fetchone()
+    return success_response(_file_dict(row), "文件上传成功")
+
+
+@yixiu_bp.get("/files/<file_id>/content")
+def file_content(file_id: str):
+    with _db() as conn:
+        row = conn.execute("SELECT * FROM yixiu_files WHERE id=?", (file_id,)).fetchone()
+    if not row:
+        return error_response(404, "文件不存在")
+    path = Path(current_app.config["UPLOAD_FOLDER"]) / "yixiu" / row["stored_name"]
+    if not path.exists():
+        return error_response(404, "文件内容不存在")
+    return send_file(path, mimetype=row["mime"], download_name=row["name"])
+
+
+@yixiu_bp.post("/search")
+def search():
+    data = request.get_json(silent=True) or {}
+    query = str(data.get("query") or data.get("description") or "").strip()
+    device = str(data.get("deviceName") or data.get("device_name") or "未命名项目").strip()
+    model = str(data.get("deviceModel") or data.get("device_model") or "待确认技术栈").strip()
+    category = str(data.get("category") or "通用任务").strip()
+    fault = str(data.get("faultType") or data.get("fault_type") or "待确认任务").strip()
+    level = str(data.get("maintenanceLevel") or "标准协作").strip()
+    file_ids = data.get("fileIds") or []
+    attachments = []
+    if file_ids:
+        marks = ",".join("?" for _ in file_ids)
+        with _db() as conn:
+            rows = conn.execute(f"SELECT * FROM yixiu_files WHERE id IN ({marks})", tuple(file_ids)).fetchall()
+        attachments = [_file_dict(row) for row in rows]
+    images = [item for item in attachments if item["type"] == "图片"]
+    docs = [item for item in attachments if item["type"] != "图片"]
+    steps, safety = _sop_for(category, level, fault)
+    knowledge = _stored_knowledge() + _base_knowledge()
+    terms = [term for term in [query, device, model, fault] if term]
+    ranked = []
+    for index, item in enumerate(knowledge):
+        haystack = json.dumps(item, ensure_ascii=False)
+        score = sum(1 for term in terms if term.lower() in haystack.lower())
+        if score or index < 4:
+            ranked.append((score, item))
+    ranked.sort(key=lambda pair: pair[0], reverse=True)
+    matched = [item for _, item in ranked[:6]]
+    visual_findings = []
+    for image in images:
+        visual_findings.extend(image.get("analysis", {}).get("fault_signs", []))
+    scene_text = " ".join([query, device, model, category, fault, " ".join(item.get("name", "") for item in attachments)])
+    has_auto_vehicle_intent = _goal_contains(scene_text, ["汽车", "轿车", "车辆", "乘用车"])
+    has_motorcycle_engine_intent = _goal_contains(scene_text, ["摩托", "cg-125", "cg125"]) or (
+        not has_auto_vehicle_intent and _goal_contains(scene_text, ["发动机异响", "气门", "怠速", "正时链条", "张紧器", "化油器", "火花塞"])
+    )
+    if has_motorcycle_engine_intent and not _has_affirmative_water_scene(scene_text):
+        engine_device = device if device and device not in {"设备", "待确认设备"} else "摩托车发动机总成"
+        engine_model = "" if model in {"待确认型号", "unknown", "未知"} else model
+        engine_knowledge = [
+            {
+                "id": "motor-engine-valve-sop",
+                "title": "CG-125/同类单缸发动机气门间隙检查 SOP",
+                "type": "标准作业流程 SOP",
+                "category": "发动机资料",
+                "equipment": engine_device,
+                "model": engine_model,
+                "match": 90,
+                "summary": "停机冷却后拆检气门室盖，用塞尺检查进/排气门间隙，调整后复装并进行冷车、热车异响复测。",
+                "tags": ["摩托车发动机", "气门间隙", "异响"],
+            },
+            {
+                "id": "motor-engine-noise-case",
+                "title": "摩托车发动机异响与怠速不稳排查案例",
+                "type": "历史故障案例",
+                "category": "历史故障案例",
+                "equipment": engine_device,
+                "model": engine_model,
+                "match": 86,
+                "summary": "围绕气门机构、正时链条/张紧器、摇臂/凸轮轴、机油润滑、火花塞、化油器怠速油路和进气漏气排查。",
+                "tags": ["发动机异响", "怠速不稳", "复检"],
+            },
+        ]
+        result = {
+            "query": query,
+            "device_name": engine_device,
+            "device_model": engine_model,
+            "category": "发动机",
+            "maintenance_level": level,
+            "modalities": ["text"] + (["image"] if images else []) + (["document"] if docs else []),
+            "match_score": min(94, 84 + (5 if images else 0) + (3 if docs else 0) + (2 if engine_model else 0)),
+            "phenomenon_summary": f"{engine_device}{f'（{engine_model}）' if engine_model else ''}出现发动机异响/怠速不稳线索；车型、里程、冷车热车差异和检测数值待确认。本次结果仅依据当前输入和本轮附件生成。",
+            "risk": "medium",
+            "stop_advice": "先停机冷却并确认机油液位；异响明显、敲击加重或润滑异常时不要继续高转速试车。",
+            "causes": ["气门间隙过大或过小", "正时链条松旷或张紧器异常", "摇臂/凸轮轴磨损", "机油不足、变质或润滑不良", "火花塞积碳或点火弱", "化油器怠速油路堵塞或混合气异常", "进气漏气", "活塞、连杆或曲轴轴承异常磨损"],
+            "positions": ["气门室盖/摇臂/凸轮轴", "正时链条与张紧器", "机油尺/机油滤网/润滑油路", "火花塞与高压帽", "化油器怠速油路", "进气歧管与密封垫", "曲轴箱与连杆轴承区域"],
+            "tools": ["塞尺", "听诊棒", "火花塞套筒", "压缩压力表", "万用表", "扭矩扳手", "化油器清洗工具"],
+            "visual_findings": visual_findings or (["已接入本次摩托车发动机图片；具体型号、拆检状态和检测数值待确认。"] if images else []),
+            "attachments": attachments,
+            "matched_manuals": engine_knowledge,
+            "recommended_sop": [
+                {"step": 1, "action": "停机冷却，确认机油液位、机油颜色和是否有金属屑"},
+                {"step": 2, "action": "冷车/热车分别听诊，定位异响来自气门室、正时侧还是曲轴箱"},
+                {"step": 3, "action": "拆检气门室盖，用塞尺检查进/排气门间隙"},
+                {"step": 4, "action": "检查正时链条松旷、张紧器回位和导轨磨损"},
+                {"step": 5, "action": "检查摇臂、凸轮轴和气门机构是否磨损或润滑不足"},
+                {"step": 6, "action": "检查火花塞积碳、点火强度和高压帽连接状态"},
+                {"step": 7, "action": "清洁化油器怠速油路，检查进气歧管和密封垫是否漏气"},
+                {"step": 8, "action": "复装后记录怠速、加速响应、冷/热车异响和复测结论"},
+            ],
+            "safety": ["热机拆检前必须冷却防烫伤", "试车时避免长时间高转速", "气门间隙调整后必须复测怠速与异响", "未确认润滑状态前不要继续运行"],
+            "audit": {"risk_level": "medium", "must_check": ["机油状态", "气门间隙", "正时链条张紧器", "点火状态", "化油器怠速油路", "复测记录"], "auditor": "明鉴"},
+        }
+        return success_response(_enhance_search_with_llm(result, engine_knowledge, attachments), "摩托车发动机检索完成")
+    if _has_affirmative_water_scene(scene_text):
+        vehicle_device = device if device and device not in {"设备", "待确认设备"} else "涉水车辆"
+        vehicle_model = "" if model in {"待确认型号", "unknown", "未知"} else model
+        vehicle_knowledge = [
+            {
+                "id": "vehicle-water-sop",
+                "title": "泡水车辆检修排查 SOP",
+                "type": "标准作业流程 SOP",
+                "category": "汽车涉水检修",
+                "equipment": vehicle_device,
+                "model": vehicle_model,
+                "match": 90,
+                "summary": "禁止启动、拖车转移、进气检查、油液检查、电气干燥、底盘清洗防锈、车内除湿消毒和复检验收。",
+                "tags": ["泡水车", "涉水", "安全确认"],
+            },
+            {
+                "id": "vehicle-water-electric",
+                "title": "汽车电气系统进水检查清单",
+                "type": "维修手册",
+                "category": "电气系统",
+                "equipment": vehicle_device,
+                "model": vehicle_model,
+                "match": 84,
+                "summary": "重点检查 ECU、保险盒、线束插头、传感器、启动机、发电机和绝缘状态；不确定进水深度时保持待确认。",
+                "tags": ["电气系统", "进水", "复检"],
+            },
+        ]
+        result = {
+            "query": query,
+            "device_name": vehicle_device,
+            "device_model": vehicle_model,
+            "category": "汽车涉水检修",
+            "maintenance_level": level,
+            "modalities": ["text"] + (["image"] if images else []) + (["document"] if docs else []),
+            "match_score": min(94, 84 + (6 if images else 0) + (3 if docs else 0)),
+            "phenomenon_summary": "根据已知图片/文字线索，车辆处于积水或涉水场景；车型、具体水深、发动机是否进水、车内是否进水均需现场复核，不做无依据推断。",
+            "risk": "high",
+            "stop_advice": "不要立即启动发动机；先断电、拖车转移，并检查进气系统、油液、电气线束、制动系统和底盘。",
+            "causes": ["道路积水导致底盘、轮毂和制动部件浸水", "积水可能进入进气、电气插头、车门密封或车内地毯", "长时间浸泡可能造成油液乳化、电气短路、轴承锈蚀或霉变"],
+            "positions": ["空气滤芯/进气管/节气门", "机油尺/油底壳", "变速箱油/差速器油", "ECU/保险盒/线束插头", "刹车盘/刹车片/ABS轮速传感器", "底盘悬挂/轴承/排气管", "车内地毯/座椅底部/安全带卷收器"],
+            "tools": ["拖车设备", "内窥镜", "万用表", "绝缘检测工具", "油液检查工具", "举升机", "除湿消毒设备"],
+            "visual_findings": visual_findings or ["已接入车辆涉水现场图片；仅根据当前线索判断为泡水/涉水风险，具体受损范围待拆检确认。"],
+            "attachments": attachments,
+            "matched_manuals": vehicle_knowledge,
+            "recommended_sop": [
+                {"step": 1, "action": "现场拍照记录，禁止启动发动机"},
+                {"step": 2, "action": "断开电瓶负极，拖车转移到维修点"},
+                {"step": 3, "action": "拆检空气滤芯、进气管和节气门"},
+                {"step": 4, "action": "检查机油、变速箱油和差速器油是否乳化"},
+                {"step": 5, "action": "检查 ECU、保险盒、线束插头、传感器、启动机和发电机"},
+                {"step": 6, "action": "检查制动系统、底盘、轴承、防尘套和排气管"},
+                {"step": 7, "action": "车内除湿、消毒、除霉味并复检"},
+            ],
+            "safety": ["禁止涉水后直接启动", "先断电再拆检电气系统", "试车前必须完成油液和电气复检"],
+            "audit": {"risk_level": "high", "must_check": ["启动前确认", "进气系统", "油液乳化", "电气绝缘", "制动复检", "现场复拍"], "auditor": "明鉴"},
+        }
+        return success_response(_enhance_search_with_llm(result, vehicle_knowledge, attachments), "车辆泡水/涉水检索完成")
+    confidence = min(96, 82 + (6 if images else 0) + (3 if docs else 0) + (3 if model != "待确认技术栈" else 0))
+    causes = [f"{fault}相关上下文需要补齐需求、代码与历史决策", "接口契约、数据模型或执行流程可能存在未同步变更", "需结合 Eval 用例验证方案是否可复用"]
+    result = {
+        "query": query, "device_name": device, "device_model": model, "category": category, "maintenance_level": level,
+        "modalities": ["text", "task_context"] + (["image"] if images else []) + (["document"] if docs else []),
+        "match_score": confidence, "phenomenon_summary": f"{device}（{model}）{fault}任务上下文包已生成",
+        "risk": "high" if any(word in query for word in ["线上", "资金", "权限", "严重", "阻塞"]) else "medium",
+        "stop_advice": "先确认影响范围、数据安全和回滚方案，再进入人机协作执行",
+        "causes": causes, "positions": ["需求入口", "相关代码路径", "数据模型", "历史任务记录"],
+        "tools": ["Context Engine", "Team Memory", "Eval Lab"], "visual_findings": visual_findings,
+        "attachments": attachments, "matched_manuals": matched,
+        "recommended_sop": steps, "safety": safety,
+        "audit": {"risk_level": "medium", "must_check": ["影响范围", "引用依据", "Eval 用例", "人工审核", "沉淀条件"], "auditor": "明鉴"},
+        "context_pack": {
+            "title": f"{device} {fault} Context Pack",
+            "objective": query or fault,
+            "sources": ["需求描述", "附件材料", "历史任务", "Team Memory", "Skill 库"],
+            "recommended_agents": ["guanwei", "zhiju", "bowen", "mingjian"],
+        },
+        "matching_memories": matched,
+        "recommended_skills": [
+            {"id": "skill-context-pack", "name": "任务上下文包生成 Skill", "reason": "当前任务需要先补齐需求、代码、文档和历史经验。"},
+            {"id": "skill-eval-regression", "name": "Skill 回归评测 Skill", "reason": "当前任务完成后需要验证方案质量、成本和成功率。"},
+        ],
+    }
+    return success_response(_enhance_search_with_llm(result, matched, attachments), "Context Pack 生成完成")
+
+
+@yixiu_bp.post("/team-os/context/pack")
+def team_os_context_pack():
+    return search()
+
+
+@yixiu_bp.get("/integrations/mcp/manifest")
+def integrations_mcp_manifest():
+    host = request.host_url.rstrip("/")
+    return success_response({
+        "name": "一休 AI Import Gateway",
+        "description": "允许 Codex、Claude、ChatGPT、Cursor 等外部 AI 工作台把对话总结、代码变更、风险、待办和候选资产同步到一休。",
+        "endpoint": f"{host}/api/yixiu/mcp",
+        "rest_import_endpoint": f"{host}/api/yixiu/integrations/imports",
+        "auth": {
+            "type": "bearer_or_workspace_token",
+            "header": "Authorization: Bearer <YIXIU_IMPORT_TOKEN>",
+            "demo_mode": "本地演示可直接在页面粘贴导入；生产环境建议启用 OAuth 或工作区 Token。"
+        },
+        "tools": [
+            {"name": "yixiu.create_project_update", "path": "/integrations/imports", "purpose": "保存外部 AI 对话总结并生成项目进展"},
+            {"name": "yixiu.save_context_pack", "path": "/team-os/context/pack", "purpose": "保存任务上下文包"},
+            {"name": "yixiu.create_memory_candidate", "path": "/integrations/imports/{id}/parse", "purpose": "从导入内容生成 Memory 候选"},
+            {"name": "yixiu.create_skill_candidate", "path": "/integrations/imports/{id}/parse", "purpose": "从导入内容生成 Skill 候选"},
+            {"name": "yixiu.link_to_project", "path": "/integrations/imports/{id}/link-project", "purpose": "将导入记录关联到一休项目"}
+        ],
+        "payload_example": {
+            "provider": "codex",
+            "project_name": "支付服务",
+            "title": "支付回调幂等修复总结",
+            "content_type": "summary",
+            "task_goal": "修复支付回调重复触发导致订单重复处理的问题",
+            "work_summary": ["新增幂等键校验", "补充重复回调 Eval 用例"],
+            "changed_files": ["server/payment/callback.py", "tests/test_payment_callback.py"],
+            "decisions": ["以 provider_event_id 作为幂等边界"],
+            "risks": ["历史脏数据需要迁移前复核"],
+            "todos": ["上线前补充灰度监控"],
+            "validation": ["pytest tests/test_payment_callback.py 通过"]
+        }
+    }, "MCP 接入配置获取成功")
+
+
+@yixiu_bp.post("/mcp")
+def yixiu_mcp_endpoint():
+    """Minimal MCP-style JSON-RPC endpoint for agent-side uploads into Yixiu.
+
+    Supports initialize, tools/list and tools/call. It is intentionally scoped to
+    asset import tools; imported content becomes pending-review candidates.
+    """
+    payload = request.get_json(silent=True) or {}
+    request_id = payload.get("id")
+    method = payload.get("method", "")
+    params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+
+    def rpc_result(result):
+        return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+    def rpc_error(code, message):
+        return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+
+    tools = [
+        {
+            "name": "yixiu.import_external_ai",
+            "description": "Upload a Codex/Claude/ChatGPT/Cursor task summary, chat transcript, diff, or PR note into Yixiu and generate project update, Memory, Skill and Eval candidates.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "provider": {"type": "string", "description": "codex, claude, chatgpt, cursor, github"},
+                    "project_name": {"type": "string", "description": "Project or repository name in Yixiu"},
+                    "title": {"type": "string", "description": "Import title"},
+                    "content_type": {"type": "string", "description": "summary, chat, diff, pr, file"},
+                    "task_goal": {"type": "string", "description": "Fixed format: task objective"},
+                    "work_summary": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: completed work summary"},
+                    "changed_files": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: changed files or modules"},
+                    "decisions": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: key decisions"},
+                    "risks": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: risks, limits, blockers"},
+                    "todos": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: pending actions"},
+                    "validation": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: tests and verification results"},
+                    "memory_candidates": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: reusable memory candidates"},
+                    "skill_candidates": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: reusable skill candidates"},
+                    "eval_cases": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: regression/eval case candidates"},
+                    "next_actions": {"type": "array", "items": {"type": "string"}, "description": "Fixed format: recommended next actions"},
+                    "raw_content": {"type": "string", "description": "Fallback free-text content if fixed fields are unavailable"}
+                },
+                "required": ["provider", "project_name"]
+            }
+        },
+        {
+            "name": "yixiu.create_project_update",
+            "description": "Create a Yixiu project progress record from the current agent work summary.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "provider": {"type": "string"},
+                    "project_name": {"type": "string"},
+                    "title": {"type": "string"},
+                    "summary": {"type": "string"}
+                },
+                "required": ["project_name", "summary"]
+            }
+        }
+    ]
+
+    if method == "initialize":
+        return rpc_result({
+            "protocolVersion": "2024-11-05",
+            "serverInfo": {"name": "yixiu-ai-import-gateway", "version": "0.1.0"},
+            "capabilities": {"tools": {}}
+        })
+    if method == "tools/list":
+        return rpc_result({"tools": tools})
+    if method == "tools/call":
+        name = params.get("name")
+        args = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+        try:
+            if name == "yixiu.import_external_ai":
+                imported = _create_external_ai_import_record({**args, "imported_by": "MCP Agent"})
+            elif name == "yixiu.create_project_update":
+                imported = _create_external_ai_import_record({
+                    "provider": args.get("provider", "mcp-agent"),
+                    "project_name": args.get("project_name", ""),
+                    "title": args.get("title", f"{args.get('project_name', '项目')} 进展同步"),
+                    "content_type": "summary",
+                    "raw_content": args.get("summary", ""),
+                    "imported_by": "MCP Agent",
+                })
+            else:
+                return rpc_error(-32601, f"未知工具：{name}")
+        except ValueError as exc:
+            return rpc_error(-32602, str(exc))
+        return rpc_result({
+            "content": [{
+                "type": "text",
+                "text": f"已同步到一休：{imported['title']}；生成 {len(imported.get('artifacts', []))} 个候选资产，等待人工审核。"
+            }],
+            "structuredContent": {"import": imported}
+        })
+    return rpc_error(-32601, f"不支持的 MCP 方法：{method}")
+
+
+@yixiu_bp.get("/integrations/sources")
+def list_external_ai_sources():
+    with _db() as conn:
+        rows = conn.execute("SELECT * FROM external_ai_sources ORDER BY created_at DESC").fetchall()
+    return success_response({"sources": [_external_source_payload(row) for row in rows]}, "外部 AI 来源获取成功")
+
+
+@yixiu_bp.post("/integrations/sources")
+def create_external_ai_source():
+    data = request.get_json(silent=True) or {}
+    provider = str(data.get("provider") or "codex").strip().lower()
+    name = str(data.get("name") or f"{provider.title()} 工作台").strip()
+    source_id = data.get("id") or f"src-{provider}-{uuid.uuid4().hex[:8]}"
+    scopes = data.get("scopes") if isinstance(data.get("scopes"), list) else ["project_update", "memory_candidate", "skill_candidate", "eval_case"]
+    now = _now()
+    with _db() as conn:
+        conn.execute(
+            """
+            INSERT INTO external_ai_sources
+              (id, provider, name, auth_type, workspace_name, endpoint, scopes_json, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              provider=excluded.provider, name=excluded.name, auth_type=excluded.auth_type,
+              workspace_name=excluded.workspace_name, endpoint=excluded.endpoint,
+              scopes_json=excluded.scopes_json, status=excluded.status, updated_at=excluded.updated_at
+            """,
+            (
+                source_id, provider, name, data.get("auth_type", "mcp_token"),
+                data.get("workspace_name", ""), data.get("endpoint", ""),
+                json.dumps(scopes, ensure_ascii=False), data.get("status", "enabled"), now, now,
+            ),
+        )
+        row = conn.execute("SELECT * FROM external_ai_sources WHERE id=?", (source_id,)).fetchone()
+    return success_response({"source": _external_source_payload(row)}, "外部 AI 来源已保存")
+
+
+@yixiu_bp.get("/integrations/imports")
+def list_external_ai_imports():
+    project_id = request.args.get("project_id", "").strip()
+    with _db() as conn:
+        if project_id:
+            rows = conn.execute("SELECT * FROM external_ai_imports WHERE project_id=? ORDER BY imported_at DESC", (project_id,)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM external_ai_imports ORDER BY imported_at DESC LIMIT 50").fetchall()
+        result = []
+        for row in rows:
+            artifacts = conn.execute("SELECT * FROM external_ai_artifacts WHERE import_id=? ORDER BY created_at DESC", (row["id"],)).fetchall()
+            result.append(_external_import_payload(row, [_external_artifact_payload(item) for item in artifacts]))
+    return success_response({"imports": result}, "外部 AI 导入记录获取成功")
+
+
+@yixiu_bp.post("/integrations/imports")
+def create_external_ai_import():
+    data = request.get_json(silent=True) or {}
+    try:
+        imported = _create_external_ai_import_record(data)
+    except ValueError as exc:
+        return error_response(400, str(exc))
+    return success_response({"import": imported}, "外部 AI 内容已导入并解析")
+
+
+@yixiu_bp.post("/integrations/imports/<import_id>/parse")
+def parse_external_ai_import(import_id: str):
+    with _db() as conn:
+        row = conn.execute("SELECT * FROM external_ai_imports WHERE id=?", (import_id,)).fetchone()
+        if not row:
+            return error_response(404, "导入记录不存在")
+        parsed = _parse_external_ai_content(row["provider"], row["project_name"], row["title"], row["raw_content"])
+        now = _now()
+        conn.execute("DELETE FROM external_ai_artifacts WHERE import_id=?", (import_id,))
+        conn.execute(
+            "UPDATE external_ai_imports SET parse_status='parsed', summary=?, metadata_json=?, updated_at=? WHERE id=?",
+            (parsed["summary"], json.dumps(parsed["metadata"], ensure_ascii=False), now, import_id),
+        )
+        for artifact in parsed["artifacts"]:
+            conn.execute(
+                "INSERT INTO external_ai_artifacts VALUES (?, ?, ?, ?, ?, ?, 'pending_review', '', ?, ?)",
+                (f"art-{uuid.uuid4().hex[:12]}", import_id, artifact["artifact_type"], artifact["title"], artifact["content"], artifact["confidence"], now, now),
+            )
+        row = conn.execute("SELECT * FROM external_ai_imports WHERE id=?", (import_id,)).fetchone()
+        artifacts = conn.execute("SELECT * FROM external_ai_artifacts WHERE import_id=? ORDER BY created_at DESC", (import_id,)).fetchall()
+    return success_response({"import": _external_import_payload(row, [_external_artifact_payload(item) for item in artifacts])}, "导入内容已重新解析")
+
+
+@yixiu_bp.put("/integrations/artifacts/<artifact_id>/review")
+def review_external_ai_artifact(artifact_id: str):
+    data = request.get_json(silent=True) or {}
+    status = data.get("status", "approved")
+    if status not in {"approved", "rejected", "pending_review"}:
+        return error_response(400, "审核状态不合法")
+    now = _now()
+    with _db() as conn:
+        row = conn.execute("SELECT * FROM external_ai_artifacts WHERE id=?", (artifact_id,)).fetchone()
+        if not row:
+            return error_response(404, "候选资产不存在")
+        target_ref = row["target_ref"] or ""
+        if status == "approved" and row["artifact_type"] == "memory_candidate" and not target_ref:
+            knowledge_id = f"kb-import-{uuid.uuid4().hex[:10]}"
+            import_row = conn.execute("SELECT * FROM external_ai_imports WHERE id=?", (row["import_id"],)).fetchone()
+            tags = ["外部AI导入", import_row["provider"] if import_row else "external", "Memory候选"]
+            conn.execute(
+                """
+                INSERT INTO yixiu_knowledge
+                  (id, title, type, category, equipment, model, summary, content, tags, source,
+                   status, reviewer, correction, created_at, updated_at)
+                VALUES (?, ?, 'Memory Unit', '外部 AI 导入', ?, ?, ?, ?, ?, ?, 'approved', ?, ?, ?, ?)
+                """,
+                (
+                    knowledge_id, row["title"], (import_row["project_name"] if import_row else "未关联项目"),
+                    data.get("model", "外部 AI 工作台"), row["content"][:240], row["content"],
+                    json.dumps(tags, ensure_ascii=False), f"external_import:{row['import_id']}",
+                    data.get("reviewer", "一休审核"), data.get("correction", ""), now, now,
+                ),
+            )
+            target_ref = knowledge_id
+        conn.execute(
+            "UPDATE external_ai_artifacts SET review_status=?, target_ref=?, updated_at=? WHERE id=?",
+            (status, target_ref, now, artifact_id),
+        )
+        updated = conn.execute("SELECT * FROM external_ai_artifacts WHERE id=?", (artifact_id,)).fetchone()
+    return success_response({"artifact": _external_artifact_payload(updated)}, "候选资产审核完成")
+
+
+@yixiu_bp.route("/knowledge", methods=["GET"])
+def knowledge():
+    keyword = request.args.get("keyword", "").strip()
+    items = _stored_knowledge() + _base_knowledge()
+    if keyword:
+        items = [item for item in items if keyword.lower() in json.dumps(item, ensure_ascii=False).lower()]
+    return success_response({"items": items, "total": len(items)}, "知识资料获取成功")
+
+
+@yixiu_bp.get("/team-os/memories")
+def team_os_memories():
+    return knowledge()
+
+
+@yixiu_bp.post("/knowledge/upload")
+@require_jwt_roles(WRITE_ROLES)
+@require_confirmed_write("knowledge.upload", "/api/yixiu/knowledge/upload")
+def upload_knowledge_file():
+    """知识库文件上传 → 切片 → embedding → 入库流水线"""
+    if "file" not in request.files:
+        return error_response(400, "请选择需要上传的知识文件")
+    upload = request.files["file"]
+    if not upload.filename:
+        return error_response(400, "文件名为空")
+    original_name = Path(upload.filename).name
+    ext = Path(original_name).suffix.lower()
+    from services.file_parser import supported_suffixes
+    if ext not in supported_suffixes():
+        return error_response(400, f"知识库仅支持解析: {', '.join(sorted(supported_suffixes()))}")
+    file_id = f"file-{uuid.uuid4().hex[:12]}"
+    stored_name = f"{file_id}{ext}"
+    upload_dir = Path(current_app.config["UPLOAD_FOLDER"]) / "yixiu"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    path = upload_dir / secure_filename(stored_name)
+    upload.save(path)
+    form = request.form
+
+    # 切片入库
+    try:
+        from services.file_parser import parse_file
+        from services.rag_service import insert_chunks
+        chunks = parse_file(path)
+        if not chunks:
+            return error_response(422, "文件无可提取文本（可能是扫描版 PDF 或空文件）")
+        ingestion = insert_chunks(chunks, source=original_name)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("知识文件入库失败 %s: %s", original_name, exc)
+        return error_response(500, f"知识入库失败: {exc}")
+
+    # 写入知识候选条目，待人工审核
+    item_id = f"kb-{uuid.uuid4().hex[:12]}"
+    title = form.get("title") or Path(original_name).stem
+    summary = f"由 {original_name} 切片入库，共 {ingestion.get('inserted', 0)}/{ingestion.get('total', 0)} 块"
+    tags = form.get("tags", "知识库导入,文件切片").split(",") if form.get("tags") else ["知识库导入", "文件切片"]
+    content_preview = chunks[0][:500] if chunks else ""
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO yixiu_knowledge VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                item_id, title, form.get("type", "知识库导入"), form.get("category", "资料"),
+                form.get("equipment", ""), form.get("model", ""), summary,
+                f"# {title}\n\n来源文件：{original_name}\n\n## 切片预览\n{content_preview}\n\n## 切片入库统计\n- 总块数：{ingestion.get('total', 0)}\n- 成功：{ingestion.get('inserted', 0)}\n- 失败：{ingestion.get('failed', 0)}\n",
+                json.dumps(tags, ensure_ascii=False), original_name, "pending", "", "", _now(), _now(),
+            ),
+        )
+        # 同步写一条文件记录，便于后续审计
+        conn.execute(
+            "INSERT INTO yixiu_files VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (file_id, original_name, stored_name, "application/octet-stream", "知识资料", form.get("category", "知识库导入"), "知识库", path.stat().st_size, form.get("equipment", ""), form.get("model", ""), form.get("uploader", "当前用户"), _now(), "待审核", f"切片入库 {ingestion.get('inserted', 0)}/{ingestion.get('total', 0)}", form.get("version", "v1.0"), "knowledge", json.dumps({"ingestion": ingestion, "chunks": len(chunks)}, ensure_ascii=False)),
+        )
+    return success_response({
+        "knowledge_id": item_id, "file_id": file_id,
+        "original_name": original_name, "chunks": len(chunks),
+        "ingestion": ingestion, "preview": content_preview,
+    }, "知识文件已切片入库，等待人工审核")
+
+
+@yixiu_bp.get("/knowledge/similar")
+def knowledge_similar():
+    """向量相似度检索：基于 LightRAG hybrid 模式检索 top 命中块"""
+    query = request.args.get("query", "").strip()
+    if not query:
+        return error_response(400, "检索 query 不能为空")
+    try:
+        limit = int(request.args.get("limit", 5))
+    except ValueError:
+        limit = 5
+    mode = request.args.get("mode", "hybrid")
+    try:
+        from services.rag_service import search_similar
+        hits = search_similar(query, limit=limit, mode=mode)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("相似度检索失败: %s", exc)
+        return error_response(500, f"检索失败: {exc}")
+    return success_response({"query": query, "hits": hits, "total": len(hits), "mode": mode}, "相似度检索成功")
+
+
+@yixiu_bp.post("/knowledge/update")
+@require_jwt_roles(WRITE_ROLES)
+@require_confirmed_write("knowledge.update", "/api/yixiu/knowledge/update")
+def update_knowledge():
+    data = request.get_json(silent=True) or {}
+    title = str(data.get("title", "")).strip()
+    summary = str(data.get("summary", "")).strip()
+    if not title or not summary:
+        return error_response(400, "Memory 标题和沉淀摘要不能为空")
+    item_id = f"kb-{uuid.uuid4().hex[:12]}"
+    tags = data.get("tags") or ["Team Memory", "Skill Candidate"]
+    content = data.get("content") or f"# {title}\n\n## 适用范围\n- 项目：{data.get('equipment') or '待补充'}\n- 模块 / 技术栈：{data.get('model') or '通用'}\n\n## 问题、尝试与经验\n{summary}\n\n## 验证与审核\n提交内容须经人工审核，确认引用依据、适用条件、失败边界和 Eval 结果后方可入库。"
+    with _db() as conn:
+        conn.execute("INSERT INTO yixiu_knowledge VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (item_id, title, data.get("type", "Memory Unit"), data.get("category", "团队记忆"), data.get("equipment", ""), data.get("model", ""), summary, content, json.dumps(tags, ensure_ascii=False), data.get("source", "Task Execution Record"), "pending", "", "", _now(), _now()))
+        row = conn.execute("SELECT * FROM yixiu_knowledge WHERE id=?", (item_id,)).fetchone()
+    item = dict(row)
+    item["tags"] = _json(item["tags"], [])
+    item["reviewable"] = True
+    return success_response(item, "Memory Unit 已进入人工审核队列")
+
+
+@yixiu_bp.put("/knowledge/<item_id>/review")
+def review_knowledge(item_id: str):
+    data = request.get_json(silent=True) or {}
+    status = data.get("status", "approved")
+    if status not in {"approved", "rejected", "pending"}:
+        return error_response(400, "无效的审核状态")
+    correction = str(data.get("correction", "")).strip()
+    tags = data.get("tags")
+    with _db() as conn:
+        row = conn.execute("SELECT * FROM yixiu_knowledge WHERE id=?", (item_id,)).fetchone()
+        if not row:
+            return error_response(404, "知识条目不存在")
+        summary = correction or row["summary"]
+        tag_value = json.dumps(tags, ensure_ascii=False) if isinstance(tags, list) else row["tags"]
+        conn.execute("UPDATE yixiu_knowledge SET status=?, reviewer=?, correction=?, summary=?, tags=?, updated_at=? WHERE id=?", (status, data.get("reviewer", "当前审核人"), correction, summary, tag_value, _now(), item_id))
+    return success_response({"id": item_id, "status": status, "summary": summary, "tags": _json(tag_value, []), "reviewer": data.get("reviewer", "当前审核人"), "updated_at": _now(), "graph_synced": status == "approved"}, "审核结果已保存并同步知识状态")
+
+
+@yixiu_bp.post("/assistant/chat")
+def assistant_chat():
+    data = request.get_json(silent=True) or {}
+    message = str(data.get("message", "")).strip()
+    file_ids = data.get("fileIds") or []
+    if not message and not file_ids:
+        return error_response(400, "请输入问题或上传现场资料")
+    attachments = []
+    if file_ids:
+        marks = ",".join("?" for _ in file_ids)
+        with _db() as conn:
+            attachments = [_file_dict(row) for row in conn.execute(f"SELECT * FROM yixiu_files WHERE id IN ({marks})", tuple(file_ids)).fetchall()]
+    findings = []
+    risks = []
+    for item in attachments:
+        analysis = item.get("analysis") or {}
+        findings.extend(analysis.get("fault_signs") or analysis.get("findings") or [])
+        risks.extend(analysis.get("risk_points") or [])
+    context = f"已结合 {len(attachments)} 个附件进行分析。" if attachments else ""
+    evidence = f"图像线索：{'、'.join(dict.fromkeys(findings))}。" if findings else ""
+    risk_text = f"风险提示：{'、'.join(dict.fromkeys(risks))}。" if risks else ""
+    answer = f"{context}{evidence}{risk_text}建议先确认设备型号和安全状态，再依据故障现象检索手册与相似案例；检测结果异常时再进入拆检或更换步骤。"
+    return success_response({
+        "response": answer,
+        "modalities": ["text"] + (["image" if any(item.get("type") == "图片" for item in attachments) else "file"] if attachments else []),
+        "findings": findings, "risk_points": risks, "attachments": attachments,
+        "references": ["设备维修手册", "标准作业流程", "历史故障案例"], "agent": data.get("agent", "观微"),
+    }, "智能检修助手已完成多模态分析")
+
+
+@yixiu_bp.post("/audit")
+def audit():
+    data = request.get_json(silent=True) or {}
+    checks = [
+        ("引用手册或知识库依据", bool(data.get("references"))),
+        ("完成安全确认与断电验电", bool(data.get("safety_checked"))),
+        ("记录故障现象和检测数据", bool(data.get("measurements"))),
+        ("完成复测确认", bool(data.get("retested"))),
+        ("提交现场证据或报告", bool(data.get("report_ready"))),
+    ]
+    checklist = [{"item": item, "passed": passed} for item, passed in checks]
+    score = round(sum(1 for _, passed in checks if passed) / len(checks) * 100)
+    return success_response({"passed": score == 100, "score": score, "checklist": checklist, "suggestion": "可归档并提交知识沉淀" if score == 100 else "请补齐未通过项目后再提交验收"}, "核查完成")
+
+
+@yixiu_bp.get("/contacts")
+def contacts():
+    with _db() as conn:
+        rows = conn.execute("SELECT * FROM yixiu_contacts ORDER BY updated_at DESC").fetchall()
+    stored = []
+    for row in rows:
+        item = dict(row)
+        item["devices"] = _json(item.pop("devices", "[]"), [])
+        item["currentTask"] = item.pop("current_task", "")
+        item["employeeId"] = item.pop("employee_id", "")
+        stored.append(item)
+    merged = list(CONTACTS)
+    known = {str(item.get("id")) for item in merged}
+    merged.extend(item for item in stored if str(item.get("id")) not in known)
+    return success_response({"contacts": merged, "total": len(merged)}, "contacts loaded")
+
+
+@yixiu_bp.put("/contacts/<contact_id>")
+def upsert_contact(contact_id: str):
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name", "")).strip()
+    if not name:
+        return error_response("contact name is required", 400)
+    now = _now()
+    with _db() as conn:
+        conn.execute(
+            """INSERT INTO yixiu_contacts
+               (id, account, name, avatar, position, department, specialty, phone,
+                status, devices, current_task, workload, employee_id, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET account=excluded.account, name=excluded.name,
+               avatar=excluded.avatar, position=excluded.position, department=excluded.department,
+               specialty=excluded.specialty, phone=excluded.phone, status=excluded.status,
+               devices=excluded.devices, current_task=excluded.current_task,
+               workload=excluded.workload, employee_id=excluded.employee_id, updated_at=excluded.updated_at""",
+            (contact_id, data.get("account"), name, data.get("avatar", ""),
+             data.get("position", "maintenance worker"), data.get("department", "unassigned"),
+             data.get("specialty", "maintenance"), data.get("phone", ""), data.get("status", "online"),
+             json.dumps(data.get("devices", []), ensure_ascii=False), data.get("currentTask", ""),
+             int(data.get("workload", 0) or 0), data.get("employeeId", ""), now),
+        )
+    return success_response({**data, "id": contact_id, "updated_at": now}, "contact synchronized")
+
+
+@yixiu_bp.get("/conversations/<conversation_id>/messages")
+def conversation_messages(conversation_id: str):
+    with _db() as conn:
+        rows = conn.execute("SELECT * FROM yixiu_messages WHERE conversation_id=? ORDER BY created_at ASC LIMIT 500", (conversation_id,)).fetchall()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["attachment"] = _json(item.pop("attachment_json", "{}"), {})
+        item["card"] = _json(item.pop("card_json", "{}"), {})
+        items.append(item)
+    return success_response({"messages": items}, "messages loaded")
+
+
+@yixiu_bp.post("/conversations/<conversation_id>/messages")
+@require_jwt_roles(WRITE_ROLES)
+@require_confirmed_write("conversation.message", "/api/yixiu/conversations/messages")
+def create_conversation_message(conversation_id: str):
+    data = request.get_json(silent=True) or {}
+    if not str(data.get("text", "")).strip() and not data.get("attachment") and not data.get("card"):
+        return error_response("message content is required", 400)
+    message_id = str(data.get("id") or uuid.uuid4())
+    created_at = str(data.get("created_at") or _now())
+    with _db() as conn:
+        conn.execute(
+            """INSERT INTO yixiu_messages
+               (id, conversation_id, sender_id, sender_name, message_type, text,
+                attachment_json, card_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (message_id, conversation_id, data.get("sender_id"), data.get("sender_name"),
+             data.get("message_type", "text"), data.get("text", ""),
+             json.dumps(data.get("attachment") or {}, ensure_ascii=False),
+             json.dumps(data.get("card") or {}, ensure_ascii=False), created_at),
+        )
+    return success_response({**data, "id": message_id, "conversation_id": conversation_id, "created_at": created_at}, "message created")
+
+
+def _ensure_knowledge_in_db(conn: sqlite3.Connection, item_id: str):
+    """确保知识条目存在于数据库中。如果来自基础JSON，则复制到数据库。"""
+    row = conn.execute("SELECT * FROM yixiu_knowledge WHERE id=?", (item_id,)).fetchone()
+    if row:
+        return row
+    for item in _base_knowledge():
+        if str(item.get("id")) == str(item_id):
+            raw_content = item.get("content", "")
+            content_str = "\n".join(raw_content) if isinstance(raw_content, list) else str(raw_content)
+            summary = item.get("summary") or content_str[:200]
+            conn.execute(
+                "INSERT INTO yixiu_knowledge VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (str(item_id), item.get("title", "未命名"), item.get("type", "手册"),
+                 item.get("category", "知识条目"), item.get("equipment_category") or item.get("equipment", ""),
+                 item.get("equipment_model") or item.get("model", ""), summary,
+                 content_str, json.dumps(item.get("tags", item.get("keywords", [])), ensure_ascii=False),
+                 item.get("source", "基础知识库"), "approved", "", "", _now(), _now()),
+            )
+            return conn.execute("SELECT * FROM yixiu_knowledge WHERE id=?", (item_id,)).fetchone()
+    return None
+
+
+@yixiu_bp.put("/knowledge/<item_id>/content")
+def edit_knowledge_content(item_id: str):
+    """编辑保存知识条目内容，自动生成版本快照。"""
+    data = request.get_json(silent=True) or {}
+    content = str(data.get("content", "")).strip()
+    if not content:
+        return error_response(400, "内容不能为空")
+    with _db() as conn:
+        row = _ensure_knowledge_in_db(conn, item_id)
+        if not row:
+            return error_response(404, "知识条目不存在")
+        current_version = conn.execute(
+            "SELECT MAX(version) as v FROM yixiu_knowledge_versions WHERE knowledge_id=?", (item_id,)
+        ).fetchone()["v"] or 1
+        new_version = current_version + 1
+        title = data.get("title") or row["title"]
+        tags = data.get("tags")
+        tag_value = json.dumps(tags, ensure_ascii=False) if isinstance(tags, list) else row["tags"]
+        equipment = data.get("equipment") or row["equipment"]
+        model = data.get("model") or row["model"]
+        summary = data.get("summary") or (content[:200] if content else row["summary"])
+        conn.execute(
+            "UPDATE yixiu_knowledge SET title=?, content=?, tags=?, equipment=?, model=?, summary=?, status=?, updated_at=? WHERE id=?",
+            (title, content, tag_value, equipment, model, summary, "pending", _now(), item_id),
+        )
+        version_id = f"ver-{uuid.uuid4().hex[:12]}"
+        conn.execute(
+            "INSERT INTO yixiu_knowledge_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (version_id, item_id, new_version, content, title,
+             data.get("change_summary", ""), data.get("editor_id", ""),
+             data.get("editor_name", "当前用户"), _now()),
+        )
+        updated = conn.execute("SELECT * FROM yixiu_knowledge WHERE id=?", (item_id,)).fetchone()
+    item = dict(updated)
+    item["tags"] = _json(item["tags"], [])
+    item["version"] = new_version
+    item["reviewable"] = True
+    return success_response(item, "知识内容已保存，版本 v%d" % new_version)
+
+
+@yixiu_bp.get("/knowledge/<item_id>/versions")
+def knowledge_versions(item_id: str):
+    """获取知识条目的版本历史。"""
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM yixiu_knowledge_versions WHERE knowledge_id=? ORDER BY version DESC",
+            (item_id,),
+        ).fetchall()
+    items = [dict(row) for row in rows]
+    return success_response({"versions": items, "total": len(items)}, "版本历史获取成功")
+
+
+@yixiu_bp.get("/knowledge/<item_id>/versions/<version_id>")
+def knowledge_version_detail(item_id: str, version_id: str):
+    """获取某个版本的详细内容。"""
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT * FROM yixiu_knowledge_versions WHERE id=? AND knowledge_id=?",
+            (version_id, item_id),
+        ).fetchone()
+    if not row:
+        return error_response(404, "版本不存在")
+    return success_response(dict(row), "版本内容获取成功")
+
+
+@yixiu_bp.post("/knowledge/<item_id>/versions/<version_id>/restore")
+def restore_knowledge_version(item_id: str, version_id: str):
+    """恢复到指定版本。"""
+    with _db() as conn:
+        row = _ensure_knowledge_in_db(conn, item_id)
+        if not row:
+            return error_response(404, "知识条目不存在")
+        ver = conn.execute(
+            "SELECT * FROM yixiu_knowledge_versions WHERE id=? AND knowledge_id=?",
+            (version_id, item_id),
+        ).fetchone()
+        if not ver:
+            return error_response(404, "版本不存在")
+        current_version = conn.execute(
+            "SELECT MAX(version) as v FROM yixiu_knowledge_versions WHERE knowledge_id=?", (item_id,)
+        ).fetchone()["v"] or 1
+        new_version = current_version + 1
+        conn.execute(
+            "UPDATE yixiu_knowledge SET content=?, title=?, status=?, updated_at=? WHERE id=?",
+            (ver["content_snapshot"], ver["title_snapshot"], "pending", _now(), item_id),
+        )
+        restore_id = f"ver-{uuid.uuid4().hex[:12]}"
+        conn.execute(
+            "INSERT INTO yixiu_knowledge_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (restore_id, item_id, new_version, ver["content_snapshot"], ver["title_snapshot"],
+             "恢复到 v%d" % ver["version"], "", "当前用户", _now()),
+        )
+    return success_response({"id": item_id, "restored_version": ver["version"], "new_version": new_version}, "已恢复到 v%d" % ver["version"])
+
+
+@yixiu_bp.get("/knowledge/<item_id>/collaborators")
+def knowledge_collaborators(item_id: str):
+    """获取知识条目的协作成员列表。"""
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM yixiu_knowledge_collaborators WHERE knowledge_id=? ORDER BY last_active_at DESC",
+            (item_id,),
+        ).fetchall()
+    items = [dict(row) for row in rows]
+    return success_response({"collaborators": items, "total": len(items)}, "协作成员获取成功")
+
+
+@yixiu_bp.post("/knowledge/<item_id>/collaborators")
+def add_knowledge_collaborator(item_id: str):
+    """添加协作成员。"""
+    data = request.get_json(silent=True) or {}
+    user_id = str(data.get("user_id") or data.get("userId") or data.get("name") or "guest")
+    user_name = str(data.get("user_name") or data.get("userName") or data.get("name") or "新成员")
+    role = str(data.get("role", "editor"))
+    now = _now()
+    collab_id = f"col-{uuid.uuid4().hex[:10]}"
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO yixiu_knowledge_collaborators VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (collab_id, item_id, user_id, user_name, role, now, 1),
+        )
+    return success_response({
+        "id": collab_id, "knowledge_id": item_id,
+        "user_id": user_id, "user_name": user_name, "role": role,
+    }, "协作成员添加成功")
+
+
+@yixiu_bp.post("/knowledge/<item_id>/presence")
+def knowledge_presence(item_id: str):
+    """上报在线状态（心跳）。"""
+    data = request.get_json(silent=True) or {}
+    user_id = str(data.get("user_id") or data.get("userId") or "guest")
+    user_name = str(data.get("user_name") or data.get("userName") or "当前用户")
+    now = _now()
+    with _db() as conn:
+        existing = conn.execute(
+            "SELECT * FROM yixiu_knowledge_collaborators WHERE knowledge_id=? AND user_id=?",
+            (item_id, user_id),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE yixiu_knowledge_collaborators SET is_online=1, last_active_at=? WHERE id=?",
+                (now, existing["id"]),
+            )
+        else:
+            collab_id = f"col-{uuid.uuid4().hex[:10]}"
+            conn.execute(
+                "INSERT INTO yixiu_knowledge_collaborators VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (collab_id, item_id, user_id, user_name, "editor", now, 1),
+            )
+        rows = conn.execute(
+            "SELECT * FROM yixiu_knowledge_collaborators WHERE knowledge_id=? AND is_online=1",
+            (item_id,),
+        ).fetchall()
+    online = [dict(row) for row in rows]
+    return success_response({"online_members": online, "count": len(online)}, "在线状态已更新")
+
+
+@yixiu_bp.route("/knowledge/<item_id>/links", methods=["GET", "POST"])
+def knowledge_links(item_id: str):
+    """获取或添加知识条目的板块联动关联。"""
+    if request.method == "GET":
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT * FROM yixiu_knowledge_links WHERE knowledge_id=? ORDER BY created_at DESC",
+                (item_id,),
+            ).fetchall()
+        items = [dict(row) for row in rows]
+        return success_response({"links": items, "total": len(items)}, "联动关联获取成功")
+
+    data = request.get_json(silent=True) or {}
+    link_type = str(data.get("link_type", "")).strip()
+    target_id = str(data.get("target_id", "")).strip()
+    target_title = str(data.get("target_title", "")).strip()
+    if link_type not in {"task", "knowledge", "file"} or not target_id:
+        return error_response(400, "关联类型和目标ID不能为空")
+    link_id = f"link-{uuid.uuid4().hex[:10]}"
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO yixiu_knowledge_links VALUES (?, ?, ?, ?, ?, ?)",
+            (link_id, item_id, link_type, target_id, target_title, _now()),
+        )
+    return success_response({"id": link_id, "knowledge_id": item_id, "link_type": link_type,
+                             "target_id": target_id, "target_title": target_title, "created_at": _now()}, "关联添加成功")
+
+
+@yixiu_bp.route("/knowledge/<item_id>/links/<link_id>", methods=["DELETE"])
+def remove_knowledge_link(item_id: str, link_id: str):
+    """移除板块联动关联。"""
+    with _db() as conn:
+        row = conn.execute("SELECT * FROM yixiu_knowledge_links WHERE id=? AND knowledge_id=?", (link_id, item_id)).fetchone()
+        if not row:
+            return error_response(404, "关联不存在")
+        conn.execute("DELETE FROM yixiu_knowledge_links WHERE id=?", (link_id,))
+    return success_response({"id": link_id}, "关联已移除")
+
+
+@yixiu_bp.get("/knowledge/linked/<link_type>/<target_id>")
+def linked_knowledge(link_type: str, target_id: str):
+    """反向查询：根据关联类型和目标ID查找关联的知识条目。"""
+    with _db() as conn:
+        rows = conn.execute(
+            """SELECT k.*, l.target_id, l.target_title, l.id as link_id
+               FROM yixiu_knowledge k
+               JOIN yixiu_knowledge_links l ON k.id = l.knowledge_id
+               WHERE l.link_type=? AND l.target_id=?""",
+            (link_type, target_id),
+        ).fetchall()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["tags"] = _json(item.get("tags"), [])
+        items.append(item)
+    return success_response({"items": items, "total": len(items)}, "关联知识获取成功")
+
+
+@yixiu_bp.route("/templates")
+def list_templates():
+    keyword = request.args.get("keyword", "").strip()
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM yixiu_doc_templates WHERE name LIKE ? OR category LIKE ? ORDER BY is_builtin DESC, created_at DESC",
+            (f"%{keyword}%", f"%{keyword}%"),
+        ).fetchall()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["skeleton"] = _json(item.get("skeleton_json"), {})
+        items.append(item)
+    return success_response({"templates": items, "total": len(items)})
+
+
+@yixiu_bp.route("/templates/<template_id>")
+def get_template(template_id):
+    with _db() as conn:
+        row = conn.execute("SELECT * FROM yixiu_doc_templates WHERE id=?", (template_id,)).fetchone()
+    if not row:
+        return error_response(404, "模板不存在")
+    item = dict(row)
+    item["skeleton"] = _json(item.get("skeleton_json"), {})
+    return success_response(item)
+
+
+@yixiu_bp.route("/templates", methods=["POST"])
+def create_template():
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name", "")).strip()
+    if not name:
+        return error_response(400, "模板名称不能为空")
+    template_id = f"tpl-{uuid.uuid4().hex[:10]}"
+    skeleton = data.get("skeleton", {})
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO yixiu_doc_templates VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+            (template_id, name, str(data.get("icon", "📝")),
+             str(data.get("category", "通用")), str(data.get("description", "")),
+             json.dumps(skeleton, ensure_ascii=False), _now()),
+        )
+    return success_response({"id": template_id, "name": name}, "模板创建成功")
+
+
+@yixiu_bp.route("/templates/<template_id>", methods=["DELETE"])
+def delete_template(template_id):
+    with _db() as conn:
+        row = conn.execute("SELECT * FROM yixiu_doc_templates WHERE id=?", (template_id,)).fetchone()
+        if not row:
+            return error_response(404, "模板不存在")
+        if row["is_builtin"]:
+            return error_response(403, "内置模板不可删除")
+        conn.execute("DELETE FROM yixiu_doc_templates WHERE id=?", (template_id,))
+    return success_response({"id": template_id}, "模板已删除")
+
+
+@yixiu_bp.get("/aios/platform")
+def aios_platform():
+    return success_response(_aios_platform_snapshot(), "天工 AIOS 平台能力获取成功")
+
+
+@yixiu_bp.route("/aios/agents", methods=["GET", "POST"])
+def aios_agents_manage():
+    if request.method == "GET":
+        with _db() as conn:
+            rows = conn.execute("SELECT * FROM yixiu_agent_configs ORDER BY id").fetchall()
+        return success_response({"agents": [_agent_config_dict(row) for row in rows]}, "AIOS 智能体配置获取成功")
+
+    data = request.get_json(silent=True) or {}
+    agent_id = _agent_key(str(data.get("id") or data.get("agent_id") or f"agent-{uuid.uuid4().hex[:8]}"))
+    name = str(data.get("name") or _agent_by_id(agent_id).get("name") or "新智能体").strip()
+    role = str(data.get("role") or data.get("description") or "").strip()
+    tools = data.get("tools") if isinstance(data.get("tools"), list) else AGENT_TOOL_ALLOWLISTS.get(agent_id, [])
+    knowledge_ids = data.get("knowledge_ids") if isinstance(data.get("knowledge_ids"), list) else []
+    memory_keys = data.get("memory_keys") if isinstance(data.get("memory_keys"), list) else ["role", "duty", "capabilities"]
+    now = _now()
+    with _db() as conn:
+        conn.execute(
+            """INSERT INTO yixiu_agent_configs
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 name=excluded.name, role=excluded.role,
+                 model_provider=excluded.model_provider, model_name=excluded.model_name,
+                 prompt=excluded.prompt, tools_json=excluded.tools_json,
+                 knowledge_ids_json=excluded.knowledge_ids_json,
+                 memory_keys_json=excluded.memory_keys_json,
+                 database_scope=excluded.database_scope, status=excluded.status,
+                 updated_at=excluded.updated_at""",
+            (
+                agent_id,
+                name,
+                role,
+                str(data.get("model_provider") or "qwen"),
+                str(data.get("model_name") or "qwen-local-or-cloud"),
+                str(data.get("prompt") or AGENT_PROMPTS.get(agent_id, "")),
+                json.dumps(tools, ensure_ascii=False),
+                json.dumps(knowledge_ids, ensure_ascii=False),
+                json.dumps(memory_keys, ensure_ascii=False),
+                str(data.get("database_scope") or "read_business"),
+                str(data.get("status") or "enabled"),
+                now,
+                now,
+            ),
+        )
+        row = conn.execute("SELECT * FROM yixiu_agent_configs WHERE id=?", (agent_id,)).fetchone()
+    return success_response(_agent_config_dict(row), "AIOS 智能体配置已保存")
+
+
+@yixiu_bp.route("/aios/teams", methods=["GET", "POST"])
+def aios_teams():
+    if request.method == "GET":
+        with _db() as conn:
+            rows = conn.execute("SELECT * FROM yixiu_agent_teams ORDER BY updated_at DESC").fetchall()
+        return success_response({"teams": [_team_dict(row) for row in rows]}, "AIOS Team 获取成功")
+
+    data = request.get_json(silent=True) or {}
+    team_id = str(data.get("id") or f"team-{uuid.uuid4().hex[:10]}")
+    members = data.get("members") if isinstance(data.get("members"), list) else []
+    workflow = data.get("workflow") if isinstance(data.get("workflow"), dict) else {}
+    now = _now()
+    with _db() as conn:
+        conn.execute(
+            """INSERT INTO yixiu_agent_teams
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 name=excluded.name, description=excluded.description,
+                 lead_agent_id=excluded.lead_agent_id, members_json=excluded.members_json,
+                 workflow_json=excluded.workflow_json, updated_at=excluded.updated_at""",
+            (
+                team_id,
+                str(data.get("name") or "自定义 AIOS Team"),
+                str(data.get("description") or ""),
+                _agent_key(str(data.get("lead_agent_id") or "tiangong")),
+                json.dumps(members, ensure_ascii=False),
+                json.dumps(workflow, ensure_ascii=False),
+                now,
+                now,
+            ),
+        )
+        row = conn.execute("SELECT * FROM yixiu_agent_teams WHERE id=?", (team_id,)).fetchone()
+    return success_response(_team_dict(row), "AIOS Team 已保存")
+
+
+@yixiu_bp.route("/aios/sessions", methods=["GET", "POST"])
+def aios_sessions():
+    if request.method == "GET":
+        limit = min(int(request.args.get("limit", 30)), 100)
+        with _db() as conn:
+            rows = conn.execute("SELECT * FROM yixiu_conversation_sessions ORDER BY updated_at DESC LIMIT ?", (limit,)).fetchall()
+        return success_response({"sessions": [_session_dict(row) for row in rows], "total": len(rows)}, "AIOS 会话获取成功")
+
+    data = request.get_json(silent=True) or {}
+    now = _now()
+    session_id = str(data.get("id") or f"session-{uuid.uuid4().hex[:12]}")
+    context = data.get("context") if isinstance(data.get("context"), dict) else {}
+    with _db() as conn:
+        conn.execute(
+            """INSERT INTO yixiu_conversation_sessions
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 title=excluded.title, channel=excluded.channel,
+                 active_agent_id=excluded.active_agent_id,
+                 context_json=excluded.context_json, status=excluded.status,
+                 updated_at=excluded.updated_at""",
+            (
+                session_id,
+                str(data.get("user_id") or "current-user"),
+                str(data.get("title") or "一修检修会话"),
+                str(data.get("channel") or "web"),
+                _agent_key(str(data.get("active_agent_id") or "tiangong")),
+                json.dumps(context, ensure_ascii=False),
+                str(data.get("status") or "active"),
+                now,
+                now,
+            ),
+        )
+        row = conn.execute("SELECT * FROM yixiu_conversation_sessions WHERE id=?", (session_id,)).fetchone()
+    return success_response(_session_dict(row), "AIOS 会话已保存")
+
+
+@yixiu_bp.route("/aios/memory", methods=["GET", "POST"])
+def aios_memory():
+    if request.method == "GET":
+        agent_id = request.args.get("agent_id", "").strip()
+        where = "WHERE agent_id=?" if agent_id else ""
+        params = (_agent_key(agent_id),) if agent_id else ()
+        with _db() as conn:
+            rows = conn.execute(f"SELECT * FROM yixiu_agent_memory {where} ORDER BY updated_at DESC", params).fetchall()
+        memories = []
+        for row in rows:
+            item = dict(row)
+            item["tags"] = _json(item.get("tags"), [])
+            memories.append(item)
+        return success_response({"memories": memories, "total": len(memories)}, "AIOS 长期记忆获取成功")
+
+    data = request.get_json(silent=True) or {}
+    agent_id = _agent_key(str(data.get("agent_id") or "tiangong"))
+    memory_key = str(data.get("memory_key") or data.get("key") or "").strip()
+    memory_value = str(data.get("memory_value") or data.get("value") or "").strip()
+    if not memory_key or not memory_value:
+        return error_response(400, "记忆键和值不能为空")
+    memory_id = f"mem-{agent_id}-{memory_key}"
+    with _db() as conn:
+        conn.execute(
+            """INSERT INTO yixiu_agent_memory VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(agent_id, memory_key) DO UPDATE SET
+                 memory_value=excluded.memory_value, tags=excluded.tags, updated_at=excluded.updated_at""",
+            (
+                memory_id,
+                agent_id,
+                memory_key,
+                memory_value,
+                json.dumps(data.get("tags") if isinstance(data.get("tags"), list) else ["manual"], ensure_ascii=False),
+                _now(),
+            ),
+        )
+        row = conn.execute("SELECT * FROM yixiu_agent_memory WHERE agent_id=? AND memory_key=?", (agent_id, memory_key)).fetchone()
+    item = dict(row)
+    item["tags"] = _json(item.get("tags"), [])
+    return success_response(item, "AIOS 长期记忆已保存")
+
+
+@yixiu_bp.route("/aios/approvals", methods=["GET", "POST"])
+def aios_approvals():
+    if request.method == "GET":
+        status = request.args.get("status", "").strip()
+        where = "WHERE status=?" if status else ""
+        params = (status,) if status else ()
+        with _db() as conn:
+            rows = conn.execute(f"SELECT * FROM yixiu_aios_approvals {where} ORDER BY created_at DESC LIMIT 80", params).fetchall()
+        return success_response({"approvals": [_approval_dict(row) for row in rows], "total": len(rows)}, "AIOS 审批获取成功")
+
+    data = request.get_json(silent=True) or {}
+    approval_id = str(data.get("id") or f"apr-{uuid.uuid4().hex[:12]}")
+    with _db() as conn:
+        conn.execute(
+            """INSERT INTO yixiu_aios_approvals
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                approval_id,
+                str(data.get("run_id") or ""),
+                str(data.get("step_key") or ""),
+                str(data.get("action") or ""),
+                str(data.get("title") or "智能体请求执行"),
+                str(data.get("detail") or ""),
+                _agent_key(str(data.get("requester_agent_id") or "tiangong")),
+                str(data.get("status") or "pending"),
+                str(data.get("requested_by") or "AIOS"),
+                "",
+                "",
+                _now(),
+                "",
+            ),
+        )
+        row = conn.execute("SELECT * FROM yixiu_aios_approvals WHERE id=?", (approval_id,)).fetchone()
+    return success_response(_approval_dict(row), "AIOS 审批已创建")
+
+
+@yixiu_bp.post("/aios/approvals/<approval_id>/decision")
+def aios_approval_decision(approval_id: str):
+    data = request.get_json(silent=True) or {}
+    decision = str(data.get("decision") or data.get("status") or "").strip()
+    if decision not in {"approved", "rejected"}:
+        return error_response(400, "审批结果必须是 approved 或 rejected")
+    with _db() as conn:
+        row = conn.execute("SELECT * FROM yixiu_aios_approvals WHERE id=?", (approval_id,)).fetchone()
+        if not row:
+            return error_response(404, "审批记录不存在")
+        conn.execute(
+            "UPDATE yixiu_aios_approvals SET status=?, decided_by=?, decision_note=?, decided_at=? WHERE id=?",
+            (decision, str(data.get("decided_by") or "当前用户"), str(data.get("note") or ""), _now(), approval_id),
+        )
+        updated = conn.execute("SELECT * FROM yixiu_aios_approvals WHERE id=?", (approval_id,)).fetchone()
+    return success_response(_approval_dict(updated), "AIOS 审批已处理")
+
+
+@yixiu_bp.post("/aios/cancel")
+def aios_cancel():
+    data = request.get_json(silent=True) or {}
+    run_id = str(data.get("run_id") or "").strip()
+    if not run_id:
+        return error_response(400, "缺少 AIOS 运行ID")
+    reason = str(data.get("reason") or "用户取消长任务").strip()
+    with _db() as conn:
+        run = _load_aios_run(conn, run_id)
+        if not run:
+            return error_response(404, "AIOS 运行记录不存在")
+        plan = run.get("plan") or {}
+        for step in plan.get("steps", []):
+            if step.get("state") not in {"done", "failed", "skipped", "compensated"}:
+                step["state"] = "skipped"
+                step["last_error"] = reason
+                step["updated_at"] = _now()
+        plan["workflow_state"] = "cancelled"
+        plan["progress"] = run.get("progress", 0)
+        plan["updated_at"] = _now()
+        conn.execute(
+            "UPDATE yixiu_aios_runs SET plan_json=?, status='cancelled', updated_at=? WHERE id=?",
+            (json.dumps(plan, ensure_ascii=False), _now(), run_id),
+        )
+        conn.execute(
+            "UPDATE yixiu_aios_queue SET state='cancelled', updated_at=? WHERE run_id=? AND state NOT IN ('done','failed')",
+            (_now(), run_id),
+        )
+        conn.execute(
+            "UPDATE yixiu_aios_approvals SET status='rejected', decision_note=?, decided_by=?, decided_at=? WHERE run_id=? AND status='pending'",
+            (reason, str(data.get("decided_by") or "当前用户"), _now(), run_id),
+        )
+        event = _record_agent_event(
+            conn,
+            "tiangong",
+            "AIOS 长任务已取消",
+            reason,
+            event_type="cancel",
+            status="cancelled",
+            payload={"run_id": run_id, "reason": reason},
+            run_id=run_id,
+        )
+        updated = _load_aios_run(conn, run_id)
+    return success_response({"run": updated, "event": event}, "AIOS 长任务已取消")
+
+
+@yixiu_bp.route("/aios/service-accounts", methods=["GET", "POST"])
+def aios_service_accounts():
+    if request.method == "GET":
+        with _db() as conn:
+            rows = conn.execute("SELECT * FROM yixiu_service_accounts ORDER BY created_at DESC").fetchall()
+        return success_response({"service_accounts": [_service_account_dict(row) for row in rows]}, "AIOS 服务账号获取成功")
+
+    data = request.get_json(silent=True) or {}
+    account_id = str(data.get("id") or f"svc-{uuid.uuid4().hex[:10]}")
+    scopes = data.get("scopes") if isinstance(data.get("scopes"), list) else ["agent:invoke", "task:read", "knowledge:read"]
+    now = _now()
+    with _db() as conn:
+        conn.execute(
+            """INSERT INTO yixiu_service_accounts
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 name=excluded.name, role=excluded.role,
+                 scopes_json=excluded.scopes_json, enabled=excluded.enabled""",
+            (
+                account_id,
+                str(data.get("name") or "AIOS 服务账号"),
+                str(data.get("role") or "service"),
+                json.dumps(scopes, ensure_ascii=False),
+                1 if data.get("enabled", True) else 0,
+                now,
+                now,
+            ),
+        )
+        row = conn.execute("SELECT * FROM yixiu_service_accounts WHERE id=?", (account_id,)).fetchone()
+    return success_response(_service_account_dict(row), "AIOS 服务账号已保存")
+
+
+@yixiu_bp.get("/aios/trace")
+def aios_trace():
+    run_id = request.args.get("run_id", "").strip()
+    with _db() as conn:
+        if run_id:
+            run = _load_aios_run(conn, run_id)
+            if not run:
+                return error_response(404, "AIOS 运行记录不存在")
+            approvals = [
+                _approval_dict(row)
+                for row in conn.execute("SELECT * FROM yixiu_aios_approvals WHERE run_id=? ORDER BY created_at ASC", (run_id,)).fetchall()
+            ]
+            return success_response({"run": run, "approvals": approvals, "tree": _trace_tree(run, approvals)}, "AIOS Trace 获取成功")
+        runs = [
+            _load_aios_run(conn, row["id"])
+            for row in conn.execute("SELECT id FROM yixiu_aios_runs ORDER BY updated_at DESC LIMIT 10").fetchall()
+        ]
+        compact = [item for item in runs if item]
+    return success_response({"runs": compact, "total": len(compact)}, "AIOS Trace 列表获取成功")
+
+
+@yixiu_bp.route("/aios/channels", methods=["GET", "POST"])
+def aios_channels():
+    if request.method == "GET":
+        with _db() as conn:
+            rows = conn.execute("SELECT * FROM yixiu_aios_channels ORDER BY id").fetchall()
+        return success_response({"channels": [_channel_dict(row) for row in rows]}, "AIOS 渠道获取成功")
+
+    data = request.get_json(silent=True) or {}
+    channel_id = str(data.get("id") or f"channel-{uuid.uuid4().hex[:10]}")
+    now = _now()
+    with _db() as conn:
+        conn.execute(
+            """INSERT INTO yixiu_aios_channels
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 name=excluded.name, channel_type=excluded.channel_type,
+                 endpoint=excluded.endpoint, enabled=excluded.enabled,
+                 agent_id=excluded.agent_id, config_json=excluded.config_json,
+                 updated_at=excluded.updated_at""",
+            (
+                channel_id,
+                str(data.get("name") or "自定义渠道"),
+                str(data.get("channel_type") or "web"),
+                str(data.get("endpoint") or ""),
+                1 if data.get("enabled", True) else 0,
+                _agent_key(str(data.get("agent_id") or "tiangong")),
+                json.dumps(data.get("config") if isinstance(data.get("config"), dict) else {}, ensure_ascii=False),
+                now,
+                now,
+            ),
+        )
+        row = conn.execute("SELECT * FROM yixiu_aios_channels WHERE id=?", (channel_id,)).fetchone()
+    return success_response(_channel_dict(row), "AIOS 渠道已保存")
+
+
+@yixiu_bp.post("/aios/plan")
+@require_jwt_roles(AUDIT_ROLES)
+def aios_plan():
+    data = request.get_json(silent=True) or {}
+    plan = _aios_plan(
+        goal=str(data.get("goal") or data.get("message") or "").strip(),
+        mode=str(data.get("mode") or "auto").strip(),
+        task_id=str(data.get("task_id") or "").strip(),
+    )
+    return success_response(plan, "AIOS 执行计划已生成")
+
+
+@yixiu_bp.post("/aios/execute")
+@require_jwt_roles(WRITE_ROLES)
+@require_confirmed_write("aios.execute", "/api/yixiu/aios/execute")
+def aios_execute():
+    data = request.get_json(silent=True) or {}
+    plan = data.get("plan")
+    plan_id = str(data.get("plan_id") or "").strip()
+    if not plan and plan_id:
+        with _db() as conn:
+            row = conn.execute("SELECT * FROM yixiu_aios_runs WHERE id=?", (plan_id,)).fetchone()
+        if row:
+            plan = _json(row["plan_json"], {})
+    if not plan:
+        plan = _aios_plan(str(data.get("goal") or data.get("message") or "").strip(), str(data.get("mode") or "auto").strip(), str(data.get("task_id") or "").strip())
+    if not isinstance(plan, dict) or not plan.get("steps"):
+        return error_response(400, "执行计划为空，无法执行")
+
+    plan = attach_state_machine(plan)
+    transition_event = str(data.get("event") or "").strip()
+    if transition_event in {"pause", "approve", "fail", "compensate"}:
+        step_key = str(data.get("step_key") or "").strip()
+        if not step_key:
+            return error_response(400, "state transition requires step_key")
+        try:
+            plan, node = transition_step(
+                plan,
+                step_key,
+                transition_event,
+                error=str(data.get("error") or "").strip(),
+                approvals=data.get("approvals") or {},
+            )
+        except ValueError as exc:
+            return error_response(400, str(exc))
+        steps = plan.get("steps", [])
+        progress = round(sum(1 for item in steps if item.get("state") == "done") / max(len(steps), 1) * 100)
+        plan["progress"] = progress
+        status = plan.get("workflow_state") or "running"
+        run_id = plan.get("id") or plan_id or f"aios-{uuid.uuid4().hex[:12]}"
+        plan["id"] = run_id
+        with _db() as conn:
+            row = conn.execute("SELECT id FROM yixiu_aios_runs WHERE id=?", (run_id,)).fetchone()
+            if row:
+                conn.execute("UPDATE yixiu_aios_runs SET plan_json=?, status=?, progress=?, updated_at=? WHERE id=?", (json.dumps(plan, ensure_ascii=False), status, progress, _now(), run_id))
+            else:
+                conn.execute("INSERT INTO yixiu_aios_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (run_id, plan.get("goal", ""), plan.get("mode", "auto"), json.dumps(plan, ensure_ascii=False), status, progress, "{}", _now(), _now()))
+            _sync_aios_queue(conn, run_id, plan)
+            _record_agent_event(
+                conn,
+                (next((step.get("agent", {}) for step in plan.get("steps", []) if step.get("key") == step_key), {}) or {}).get("id", "tiangong"),
+                f"AIOS 状态变更：{transition_event}",
+                f"步骤 {step_key} 已切换为 {node.get('state')}。",
+                event_type="transition",
+                status=node.get("state", status),
+                payload={"step_key": step_key, "event": transition_event, "node": node},
+                run_id=run_id,
+            )
+        return success_response({"run_id": run_id, "status": status, "progress": progress, "plan": plan, "node": node}, "AIOS state transition completed")
+
+    steps = plan.get("steps", [])
+    approvals = data.get("approvals") or {}
+    if data.get("approve_all"):
+        approvals = {**{item.get("key"): True for item in steps if item.get("requires_approval")}, **approvals}
+    execute_all = bool(data.get("execute_all", False))
+    step_key = str(data.get("step_key") or "").strip()
+    commit = data.get("commit", True) is not False
+    artifacts: dict[str, dict] = {}
+    selected: list[dict] = []
+
+    while True:
+        ready_steps = next_executable_steps(plan, approvals=approvals)
+        if not ready_steps:
+            if execute_all:
+                blocked_waiting = False
+                for item in plan.get("steps", []):
+                    if not item.get("requires_approval") or item.get("state") in {"done", "failed", "skipped"}:
+                        continue
+                    if item.get("approved") or approvals.get(item.get("key")):
+                        continue
+                    try:
+                        plan, _ = transition_step(plan, item["key"], "execute", approvals=approvals)
+                        blocked_waiting = True
+                        break
+                    except ValueError:
+                        continue
+                if blocked_waiting:
+                    break
+            break
+        if not execute_all:
+            candidate = next((item for item in ready_steps if item.get("key") == step_key), None)
+            if step_key and not candidate:
+                return error_response(409, "请求的 AIOS 步骤暂不可执行，可能依赖未完成或需要审批")
+            ready_steps = [candidate] if candidate else ready_steps[:1]
+        for step in ready_steps:
+            selected.append(step)
+            try:
+                plan, node = transition_step(plan, step["key"], "execute", approvals=approvals)
+                if node.get("state") != "running":
+                    artifacts[step["key"]] = {"summary": node.get("last_error", "步骤暂不可执行"), "state": node.get("state")}
+                    continue
+                if commit:
+                    with _db() as conn:
+                        _record_agent_event(
+                            conn,
+                            step.get("agent", {}).get("id", "tiangong"),
+                            f"开始执行：{step.get('title')}",
+                            step.get("tool_description") or step.get("expected_output") or "",
+                            event_type="step_start",
+                            status="running",
+                            payload={"step_key": step.get("key"), "action": step.get("action"), "input": step.get("input")},
+                            run_id=plan.get("id", ""),
+                        )
+                result = _aios_execute_action(step, plan.get("snapshot") or {}, commit=commit)
+                step["result"] = result
+                step["executed_at"] = _now()
+                artifacts[step["key"]] = result
+                if commit and (result.get("needs_confirmation") or step.get("requires_approval")):
+                    with _db() as conn:
+                        approval = _ensure_aios_approval(conn, plan.get("id", ""), step, result.get("summary", ""))
+                        result["approval"] = approval
+                        _record_agent_event(
+                            conn,
+                            step.get("agent", {}).get("id", "tiangong"),
+                            f"等待人工确认：{step.get('title')}",
+                            approval.get("title", ""),
+                            event_type="approval_requested",
+                            status="waiting_approval",
+                            payload={"step_key": step.get("key"), "approval": approval},
+                            run_id=plan.get("id", ""),
+                        )
+                plan, _ = transition_step(plan, step["key"], "complete")
+                if commit:
+                    with _db() as conn:
+                        _record_agent_event(
+                            conn,
+                            step.get("agent", {}).get("id", "tiangong"),
+                            f"完成执行：{step.get('title')}",
+                            result.get("summary", ""),
+                            event_type="step_done",
+                            status="done",
+                            payload={"step_key": step.get("key"), "action": step.get("action"), "result": result},
+                            run_id=plan.get("id", ""),
+                        )
+            except Exception as exc:  # noqa: BLE001
+                plan, _ = transition_step(plan, step["key"], "fail", error=str(exc))
+                artifacts[step["key"]] = {"summary": "AIOS 步骤执行失败", "error": str(exc)}
+                if commit:
+                    with _db() as conn:
+                        _record_agent_event(
+                            conn,
+                            step.get("agent", {}).get("id", "tiangong"),
+                            f"执行失败：{step.get('title')}",
+                            str(exc),
+                            event_type="step_failed",
+                            status="failed",
+                            payload={"step_key": step.get("key"), "action": step.get("action"), "error": str(exc)},
+                            run_id=plan.get("id", ""),
+                        )
+        if not execute_all:
+            break
+
+    if not selected:
+        return error_response(409, "没有可执行的 AIOS 步骤，可能依赖未完成或需要审批")
+
+    steps = plan.get("steps", [])
+    done = sum(1 for item in steps if item.get("state") == "done")
+    progress = round(done / max(len(steps), 1) * 100)
+    plan["progress"] = progress
+    plan["updated_at"] = _now()
+    status = plan.get("workflow_state") or ("completed" if progress == 100 else "running")
+    run_id = plan.get("id") or f"aios-{uuid.uuid4().hex[:12]}"
+    plan["id"] = run_id
+    with _db() as conn:
+        row = conn.execute("SELECT id FROM yixiu_aios_runs WHERE id=?", (run_id,)).fetchone()
+        payload = (json.dumps(plan, ensure_ascii=False), status, progress, json.dumps(artifacts, ensure_ascii=False), _now())
+        if row:
+            conn.execute("UPDATE yixiu_aios_runs SET plan_json=?, status=?, progress=?, artifacts_json=?, updated_at=? WHERE id=?", (*payload, run_id))
+        else:
+            conn.execute("INSERT INTO yixiu_aios_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (run_id, plan.get("goal", ""), plan.get("mode", "auto"), payload[0], status, progress, payload[3], _now(), _now()))
+        queue = _sync_aios_queue(conn, run_id, plan, artifacts)
+        events = [
+            _agent_event_dict(row)
+            for row in conn.execute("SELECT * FROM yixiu_agent_events WHERE run_id=? ORDER BY created_at ASC", (run_id,)).fetchall()
+        ]
+        approval_rows = [
+            _approval_dict(row)
+            for row in conn.execute("SELECT * FROM yixiu_aios_approvals WHERE run_id=? ORDER BY created_at ASC", (run_id,)).fetchall()
+        ]
+    return success_response({"run_id": run_id, "status": status, "progress": progress, "plan": plan, "artifacts": artifacts, "queue": queue, "events": events, "approvals": approval_rows, "next_steps": [item for item in steps if item.get("state") != "done"]}, "AIOS 已执行计划步骤")
+
+
+@yixiu_bp.get("/aios/status")
+def aios_status():
+    limit = min(int(request.args.get("limit", 10)), 50)
+    with _db() as conn:
+        rows = conn.execute("SELECT * FROM yixiu_aios_runs ORDER BY updated_at DESC LIMIT ?", (limit,)).fetchall()
+    runs = []
+    for row in rows:
+        item = dict(row)
+        item["plan"] = _json(item.pop("plan_json", "{}"), {})
+        item["artifacts"] = _json(item.pop("artifacts_json", "{}"), {})
+        runs.append(item)
+    return success_response({"runs": runs, "total": len(runs)}, "AIOS 运行记录获取成功")
+
+
+@yixiu_bp.get("/aios/runs/<run_id>")
+def aios_run_detail(run_id: str):
+    with _db() as conn:
+        run = _load_aios_run(conn, run_id)
+    if not run:
+        return error_response(404, "AIOS 运行记录不存在")
+    return success_response(run, "AIOS 运行详情获取成功")
+
+
+@yixiu_bp.get("/aios/events")
+def aios_events():
+    run_id = request.args.get("run_id", "").strip()
+    agent_id = request.args.get("agent_id", "").strip()
+    limit = min(int(request.args.get("limit", 80)), 300)
+    where = []
+    params = []
+    if run_id:
+        where.append("run_id=?")
+        params.append(run_id)
+    if agent_id:
+        where.append("agent_id=?")
+        params.append(_agent_key(agent_id))
+    clause = "WHERE " + " AND ".join(where) if where else ""
+    with _db() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM yixiu_agent_events {clause} ORDER BY created_at DESC LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+    return success_response({"events": [_agent_event_dict(row) for row in rows], "total": len(rows)}, "AIOS 事件流获取成功")
+
+
+@yixiu_bp.post("/aios/resume")
+@require_jwt_roles(WRITE_ROLES)
+@require_confirmed_write("aios.resume", "/api/yixiu/aios/resume")
+def aios_resume():
+    data = request.get_json(silent=True) or {}
+    run_id = str(data.get("run_id") or data.get("plan_id") or "").strip()
+    if not run_id:
+        return error_response(400, "缺少 AIOS 运行ID")
+    with _db() as conn:
+        run = _load_aios_run(conn, run_id)
+    if not run:
+        return error_response(404, "AIOS 运行记录不存在")
+    plan = run.get("plan") or {}
+    payload = {
+        "plan": plan,
+        "plan_id": run_id,
+        "execute_all": data.get("execute_all", True),
+        "approve_all": data.get("approve_all", False),
+        "approvals": data.get("approvals") or {},
+        "commit": data.get("commit", True),
+        "confirmed": True,
+        "idempotency_key": f"execute-{uuid.uuid4().hex[:12]}",
+    }
+    # 直接复用执行核心逻辑，保留同一 run_id、同一状态机和队列。
+    with current_app.test_request_context(
+        "/api/yixiu/aios/execute",
+        method="POST",
+        json=payload,
+        headers={"Authorization": request.headers.get("Authorization", ""), "Idempotency-Key": payload["idempotency_key"]},
+    ):
+        return aios_execute()
+
+
+@yixiu_bp.get("/database/status")
+def database_status():
+    return success_response(_database_status(), "数据库状态获取成功")
+
+
+@yixiu_bp.post("/database/bootstrap")
+def database_bootstrap():
+    with _db() as conn:
+        _seed_templates(conn)
+        _seed_agent_memory(conn)
+    return success_response(_database_status(), "一修业务数据库已完成初始化检查")

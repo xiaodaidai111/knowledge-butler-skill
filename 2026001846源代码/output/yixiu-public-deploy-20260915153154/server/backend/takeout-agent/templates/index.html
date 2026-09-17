@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>慧识外卖 | 智能健康评估</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="glow"></div>
+  <div class="orb orb--a"></div>
+  <div class="orb orb--b"></div>
+  <header class="hero" data-animate style="--delay: 0s">
+    <nav class="nav">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <span>慧识外卖</span>
+      </div>
+      <div class="nav-links">
+        <a href="#insights">洞察</a>
+        <a href="#restaurants">店铺画像</a>
+        <a href="#chat">对话·识图</a>
+        <a href="/simple">简易测试</a>
+      </div>
+      <div class="nav-actions">
+        <button class="btn ghost">展示模式</button>
+      </div>
+    </nav>
+    <div class="hero-content">
+      <div class="hero-left">
+        <div class="pill">智能体 · 健康评估</div>
+        <h1>让每一份外卖都有可量化的健康可信度</h1>
+        <p>融合卫生巡检、评价信号与图片识别，构建可解释、可展示的外卖健康评估体系。</p>
+        <div class="hero-actions">
+          <button class="btn primary" onclick="document.querySelector('#chat').scrollIntoView({behavior:'smooth'})">开始对话</button>
+          <button class="btn ghost" onclick="document.querySelector('#restaurants').scrollIntoView({behavior:'smooth'})">查看画像</button>
+        </div>
+        <div class="hero-stats">
+          <div class="stat-card">
+            <div class="stat-label">覆盖店铺</div>
+            <div class="stat-value" id="stat-total">--</div>
+            <div class="stat-hint">样本库</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">高风险占比</div>
+            <div class="stat-value" id="stat-risk-rate">--</div>
+            <div class="stat-hint">低于 70 分</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">健康趋势</div>
+            <div class="stat-value" id="stat-trend">稳健</div>
+            <div class="stat-hint">基于综合评分</div>
+          </div>
+        </div>
+      </div>
+      <div class="hero-card">
+        <div class="hero-card-header">
+          <span>实时风险指数</span>
+          <span class="status">Online</span>
+        </div>
+        <div class="hero-metrics">
+          <div>
+            <div class="metric-label">平均卫生分</div>
+            <div class="metric-value" id="avg-score">--</div>
+          </div>
+          <div>
+            <div class="metric-label">高风险店铺</div>
+            <div class="metric-value" id="risk-count">--</div>
+          </div>
+          <div>
+            <div class="metric-label">重点关注</div>
+            <div class="metric-value" id="top-risk">--</div>
+          </div>
+        </div>
+        <div class="hero-indicators">
+          <span class="indicator">RAG 检索</span>
+          <span class="indicator">多维评分</span>
+          <span class="indicator">视觉评估</span>
+        </div>
+        <div class="hero-footer" id="summary-time">更新中</div>
+      </div>
+    </div>
+  </header>
+
+  <section class="section" id="insights" data-animate style="--delay: 0.1s">
+    <div class="section-head">
+      <span class="section-kicker">01 / 洞察引擎</span>
+      <h2>洞察引擎</h2>
+      <p class="section-lead">多维度融合：卫生巡检 + 评价信号 + 配送链路 + 包装材质。输出清晰、可展示的卫生评分与风险标签。</p>
+    </div>
+    <div class="grid three">
+      <div class="card feature-card">
+        <div class="card-chip">Knowledge</div>
+        <h3>专业知识库</h3>
+        <p>覆盖高温塑料、冷链、生熟分离、卫生巡检指标与消费者自检清单。</p>
+      </div>
+      <div class="card feature-card">
+        <div class="card-chip">Explain</div>
+        <h3>可解释评分</h3>
+        <p>评分公式融合巡检、差评占比、投诉密度与包装风险，可追溯每个权重。</p>
+      </div>
+      <div class="card feature-card">
+        <div class="card-chip">Vision</div>
+        <h3>图像识别</h3>
+        <p>识别塑料容器与油脂特征，提示高温风险与膳食负担。</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="restaurants" data-animate style="--delay: 0.2s">
+    <div class="section-head">
+      <span class="section-kicker">02 / 店铺画像</span>
+      <h2>店铺画像</h2>
+      <p class="section-lead">聚合卫生与口碑数据，快速识别风险分布。</p>
+    </div>
+    <div class="grid two" id="restaurant-grid"></div>
+  </section>
+
+  <section class="section" id="chat" data-animate style="--delay: 0.3s">
+    <div class="section-head">
+      <span class="section-kicker">03 / 智能体</span>
+      <h2>对话 · 识图一体</h2>
+      <p class="section-lead">同一窗口内既可打字聊天、问店铺评估，也可上传外卖照片让我一起看并给建议。</p>
+    </div>
+    <div class="api-panel">
+      <div class="api-title">API 接入（可选）</div>
+      <div class="api-fields">
+        <label>
+          <span>API Key</span>
+          <input type="password" id="api-key" placeholder="API Key（可选）" />
+        </label>
+        <label>
+          <span>Base URL</span>
+          <input type="text" id="api-base-url" placeholder="Base URL（可选）" />
+        </label>
+      </div>
+      <div class="api-hint">配置后用于对话与识图；不配置也可用店铺名评估。</div>
+    </div>
+    <div class="chat">
+      <div class="chat-head">
+        <div>
+          <div class="chat-title">慧识小助手</div>
+          <div class="chat-subtitle">对话 + 识图 · 问店铺、发图都可</div>
+        </div>
+        <div class="chat-status">在线</div>
+      </div>
+      <div class="chat-window" id="chat-window"></div>
+      <form class="chat-input" id="chat-form">
+        <input type="text" id="chat-text" placeholder="输入文字或上传图片，例如：塑料盒高温有什么风险？或直接发一张外卖图" autocomplete="off" />
+        <label class="file-pill">
+          <input type="file" id="chat-image-input" accept="image/*" />
+          <span>发图</span>
+        </label>
+        <button class="btn primary" type="submit">发送</button>
+      </form>
+      <div class="chat-hint">支持纯文字、纯发图、或文字+图一起发。jpg/png，建议不超过 5MB。</div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div>慧识外卖 · 智能健康评估 Demo</div>
+    <div>基于 Flask + RAG + 视觉评估</div>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 /*
- * 一修 Web 视觉精修层
+ * 一休 Web 视觉精修层
  * 目标：保留现有业务能力，用更克制的企业级视觉语言统一五个一级页面。
  */
 
@@ -837,3 +837,5 @@ input:focus, textarea:focus, select:focus {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+
