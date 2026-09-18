@@ -4,7 +4,7 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
-import * as echarts from 'echarts'
+import { init as initEChart } from '../lib/echarts.js'
 
 const props = defineProps({
   option: { type: Object, required: true },
@@ -29,7 +29,7 @@ const render = () => {
 onMounted(async () => {
   await nextTick()
   if (!el.value) return
-  chart = echarts.init(el.value)
+  chart = initEChart(el.value)
   chart.setOption(props.option, true)
   if (props.clickField) {
     chart.on('click', (params) => {

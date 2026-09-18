@@ -36,6 +36,24 @@ class AiosSecurityTest(unittest.TestCase):
         app.register_blueprint(yixiu.yixiu_bp, url_prefix="/api/yixiu")
         app.register_blueprint(monitor.monitor_bp)
         self.client = app.test_client()
+        # 需要身份的公网协作接口使用真实库内账号与会话成员关系，避免测试令牌
+        # 绕过业务层 ACL。匿名读取在对应测试中单独断言为 401。
+        now = yixiu._now()
+        with yixiu._db() as conn:
+            conn.execute(
+                """INSERT INTO yixiu_users
+                   (id, account, password_hash, name, profile_json, role, status, created_at, updated_at, last_login_at)
+                   VALUES (?, ?, ?, ?, '{}', 'operator', 'active', ?, ?, ?)""",
+                ("u-1", "test_operator", "test-only", "测试协作者", now, now, now),
+            )
+            members = json.dumps([{"account": "test_operator", "name": "测试协作者"}], ensure_ascii=False)
+            for conversation_id in ("c-1", "c-2"):
+                conn.execute(
+                    """INSERT INTO yixiu_conversations
+                       (id, name, kind, project_id, task_id, created_by, members_json, metadata_json, created_at, updated_at)
+                       VALUES (?, ?, 'group', '', '', 'test_operator', ?, '{}', ?, ?)""",
+                    (conversation_id, f"测试会话 {conversation_id}", members, now, now),
+                )
 
     def tearDown(self):
         yixiu.DB_PATH = self.old_yixiu_db
@@ -250,8 +268,11 @@ class AiosSecurityTest(unittest.TestCase):
         self.assertEqual(loaded.get_json()["data"]["memory"][0]["memory_key"], "risk")
 
     def test_conversation_history_get_available_then_persists(self):
-        """普通查询直接可用：GET messages 不需要 JWT；POST 需要 confirmed + 幂等"""
-        loaded = self.client.get("/api/yixiu/conversations/c-1/messages")
+        """团队会话读写都需要成员身份；写入还需要 confirmed + 幂等。"""
+        anonymous = self.client.get("/api/yixiu/conversations/c-1/messages")
+        self.assertEqual(anonymous.status_code, 401)
+
+        loaded = self.client.get("/api/yixiu/conversations/c-1/messages", headers=self.auth_headers())
         self.assertEqual(loaded.status_code, 200)
 
         saved = self.client.post(
@@ -261,7 +282,7 @@ class AiosSecurityTest(unittest.TestCase):
         )
         self.assertEqual(saved.status_code, 200)
 
-        loaded = self.client.get("/api/yixiu/conversations/c-1/messages")
+        loaded = self.client.get("/api/yixiu/conversations/c-1/messages", headers=self.auth_headers())
         self.assertEqual(loaded.status_code, 200)
         self.assertEqual(loaded.get_json()["data"]["messages"][0]["text"], "hello")
 
@@ -314,8 +335,12 @@ class AiosSecurityTest(unittest.TestCase):
     def test_miniclaw_fastapi_chat_requires_auth(self):
         from starlette.requests import Request
 
+        from miniclaw import gateway as gateway_module
         from miniclaw.gateway import ChatRequest
         from miniclaw.gateway import MiniClawGateway
+
+        if gateway_module.FastAPI is None:
+            self.skipTest("当前 Flask-only 测试环境未安装 FastAPI 可选依赖")
 
         gateway = MiniClawGateway()
         gateway.setup()

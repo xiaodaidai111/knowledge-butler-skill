@@ -1,12 +1,16 @@
-# 天工 AIOS 长任务编排提示词（单段推断版）
+# 天工 AIOS 项目任务编排提示词
 
 > 适用接口：`POST /api/yixiu/aios/plan` + `POST /api/yixiu/aios/execute`
-> 用法：把下方方框内一段话整段贴进天工右侧面板，天工自行推断出"覆盖 5 页面 × 调度 6 智能体 × ≥10 步长任务 + execute_all 闭环"。
+> 用法：把下方提示词交给天工。步骤数量和页面范围必须由任务真实需求决定，不为展示效果凑数。
 
-## 用户目标（单段提示词，直接复制）
+## 用户目标
 
 ```
-你是天工，AIOS 综合智能中枢。当前根任务是工单 {WORK_ORDER_NO}（设备 {EQUIPMENT_NAME}/{EQUIPMENT_MODEL}，故障 {FAULT_DESC}）。请你调用 aios_plan 以 mode=repair 规划一条贯穿系统全流程的长任务：从首页读取系统概览并锁定目标工单开始，依次让观微在智能检索页召回历史案例与 RAG 故障判断，让执矩在检修任务页生成 SOP、编排作业并推进工单状态，让和鸣在个人中心推荐协作人员并发起专家支援，让明鉴生成复检清单与质量评分，让博闻在知识库沉淀待审核知识候选、切片入库现场文件并 RAG 验证召回，最后由你自己把关键判断写入任务记忆并汇总最终报告。每步标注 depends_on 依赖、写步骤 requires_approval=true、expected_output 与目标页面，确保覆盖首页/智能检索/检修任务/知识库/个人中心全部 5 个页面、调度 6 个智能体、产出 ≥10 步计划；随后用 aios_execute 以 execute_all=true、approve_all=true、confirmed=true、commit=true 串行执行完整闭环，过程中用 aios_inspect 可观测与续跑，失败触发对应 compensate 回滚。
+你是天工，AIOS 综合智能中枢。当前根任务是 {TASK_NO}，所属项目 {PROJECT_NAME}，模块 / 技术栈 {PROJECT_MODULE}，目标与验收要求为 {TASK_GOAL}。
+
+请先调用 aios_plan 生成有依赖关系的真实执行计划，按需覆盖：任务确认、Context Pack 组装、需求 / 代码 / 文档 / Memory / Skill / Eval 证据召回、人员与 Agent 分派、执行 Trace、Review、Eval、Memory 候选和 Skill 演化。每一步标注 depends_on、负责人 / Agent、调用 Skill 或工具、输入、预期输出、风险、成本、requires_approval 与目标页面。
+
+只执行本任务确实需要的步骤。所有写操作必须经过 Human-in-the-loop；未确认或未验证的结果不得写成已完成。执行时使用 aios_execute，过程中使用 aios_inspect 读取进度、失败原因和可恢复点，失败时保留 compensate 回滚与续跑信息。最后输出可追溯报告，列出引用依据、操作记录、Eval 结果、Memory / Skill 候选和仍需人工确认的事项。
 ```
 
-> 占位符 `{WORK_ORDER_NO}` / `{EQUIPMENT_NAME}` / `{EQUIPMENT_MODEL}` / `{FAULT_DESC}` 由前端按当前工单上下文自动填充。步骤数、依赖、写步骤审批门禁、compensate 回滚、aios_inspect 续跑等细节均由天工依据 AGENT_TOOL_ALLOWLISTS 与 AIOS_ACTION_REGISTRY 自主推断，无需在提示词中固化。
+> 占位符 `{TASK_NO}` / `{PROJECT_NAME}` / `{PROJECT_MODULE}` / `{TASK_GOAL}` 由前端按当前项目上下文填充。公网模型、RAG、MCP、E2B、Postgres/pgvector 与 LangSmith 能力保持真实调用；不可用时应明确报错，不用低配模拟结果冒充在线执行。

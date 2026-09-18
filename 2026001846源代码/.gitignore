@@ -18,6 +18,10 @@ logs/
 # Uploads
 uploads/
 
+# Runtime public-content cache
+server/backend/data/public_ai_updates.json
+server/backend/data/public_ai_update_images/
+
 # IDE
 .vscode/
 .idea/

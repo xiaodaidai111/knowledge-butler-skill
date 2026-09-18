@@ -28,12 +28,24 @@ const getStoredToken = () => {
   return ''
 }
 
+const getStoredRoutingPolicy = () => {
+  if (typeof window === 'undefined') return {}
+  try {
+    return JSON.parse(window.localStorage?.getItem('yixiu-model-routing-policy-v1') || '{}') || {}
+  } catch (_error) {
+    return {}
+  }
+}
+
 const operationId = (prefix = 'op') => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
 
 const normalizeResponse = async (response) => {
   const payload = await response.json().catch(() => ({}))
   if (!response.ok || (payload.code && payload.code >= 400)) {
-    throw new Error(payload.message || `请求失败：${response.status}`)
+    const error = new Error(payload.message || `请求失败：${response.status}`)
+    error.status = response.status || payload.code
+    error.payload = payload
+    throw error
   }
   return payload.data ?? payload
 }
@@ -66,9 +78,15 @@ const resolveAssetUrl = (url) => {
   return `${getHost()}${url.startsWith('/') ? '' : '/'}${url}`
 }
 
+const resolveContentImageUrl = (url) => {
+  if (!url || /^https?:/i.test(url) || url.startsWith('blob:') || url.startsWith('data:')) return url
+  if (url.startsWith('/api/')) return `${getHost()}${url}`
+  return url
+}
+
 const normalizeFile = (file) => ({ ...file, url: resolveAssetUrl(file.url) })
 
-const knowledgeTypes = ['维修手册', '历史故障案例', '标准作业流程 SOP', '安全操作规范']
+const knowledgeTypes = ['需求', '代码', 'Memory', 'Skill', 'Eval']
 
 const inferKnowledgeType = (item = {}) => {
   const text = [
@@ -83,10 +101,11 @@ const inferKnowledgeType = (item = {}) => {
     ...(Array.isArray(item.keywords) ? item.keywords : [])
   ].filter(Boolean).join(' ')
 
-  if (/安全|规范|规程|作业许可|挂牌|隔离/.test(text)) return '安全操作规范'
-  if (/SOP|标准作业|作业流程|检修流程|操作流程/.test(text)) return '标准作业流程 SOP'
-  if (/案例|故障记录|经验|复盘|处置记录/.test(text)) return '历史故障案例'
-  return '维修手册'
+  if (/Eval|评测|回归|测试|验收|评分|质量门禁/i.test(text)) return 'Eval'
+  if (/Skill|SOP|工作流|执行指引|操作流程/i.test(text)) return 'Skill'
+  if (/Memory|经验|复盘|决策|历史任务|案例/i.test(text)) return 'Memory'
+  if (/代码|仓库|commit|pull request|\bPR\b|接口|模块/i.test(text)) return '代码'
+  return '需求'
 }
 
 const supplementMissingKnowledgeTypes = (items) => {
@@ -105,6 +124,30 @@ const supplementMissingKnowledgeTypes = (items) => {
 }
 
 export const yixiuApi = {
+  async contentUpdates() {
+    const data = await requestJson('/content/updates')
+    return {
+      ...data,
+      items: (data.items || []).map((item) => ({ ...item, image: resolveContentImageUrl(item.image) }))
+    }
+  },
+
+  modelRoute(payload = {}) {
+    return requestJson('/model-routing/recommend', { method: 'POST', body: payload })
+  },
+
+  register(payload = {}) {
+    return requestJson('/auth/register', { method: 'POST', body: payload })
+  },
+
+  login(payload = {}) {
+    return requestJson('/auth/login', { method: 'POST', body: payload })
+  },
+
+  updateProfile(payload = {}) {
+    return requestJson('/auth/profile', { method: 'PUT', body: payload })
+  },
+
   async overview() {
     try {
       const data = await requestJson('/overview')
@@ -157,7 +200,10 @@ export const yixiuApi = {
   },
 
   agentChat(agentId, payload = {}) {
-    return requestJson(`/agents/${encodeURIComponent(agentId)}/chat`, { method: 'POST', body: payload })
+    return requestJson(`/agents/${encodeURIComponent(agentId)}/chat`, {
+      method: 'POST',
+      body: { ...payload, routing_policy: payload.routing_policy || getStoredRoutingPolicy() }
+    })
   },
 
   dispatchAgents(payload = {}) {
@@ -214,9 +260,22 @@ export const yixiuApi = {
     }
   },
 
-  createTask(task) {
+  async createTask(task) {
     const options = confirmedBody(task, 'task-create')
-    return requestJson('/tasks', { method: 'POST', ...options })
+    try {
+      return await requestJson('/tasks', { method: 'POST', ...options })
+    } catch (error) {
+      if (error?.status) throw error
+      return {
+        ...task,
+        id: `offline-task-${Date.now()}`,
+        workOrderNo: `LOCAL-${Date.now()}`,
+        status: 'pending',
+        completedSteps: [],
+        created_at: new Date().toISOString(),
+        offline: true
+      }
+    }
   },
 
   updateTaskStatus(taskId, status, extra = {}) {
@@ -233,16 +292,16 @@ export const yixiuApi = {
       const type = inferKnowledgeType(item)
       return {
       id: item.id || `manual-${index}`,
-      title: item.title || item.name || '设备检修资料',
+      title: item.title || item.name || '项目上下文资料',
       type,
       category: type,
-      equipment: item.equipment || payload.deviceName || '检修设备',
+      equipment: item.equipment || payload.deviceName || '当前项目',
       model: item.model || data.device_model || payload.deviceModel,
       match: item.match || Math.max(75, Number(data.match_score || 88) - index * 3),
       updated_at: item.updated_at || '2026-08-04',
       source: item.source || item.chapter || '知识库',
-      summary: item.summary || item.content || '与当前故障和设备型号相关的检修依据。',
-      tags: item.tags || ['设备检修', '检索召回'],
+      summary: item.summary || item.content || '与当前任务目标、代码影响面和验收标准相关的上下文依据。',
+      tags: item.tags || ['项目协作', '上下文召回'],
       citations: item.citations || 1,
       fileType: item.fileType || 'DOC'
       }
@@ -329,6 +388,20 @@ export const yixiuApi = {
     return requestJson(`/contacts/${encodeURIComponent(contact.id)}`, { method: 'PUT', body: contact })
   },
 
+  async conversations(account = '') {
+    const data = await requestJson(`/conversations${account ? `?account=${encodeURIComponent(account)}` : ''}`)
+    return data.conversations || []
+  },
+
+  createConversation(payload) {
+    const options = confirmedBody(payload, 'conversation-create')
+    return requestJson('/conversations', { method: 'POST', ...options })
+  },
+
+  markConversationRead(conversationId, account) {
+    return requestJson(`/conversations/${encodeURIComponent(conversationId)}/read`, { method: 'POST', body: { account } })
+  },
+
   async conversationMessages(conversationId) {
     const data = await requestJson(`/conversations/${encodeURIComponent(conversationId)}/messages`)
     return data.messages || []
@@ -337,6 +410,26 @@ export const yixiuApi = {
   sendConversationMessage(conversationId, payload) {
     const options = confirmedBody(payload, 'conversation-message')
     return requestJson(`/conversations/${encodeURIComponent(conversationId)}/messages`, { method: 'POST', ...options })
+  },
+
+  updateTaskCollaboration(taskId, payload) {
+    const options = confirmedBody(payload, 'task-collaboration')
+    return requestJson(`/tasks/${encodeURIComponent(taskId)}/collaboration`, { method: 'PUT', ...options })
+  },
+
+  async taskHandoffs(taskId) {
+    const data = await requestJson(`/tasks/${encodeURIComponent(taskId)}/handoffs`)
+    return data.handoffs || []
+  },
+
+  createTaskHandoff(taskId, payload) {
+    const options = confirmedBody(payload, 'task-handoff-create')
+    return requestJson(`/tasks/${encodeURIComponent(taskId)}/handoffs`, { method: 'POST', ...options })
+  },
+
+  resolveTaskHandoff(taskId, handoffId, payload) {
+    const options = confirmedBody(payload, 'task-handoff-resolve')
+    return requestJson(`/tasks/${encodeURIComponent(taskId)}/handoffs/${encodeURIComponent(handoffId)}`, { method: 'PUT', ...options })
   },
 
   recheck(payload) {
@@ -404,7 +497,8 @@ export const yixiuApi = {
     return requestJson('/integrations/sources')
   },
   saveIntegrationSource(payload = {}) {
-    return requestJson('/integrations/sources', { method: 'POST', body: payload })
+    const options = confirmedBody(payload, 'integration-source-save')
+    return requestJson('/integrations/sources', { method: 'POST', ...options })
   },
   externalImports(params = {}) {
     const query = new URLSearchParams()
@@ -412,13 +506,16 @@ export const yixiuApi = {
     return requestJson(`/integrations/imports${query.size ? `?${query}` : ''}`)
   },
   createExternalImport(payload = {}) {
-    return requestJson('/integrations/imports', { method: 'POST', body: payload })
+    const options = confirmedBody(payload, 'integration-import-create')
+    return requestJson('/integrations/imports', { method: 'POST', ...options })
   },
   parseExternalImport(importId) {
-    return requestJson(`/integrations/imports/${encodeURIComponent(importId)}/parse`, { method: 'POST', body: {} })
+    const options = confirmedBody({}, 'integration-import-parse')
+    return requestJson(`/integrations/imports/${encodeURIComponent(importId)}/parse`, { method: 'POST', ...options })
   },
   reviewExternalArtifact(artifactId, payload = {}) {
-    return requestJson(`/integrations/artifacts/${encodeURIComponent(artifactId)}/review`, { method: 'PUT', body: payload })
+    const options = confirmedBody(payload, 'integration-artifact-review')
+    return requestJson(`/integrations/artifacts/${encodeURIComponent(artifactId)}/review`, { method: 'PUT', ...options })
   },
 
   skills() {

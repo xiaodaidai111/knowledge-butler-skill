@@ -163,9 +163,9 @@ export const mockFiles = [
 ]
 
 export const mockContacts = [
-  { id: 1, name: '聪明的一休', avatar: '/static/avatar-1.png', position: '协作负责人', department: 'AI 原生项目协作组', specialty: 'Context/Memory', phone: '138-0000-1024', status: '在线', currentTask: '支付回调修复', devices: ['支付服务', '权限模块'], workload: 72 },
-  { id: 2, name: '唐忆哲', avatar: '/static/avatar-2.png', position: '评测负责人', department: 'Eval Lab', specialty: 'Skill 回归', phone: '138-0000-2048', status: '在线', currentTask: '日报 Skill 回归', devices: ['日报 Skill'], workload: 48 },
-  { id: 3, name: '赵宁', avatar: '/static/avatar-3.png', position: 'Memory 审核人', department: 'Team Memory', specialty: '问题资产化', phone: '138-0000-4096', status: '忙碌', currentTask: '重复问题审核', devices: ['登录链路', '支付服务'], workload: 83 }
+  { id: 1, account: 'yixiu', name: '聪明的一休', avatar: '/static/avatar-1.png', position: '协作负责人', department: 'AI 原生项目协作组', specialty: 'Context/Memory', phone: '138-0000-1024', status: '在线', currentTask: '支付回调修复', devices: ['支付服务', '权限模块'], workload: 72 },
+  { id: 2, account: 'tangyizhe', name: '唐忆哲', avatar: '/static/avatar-2.png', position: '评测负责人', department: 'Eval Lab', specialty: 'Skill 回归', phone: '138-0000-2048', status: '在线', currentTask: '日报 Skill 回归', devices: ['日报 Skill'], workload: 48 },
+  { id: 3, account: 'zhaoning', name: '赵宁', avatar: '/static/avatar-3.png', position: 'Memory 审核人', department: 'Team Memory', specialty: '问题资产化', phone: '138-0000-4096', status: '忙碌', currentTask: '重复问题审核', devices: ['登录链路', '支付服务'], workload: 83 }
 ]
 
 export const mockOverview = {
@@ -246,11 +246,11 @@ export const createOverviewFromMock = () => {
 }
 
 export const mockSkills = [
-  { id: 1, name: 'Machina', category: '工业维护 Agent', trigger: '设备故障诊断', successRate: 94, usedCount: 1280, status: 'verified', version: 'v0.2', description: '用几行 Python 构建工业维护 AI Agent，内置 CMMS、传感器和文档 RAG 连接器。', repo: 'https://github.com/LGDiMaggio/machina', stars: 1200, lang: 'Python' },
-  { id: 2, name: 'Graphiti', category: '知识图谱', trigger: '实时上下文记忆', successRate: 97, usedCount: 30858, status: 'verified', version: 'v1.0', description: '为 AI Agent 构建时序知识图谱，跟踪事实随时间的变化，支持混合检索。', repo: 'https://github.com/getzep/graphiti', stars: 30858, lang: 'Python' },
-  { id: 3, name: 'Microsoft GraphRAG', category: 'RAG 框架', trigger: '文档知识检索', successRate: 95, usedCount: 33900, status: 'verified', version: 'v2.0', description: '微软开源的基于图的 RAG 系统，模块化架构，支持实体提取与社区摘要。', repo: 'https://github.com/microsoft/graphrag', stars: 33900, lang: 'Python' },
-  { id: 4, name: 'nanobot', category: 'Agent 框架', trigger: '多 Agent 协作', successRate: 92, usedCount: 47663, status: 'verified', version: 'v0.3', description: '超轻量级开源个人 AI Agent 框架，支持工具调用、长期记忆、MCP 集成和多 Agent 委派。', repo: 'https://github.com/HKUDS/nanobot', stars: 47663, lang: 'Python' },
-  { id: 5, name: 'Agentic Predictive Maintenance', category: '预测性维护', trigger: 'IoT 传感器异常', successRate: 88, usedCount: 356, status: 'testing', version: 'v1.0', description: '三 Agent 协作的工业预测性维护系统，结合 RAG 检索技术文档与故障根因分析。', repo: 'https://github.com/fhattat/agentic-pred-maintenance-rag', stars: 356, lang: 'Python' },
-  { id: 6, name: 'FlowGuard Engine', category: '安全关键系统', trigger: '电梯遥测异常', successRate: 91, usedCount: 890, status: 'verified', version: 'v1.0', description: '安全优先的数字孪生诊断引擎，LangGraph + Qdrant + FastAPI，带安全防护栏自动重试。', repo: 'https://github.com/Nibir1/FlowGuard-Engine', stars: 890, lang: 'Python' },
+  { id: 1, name: 'Dify', category: 'Agent 工作流', trigger: '团队 Agent 应用编排', successRate: 96, usedCount: 155984, status: 'verified', version: 'v1.17', description: '面向团队的 Agent 工作流与 RAG 平台，覆盖模型、工具、知识库、可观测和发布流程。', reason: '工作流、知识检索与可观测能力完整，适合对照一休的端到端编排。', purpose: '验证 Agent 流程编排、运行监控和应用发布方案。', repo: 'https://github.com/langgenius/dify', stars: 155984, lang: 'TypeScript' },
+  { id: 2, name: 'Graphiti', category: '知识图谱', trigger: '实时上下文记忆', successRate: 97, usedCount: 30858, status: 'verified', version: 'v1.0', description: '为 AI Agent 构建时序知识图谱，跟踪事实随时间的变化，支持混合检索。', reason: '时序事实和关系变化与 Memory Evolution 的版本演化高度匹配。', purpose: '验证跨任务 Memory 关系、时间有效性与冲突更新。', repo: 'https://github.com/getzep/graphiti', stars: 30858, lang: 'Python' },
+  { id: 3, name: 'Microsoft GraphRAG', category: 'RAG 框架', trigger: '文档知识检索', successRate: 95, usedCount: 33900, status: 'verified', version: 'v2.0', description: '微软开源的基于图的 RAG 系统，模块化架构，支持实体提取与社区摘要。', reason: '图检索与社区摘要可补强项目级 Context Pack 的证据组织。', purpose: '验证跨文档关系召回、证据聚合和来源定位。', repo: 'https://github.com/microsoft/graphrag', stars: 33900, lang: 'Python' },
+  { id: 4, name: 'nanobot', category: 'Agent 框架', trigger: '多 Agent 协作', successRate: 92, usedCount: 47663, status: 'verified', version: 'v0.3', description: '超轻量级开源个人 AI Agent 框架，支持工具调用、长期记忆、MCP 集成和多 Agent 委派。', reason: '体量轻且包含 MCP、长期记忆和多 Agent 委派，便于快速对照验证。', purpose: '验证本机 Agent 接入、工具注册和低成本协作。', repo: 'https://github.com/HKUDS/nanobot', stars: 47663, lang: 'Python' },
+  { id: 5, name: 'LangGraph', category: 'Agent 编排', trigger: '长任务与人机确认', successRate: 95, usedCount: 41791, status: 'verified', version: 'v1.0', description: '用于构建有状态、可恢复 Agent 的图编排框架，支持持久化、人工确认和长任务执行。', reason: '持久化、人工确认与可恢复执行正好覆盖一休的任务状态机。', purpose: '验证长任务恢复、审批门禁和人机协作 Trace。', repo: 'https://github.com/langchain-ai/langgraph', stars: 41791, lang: 'Python' },
+  { id: 6, name: 'Deep Agents', category: 'Coding Agent', trigger: '复杂研发任务执行', successRate: 93, usedCount: 29496, status: 'verified', version: 'v0.3', description: '包含规划、文件系统、子 Agent 和长期记忆能力的开源 Agent Harness。', reason: '规划、子 Agent 和文件系统能力可对照复杂研发任务的执行闭环。', purpose: '验证代码任务拆解、执行记录和自动沉淀候选。', repo: 'https://github.com/langchain-ai/deepagents', stars: 29496, lang: 'Python' },
 ]
 

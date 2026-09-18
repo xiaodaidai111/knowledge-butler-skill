@@ -26,6 +26,16 @@ WRITE_ROLES = {ROLE_ADMIN, ROLE_OPERATOR}
 AUDIT_ROLES = {ROLE_ADMIN, ROLE_OPERATOR, ROLE_AUDITOR}
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """Commit/rollback like sqlite3.Connection, then always release the file handle."""
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 def _now() -> str:
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
 
@@ -36,7 +46,7 @@ def _json(value: Any) -> str:
 
 def _security_db() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(SECURITY_DB_PATH)
+    conn = sqlite3.connect(SECURITY_DB_PATH, factory=_ClosingConnection)
     conn.row_factory = sqlite3.Row
     conn.executescript(
         """

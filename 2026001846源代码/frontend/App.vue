@@ -39,7 +39,7 @@
           <label v-if="authMode === 'login'" class="remember-row"><input v-model="authForm.remember" type="checkbox" />保持登录状态</label>
           <label v-else class="remember-row"><input v-model="authForm.agreed" type="checkbox" />我已阅读并同意平台使用规范</label>
           <button class="auth-submit" type="submit">{{ authMode === 'login' ? '进入工作台' : '完成注册并登录' }}</button>
-          <div v-if="authMode === 'login'" class="demo-account"><span>默认演示账号</span><b>账号：yixiu</b><b>密码：Yixiu2026!</b></div>
+          <div v-if="authMode === 'login' && demoAccountEnabled" class="demo-account"><span>本机演示账号</span><b>账号：yixiu</b><b>密码：Yixiu2026!</b></div>
         </form>
       </div>
     </section>
@@ -67,6 +67,8 @@
           :key="item.key"
           type="button"
           :class="{ active: activePage === item.key }"
+          :aria-label="item.label"
+          :title="item.label"
           @click="switchPage(item.key)"
         >
           <span class="nav-icon">
@@ -100,7 +102,7 @@
             <button type="button" @click="activePage = 'tasks'; taskPanel = 'manage'; globalSearchFocused = false; taskChamberOpen = false">
               <b>活跃项目 {{ overview.stats.pending }}</b><small>进入任务执行中心</small>
             </button>
-            <button type="button" @click="activePage = 'tasks'; taskPanel = 'recheck'; globalSearchFocused = false; taskChamberOpen = false">
+            <button type="button" @click="openEvalLab(); globalSearchFocused = false; taskChamberOpen = false">
               <b>待 Eval {{ overview.stats.review }}</b><small>查看 Skill 回归评测</small>
             </button>
             <button class="danger" type="button" @click="activePage = 'tasks'; taskPanel = 'overview'; globalSearchFocused = false; taskChamberOpen = false">
@@ -144,31 +146,91 @@
 
       <div class="content-shell" :class="{ 'search-focus-shell': activePage === 'search', 'contact-focus-shell': activePage === 'tasks' && taskPanel === 'contacts', 'profile-focus-shell': activePage === 'profile', 'knowledge-focus-shell': activePage === 'knowledge' }" :style="{ '--operator-width': `${operatorWidth}px` }">
       <section class="page-scroll" :class="[`page-theme-${activePage}`, { 'panel-network': activePage === 'search' && searchPanel === 'network' }]">
+        <div class="project-context-bar">
+          <div class="project-context-main">
+            <span class="project-context-dot"></span>
+            <label>
+              <small>当前项目上下文</small>
+              <select v-model="activeProjectId" @change="syncActiveProject">
+                <option v-for="project in projectOptions" :key="project.id" :value="project.id">{{ project.name }}</option>
+              </select>
+            </label>
+            <span class="project-context-meta"><b>{{ currentProject.sprint }}</b><small>{{ currentProject.repo }}</small></span>
+          </div>
+          <div class="project-context-flow" aria-label="任务能力演化链路">
+            <button
+              v-for="(step, index) in projectFlowSteps"
+              :key="step.key"
+              type="button"
+              :class="{ done: index < currentProject.flowStep, current: index === currentProject.flowStep }"
+              :title="step.desc"
+              :aria-current="index === currentProject.flowStep ? 'step' : undefined"
+              @click="openProjectFlowStep(step)"
+            ><small>{{ String(index + 1).padStart(2, '0') }}</small><b>{{ step.label }}</b></button>
+          </div>
+        </div>
         <section v-if="activePage === 'home'" class="page-grid">
+          <div class="panel span-all project-command-panel">
+            <header class="project-command-head">
+              <div>
+                <p class="eyebrow">Project Pulse</p>
+                <h2>{{ currentProject.name }}</h2>
+                <p>{{ currentProject.goal }}</p>
+              </div>
+              <div class="project-command-progress">
+                <span><b>{{ currentProjectProgress }}%</b><small>项目整体进度</small></span>
+                <div><i :style="{ width: `${currentProjectProgress}%` }"></i></div>
+                <em>{{ currentProject.sprint }}</em>
+              </div>
+            </header>
+            <div class="project-pulse-grid">
+              <button v-for="item in projectPulseCards" :key="item.key" type="button" :class="`tone-${item.tone}`" @click="item.action()">
+                <span><small>{{ item.label }}</small><b>{{ item.value }}</b></span>
+                <em>{{ item.desc }}</em>
+              </button>
+            </div>
+            <div class="project-command-foot">
+              <div class="dynamic-action-label"><b>下一步建议</b><small>快捷操作会随当前项目状态变化</small></div>
+              <button v-for="item in dynamicProjectActions" :key="item.key" type="button" :class="{ primary: item.primary }" @click="item.action()">
+                <span>{{ item.label }}</span><small>{{ item.desc }}</small><i>→</i>
+              </button>
+            </div>
+          </div>
+
           <div
             class="panel span-7 home-news-carousel"
             @mouseenter="pauseNewsCarousel"
             @mouseleave="resumeNewsCarousel"
           >
             <div class="news-carousel-stage">
-              <a class="news-image-link" :href="activeNews.link" target="_blank" rel="noopener">
+              <a class="news-image-link" :href="activeNews.link" target="_blank" rel="noopener noreferrer">
                 <transition name="news-fade" mode="out-in">
                   <img :key="activeNews.image" :src="activeNews.image" :alt="activeNews.title" @error="handleContentImageError($event, newsImageFallback)" />
                 </transition>
               </a>
             </div>
             <div class="news-carousel-copy">
-              <a :href="activeNews.link" target="_blank" rel="noopener">
+              <a :href="activeNews.link" target="_blank" rel="noopener noreferrer">
                 <h2>{{ activeNews.title }}</h2>
               </a>
               <p>{{ activeNews.summary }}</p>
               <div class="news-meta">
                 <span>{{ activeNews.source }}</span>
                 <span>{{ activeNews.date }}</span>
+                <button
+                  class="news-refresh-button"
+                  type="button"
+                  :disabled="newsUpdateState.loading"
+                  :title="newsUpdateState.nextRefreshText"
+                  @click="refreshPublicUpdates(false)"
+                >
+                  <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"></path></svg>
+                  {{ newsUpdateState.loading ? '检查更新中' : newsUpdateState.label }}
+                </button>
                 <div class="news-dots" aria-label="轮播页码">
                   <button
                     v-for="(item, index) in newsSlides"
-                    :key="item.image"
+                    :key="item.id || item.link"
                     type="button"
                     :class="{ active: index === newsIndex }"
                     :aria-label="`切换到第 ${index + 1} 条新闻`"
@@ -184,7 +246,7 @@
               <img :src="'/static/yixiu-logo-full.png'" alt="一休系统 Logo" @error="handleContentImageError($event, '/static/yixiu-logo.png')" />
               <div>
                 <p class="eyebrow">我的今日工作</p>
-                <h2>{{ user.name }}，今天重点处理 {{ overview.stats.pending + overview.stats.inProgress + overview.stats.review }} 项检修工作</h2>
+                <h2>{{ user.name }}，今天重点推进 {{ overview.stats.pending + overview.stats.inProgress + overview.stats.review }} 项协作任务</h2>
                 <p>{{ nowText }}，{{ user.department }}。请优先确认重复问题、即将逾期和待 Eval 任务。</p>
               </div>
             </div>
@@ -226,7 +288,7 @@
               <div class="schedule-head-meta">
                 <span class="meta-today">今日 {{ selectedScheduleItems.length }}</span>
                 <span class="meta-critical">重点 {{ scheduleToneStats.critical }}</span>
-                <span class="meta-review">复检 {{ scheduleToneStats.review }}</span>
+                <span class="meta-review">Eval {{ scheduleToneStats.review }}</span>
               </div>
             </div>
             <div class="schedule-calendar">
@@ -265,6 +327,20 @@
             </div>
           </div>
 
+          <div class="panel span-all capability-loop-panel">
+            <div class="section-title-row">
+              <div><p class="eyebrow">TeamMemory Loop</p><h3>从任务执行到团队能力复用</h3></div>
+              <span class="quiet-label">当前项目 · {{ currentProject.name }}</span>
+            </div>
+            <div class="capability-loop-grid">
+              <button v-for="(item, index) in teamCapabilityLoop" :key="item.key" type="button" :class="[`tone-${item.tone}`, { current: item.current }]" @click="item.action()">
+                <small>{{ String(index + 1).padStart(2, '0') }}</small>
+                <span><b>{{ item.label }}</b><em>{{ item.desc }}</em></span>
+                <strong>{{ item.value }}</strong>
+              </button>
+            </div>
+          </div>
+
           <div class="home-task-track-row span-all">
           <div class="panel home-task-panel home-task-compact">
             <div class="section-title-row home-task-title">
@@ -275,7 +351,7 @@
               <div class="task-title-actions"><span>{{ skillRankList.length }} 个 Skill</span><button class="ghost" type="button" @click="activePage = 'knowledge'; knowledgePanel = 'recheck'">查看全部 →</button></div>
             </div>
             <div class="home-task-list">
-              <a v-for="(skill, index) in skillRankList" :key="skill.id" :href="skill.repo" target="_blank" rel="noopener" class="home-task-row skill-row" :class="`risk-${skill.status === 'verified' ? 'low' : skill.status === 'testing' ? 'medium' : 'high'}`">
+              <a v-for="(skill, index) in skillRankList" :key="skill.id" :href="skill.repo" target="_blank" rel="noopener noreferrer" class="home-task-row skill-row" :class="`risk-${skill.status === 'verified' ? 'low' : skill.status === 'testing' ? 'medium' : 'high'}`">
                 <span class="task-index-block">
                   <b>{{ String(index + 1).padStart(2, '0') }}</b>
                   <i :class="skill.status === 'verified' ? 'rank-hot' : skill.status === 'testing' ? 'rank-warm' : 'rank-new'"></i>
@@ -283,7 +359,8 @@
                 <span class="task-device-block">
                   <small>{{ skill.category }} · {{ skill.lang }}</small>
                   <b>{{ skill.name }}</b>
-                  <em>{{ skill.description }}</em>
+                  <em><strong>推荐原因</strong>{{ skill.reason }}</em>
+                  <em><strong>预计用途</strong>{{ skill.purpose }}</em>
                 </span>
                 <span class="task-fault-block">
                   <span><b>{{ skill.trigger }}</b><i :class="['badge', skill.status === 'verified' ? 'low' : skill.status === 'testing' ? 'medium' : 'high']">{{ skill.status === 'verified' ? '已验证' : skill.status === 'testing' ? '测试中' : '候选' }}</i></span>
@@ -296,7 +373,7 @@
                 <span class="task-progress-block">
                   <span><b>匹配度 {{ skill.successRate }}%</b></span>
                   <i><u :style="{ width: `${skill.successRate}%` }"></u></i>
-                  <small>与一修系统契合度</small>
+                  <small>与一休系统契合度</small>
                 </span>
                 <span class="row-arrow">↗</span>
               </a>
@@ -320,10 +397,22 @@
           <div class="panel analytics-panel span-all">
             <div class="panel-head">
               <div>
-                <p class="eyebrow">数据分析</p>
-                <h3>系统今日概览数据看板</h3>
+                <p class="eyebrow">Team Intelligence</p>
+                <h3>团队能力、质量、成本与效率</h3>
               </div>
-              <div class="chart-legend"><i></i>实时汇总 <span>多维指标</span></div>
+              <div class="chart-legend"><i></i>演示数据 <span>接入后切换真实口径</span></div>
+            </div>
+            <div class="team-analytics-filters">
+              <label>项目<select v-model="analyticsFilters.project"><option value="all">全部项目</option><option v-for="project in projectOptions" :key="project.id" :value="project.id">{{ project.name }}</option></select></label>
+              <label>成员<select v-model="analyticsFilters.member"><option value="all">全部成员</option><option v-for="member in analyticsMembers" :key="member" :value="member">{{ member }}</option></select></label>
+              <label>Agent<select v-model="analyticsFilters.agent"><option value="all">全部 Agent</option><option v-for="agent in agents" :key="agent.id" :value="agent.id">{{ agent.name }}</option></select></label>
+              <label>时间<select v-model="analyticsFilters.range"><option value="7d">近 7 天</option><option value="30d">近 30 天</option><option value="90d">近 90 天</option></select></label>
+              <button type="button" @click="resetAnalyticsFilters">重置筛选</button>
+            </div>
+            <div class="team-intelligence-metrics">
+              <button v-for="item in teamAnalyticsMetrics" :key="item.key" type="button" @click="item.action()">
+                <small>{{ item.label }}</small><b>{{ item.value }}</b><em :class="{ down: item.down }">{{ item.change }}</em><span>{{ item.note }}</span>
+              </button>
             </div>
             <div class="dashboard-charts">
               <section class="chart-tile chart-tile-wide">
@@ -339,15 +428,15 @@
                 <EChart :option="homeRiskOption" class="chart-canvas" height="230px" />
               </section>
               <section class="chart-tile">
-                <div class="chart-tile-head"><b>故障构成</b><small>按案例占比</small></div>
+                <div class="chart-tile-head"><b>任务类型构成</b><small>按项目任务占比</small></div>
                 <EChart :option="homeFaultOption" class="chart-canvas" height="230px" />
               </section>
               <section class="chart-tile">
-                <div class="chart-tile-head"><b>复检质量雷达</b><small>流程闭环能力</small></div>
+                <div class="chart-tile-head"><b>协作质量雷达</b><small>任务闭环能力</small></div>
                 <EChart :option="homeQualityOption" class="chart-canvas" height="230px" />
               </section>
               <section class="chart-tile chart-tile-wide">
-                <div class="chart-tile-head"><b>知识沉淀与引用</b><small>本周新增 {{ overview.stats.weekKnowledge }} 条</small></div>
+                <div class="chart-tile-head"><b>Memory 沉淀与复用</b><small>本周新增 {{ overview.stats.weekKnowledge }} 条</small></div>
                 <EChart :option="homeKnowledgeOption" class="chart-canvas" height="230px" />
               </section>
             </div>
@@ -537,6 +626,43 @@
                 <div><p class="eyebrow">Context Pack 生成</p><h3>{{ searchResult ? '任务上下文摘要' : '等待上下文组装' }}</h3><small>{{ searchResult ? '综合需求、代码、文档与历史经验形成判断' : '请先在 Context Engine 中启动组包' }}</small></div>
               </div>
               <template v-if="searchResult">
+                <div class="context-pack-meta">
+                  <span><small>Pack 版本</small><b>{{ contextPackMeta.version }}</b></span>
+                  <span><small>证据完整度</small><b>{{ contextPackMeta.completeness }}%</b></span>
+                  <span><small>已引用证据</small><b>{{ contextPackMeta.evidenceCount }} 条</b></span>
+                  <span :class="{ warning: contextPackMeta.gaps.length }"><small>信息缺口</small><b>{{ contextPackMeta.gaps.length ? `${contextPackMeta.gaps.length} 项待补充` : '已满足' }}</b></span>
+                </div>
+                <div v-if="contextPackMeta.gaps.length" class="context-pack-gaps">
+                  <b>建议补充</b><span v-for="gap in contextPackMeta.gaps" :key="gap">{{ gap }}</span>
+                </div>
+                <div class="context-evidence-board">
+                  <header><div><b>证据完整度检测</b><small>每项结论必须能回到来源，缺失项不会被模型自动补写</small></div><strong>{{ contextPackMeta.completeness }}%</strong></header>
+                  <div class="context-evidence-checks">
+                    <button v-for="item in contextEvidenceChecks" :key="item.key" type="button" :class="{ ok: item.ok }" @click="item.action()">
+                      <i>{{ item.ok ? '✓' : '!' }}</i><span><b>{{ item.label }}</b><small>{{ item.detail }}</small></span><em>{{ item.ok ? '已覆盖' : '待补充' }}</em>
+                    </button>
+                  </div>
+                  <div class="context-source-locator">
+                    <b>引用来源定位</b>
+                    <button v-for="(source, index) in contextSourceList" :key="source.id || source.title" type="button" @click="locateContextSource(source)">
+                      <span>{{ index + 1 }}</span><em>{{ source.title }}</em><small>{{ source.source || source.type || 'Context Pack' }}</small><i>定位 →</i>
+                    </button>
+                  </div>
+                </div>
+                <div class="context-version-board">
+                  <header><div><b>版本管理与历史对比</b><small>比较证据、结论与风险变化，保留每次组包快照</small></div><em>{{ contextPackVersions.length }} 个版本</em></header>
+                  <div class="context-version-controls">
+                    <label>基准版本<select v-model="contextCompareBase"><option v-for="item in contextPackVersions" :key="`base-${item.id}`" :value="item.id">{{ item.version }} · {{ item.createdAt }}</option></select></label>
+                    <span>对比</span>
+                    <label>目标版本<select v-model="contextCompareTarget"><option v-for="item in contextPackVersions" :key="`target-${item.id}`" :value="item.id">{{ item.version }} · {{ item.createdAt }}</option></select></label>
+                  </div>
+                  <div v-if="contextVersionDiff" class="context-version-diff">
+                    <span><small>证据变化</small><b>{{ contextVersionDiff.evidence }}</b></span>
+                    <span><small>完整度变化</small><b>{{ contextVersionDiff.completeness }}</b></span>
+                    <span><small>缺失材料</small><b>{{ contextVersionDiff.gaps }}</b></span>
+                    <span><small>结论变化</small><b>{{ contextVersionDiff.summary }}</b></span>
+                  </div>
+                </div>
                 <div class="analysis-summary"><span>上下文结论</span><h3>{{ searchResult.phenomenonSummary }}</h3></div>
                 <div class="analysis-grid">
                   <span>风险等级：{{ severityText(searchResult.risk) }}</span>
@@ -552,7 +678,13 @@
                 <ul><li v-for="item in searchResult.causes" :key="item">{{ item }}</li></ul>
                 <h4>推荐关注位置 / 工具</h4>
                 <p>{{ searchResult.positions.join('、') }}；工具：{{ searchResult.tools.join('、') }}</p>
-                <div class="card-actions"><button class="primary" type="button" @click="prepareKnowledgeFromSearch">提炼为 Memory</button><button type="button" @click="searchPanel = 'multimodal'">重新组包</button></div>
+                <div class="card-actions context-pack-actions">
+                  <button class="primary" type="button" @click="createTaskFromSearch({ title: contextPackMeta.title })">转为项目任务</button>
+                  <button type="button" @click="routeContextPack">交给 Agent</button>
+                  <button type="button" @click="prepareKnowledgeFromSearch">提炼为 Memory</button>
+                  <button type="button" @click="shareContextPack">发送协作成员</button>
+                  <button type="button" @click="searchPanel = 'multimodal'">重新组包</button>
+                </div>
               </template>
               <div v-else-if="loading.search" class="search-running-state">
                 <div class="search-scan-visual large">
@@ -582,7 +714,7 @@
               <div class="panel-head">
                 <div>
                   <p class="eyebrow">03 · 上下文分类</p>
-                  <h3>需求、代码、历史任务、Memory、Skill 与 Eval 节点</h3>
+                  <h3>需求、代码、Memory、Skill 与 Eval 节点</h3>
                   <small class="result-tab-hint">{{ resultTabHint }}</small>
                 </div>
                 <div class="tabs">
@@ -593,7 +725,7 @@
                 <article v-for="item in filteredResults" :key="item.id" class="result-card">
                   <div>
                     <b>{{ item.title }}</b>
-                    <small>{{ item.type }} · {{ item.equipment }} · {{ item.model }} · 匹配度 {{ item.match }}%</small>
+                    <small>{{ item.type }} · {{ item.equipment || '当前项目' }} · {{ item.model || '通用模块' }} · 匹配度 {{ item.match }}%</small>
                     <p>{{ item.summary }}</p>
                   </div>
                   <div class="tag-line"><span v-for="tag in item.tags" :key="tag">{{ tag }}</span></div>
@@ -736,49 +868,29 @@
             </div>
           </template>
 
-          <div v-if="searchPanel === 'update'" class="panel span-all">
-            <p class="eyebrow">沉淀更新</p>
-            <div class="form-grid">
-              <label>知识标题<input v-model="knowledgeForm.title" placeholder="如：发动机异响复检案例" /></label>
-              <label>资产类型<select v-model="knowledgeForm.type"><option>Memory Unit</option><option>Skill</option><option>Eval Case</option><option>Issue to Skill</option></select></label>
-              <label>适用设备<input v-model="knowledgeForm.equipment" /></label>
-              <label>设备型号<input v-model="knowledgeForm.model" /></label>
-              <label>来源依据<input v-model="knowledgeForm.source" placeholder="工单号、手册章节或现场记录" /></label>
-              <label>人工标签<input v-model="knowledgeForm.tagText" placeholder="使用逗号分隔，如：异响,气门,复测" /></label>
-              <label class="wide">沉淀摘要<textarea v-model="knowledgeForm.summary" placeholder="描述问题、尝试、根因、方案、适用条件、Eval 结论和引用依据"></textarea></label>
-            </div>
-            <button class="primary" type="button" @click="saveKnowledge">提交 Memory 审核</button>
-            <div class="knowledge-review-list">
-              <article v-for="item in pendingKnowledge" :key="item.id" class="result-card">
-                <div><b>{{ item.title }}</b><small>{{ item.equipment }} / {{ item.model }} · {{ knowledgeStatusText(item.status) }}</small><p>{{ item.summary }}</p></div>
-                <label>人工修正<textarea v-model="knowledgeCorrections[item.id]" placeholder="核对并修正模型整理结果；无误可直接通过"></textarea></label>
-                <div class="tag-line"><span v-for="tag in item.tags || []" :key="tag">{{ tag }}</span></div>
-                <div class="card-actions"><button class="primary" type="button" @click="reviewKnowledge(item, 'approved')">审核入库</button><button type="button" @click="reviewKnowledge(item, 'rejected')">退回修改</button></div>
-              </article>
-            </div>
-          </div>
           <template v-if="searchPanel === 'history'">
             <div class="panel search-history-panel">
               <div class="panel-head"><div><p class="eyebrow">历史经验</p><h3>最近 Context Pack 记录</h3><small>点击记录可回填任务条件，继续追溯同类问题。</small></div><button type="button" @click="searchPanel = 'multimodal'">新建组包</button></div>
               <div class="history-command-strip">
-                <button type="button" @click="toast('已筛出可复用的高置信度 Context Pack')"><b>高置信复用</b><small>优先使用 85% 以上记录</small></button>
-                <button type="button" @click="toast('已按项目和任务类型合并相似问题')"><b>相似问题合并</b><small>同模块、同任务自动归组</small></button>
-                <button type="button" @click="toast('已生成历史上下文追溯摘要')"><b>生成追溯摘要</b><small>用于任务执行备注</small></button>
+                <button type="button" :class="{ active: historyViewMode === 'confidence' }" @click="setHistoryView('confidence')"><b>高置信复用</b><small>优先使用 85% 以上记录</small></button>
+                <button type="button" :class="{ active: historyViewMode === 'grouped' }" @click="setHistoryView('grouped')"><b>相似问题合并</b><small>同模块、同任务自动归组</small></button>
+                <button type="button" @click="summarizeSearchHistory"><b>生成追溯摘要</b><small>用于任务执行备注</small></button>
               </div>
+              <p v-if="historyFeedback" class="history-feedback">{{ historyFeedback }}</p>
               <div class="history-stat-grid">
                 <span><b>{{ searchHistory.length }}</b><small>近期检索</small></span>
                 <span><b>{{ Math.round(searchHistory.reduce((sum, item) => sum + item.confidence, 0) / Math.max(searchHistory.length, 1)) }}%</b><small>平均置信度</small></span>
                 <span><b>{{ new Set(searchHistory.map(item => item.faultType)).size }}</b><small>任务类型</small></span>
               </div>
               <div class="history-search-list">
-                <button v-for="item in searchHistory" :key="item.id" type="button" @click="applySearchHistory(item)">
+                <button v-for="item in visibleSearchHistory" :key="item.id" type="button" @click="applySearchHistory(item)">
                   <span><b>{{ item.title }}</b><small>{{ item.time }} · {{ item.deviceName }} · {{ item.model }} · {{ item.faultType }}</small></span>
                   <em>{{ item.confidence }}%</em>
                 </button>
               </div>
               <div class="history-action-row">
-                <button type="button" @click="toast('已按任务类型整理历史记录')">按任务归类</button>
-                <button type="button" @click="toast('已标记高匹配历史记录')">标记高匹配</button>
+                <button type="button" @click="setHistoryView('grouped')">按任务归类</button>
+                <button type="button" @click="setHistoryView('confidence')">标记高匹配</button>
                 <button type="button" @click="activePage = 'search'; searchPanel = 'update'">沉淀为 Memory</button>
               </div>
             </div>
@@ -1064,7 +1176,7 @@
                     <span>{{ tpl.category }}</span>
                     <p>{{ tpl.description }}</p>
                   </div>
-                  <button class="kb-template-use" type="button">使用模板 →</button>
+                  <button class="kb-template-use" type="button" @click.stop="createDocFromTemplate(tpl)">使用模板 →</button>
                 </article>
               </div>
             </article>
@@ -1096,7 +1208,7 @@
                     <span>{{ tpl.category }}</span>
                     <p>{{ tpl.description }}</p>
                   </div>
-                  <button class="kb-template-use" type="button">使用模板 →</button>
+                  <button class="kb-template-use" type="button" @click.stop="createDocFromTemplate(tpl)">使用模板 →</button>
                 </article>
               </div>
             </article>
@@ -1137,7 +1249,7 @@
             <div class="panel span-all task-analytics">
               <div class="panel-head">
                 <div><p class="eyebrow">Project Intelligence</p><h3>项目趋势、阶段状态、重复问题、模块和人员负载</h3></div>
-                <button type="button" @click="toast('已展开更多分析：平均执行时长、按时完成率、重复劳动率、Skill 覆盖率')">查看更多分析</button>
+                <button type="button" :aria-expanded="taskAnalyticsExpanded" @click="taskAnalyticsExpanded = !taskAnalyticsExpanded">{{ taskAnalyticsExpanded ? '收起扩展分析' : '查看更多分析' }}</button>
               </div>
               <div class="analysis-cards">
                 <section>
@@ -1160,6 +1272,12 @@
                   <button v-for="item in taskCategoryAnalysis" :key="item.key" type="button" class="chip-row" @click="filterTaskBy('category', item.key)">{{ item.label }} <em>{{ item.count }}</em></button>
                   <button v-for="item in faultRankAnalysis" :key="item.key" type="button" class="chip-row warm" @click="filterTaskBy('faultType', item.key)">{{ item.label }} <em>{{ item.count }}</em></button>
                 </section>
+              </div>
+              <div v-if="taskAnalyticsExpanded" class="task-insight-strip">
+                <span><small>平均执行进度</small><b>{{ Math.round(tasks.reduce((sum, item) => sum + Number(item.progress || 0), 0) / Math.max(tasks.length, 1)) }}%</b></span>
+                <span><small>按期任务</small><b>{{ tasks.filter(item => !item.overdue).length }} / {{ tasks.length }}</b></span>
+                <span><small>重复问题</small><b>{{ tasks.filter(item => item.severity === 'high').length }} 项</b></span>
+                <span><small>Skill 覆盖</small><b>{{ Math.round(tasks.filter(item => item.sop?.length).length / Math.max(tasks.length, 1) * 100) }}%</b></span>
               </div>
             </div>
             <div class="panel span-all priority-panel">
@@ -1193,7 +1311,7 @@
           <template v-if="taskPanel === 'manage'">
             <div class="panel span-all task-manage-panel">
               <div class="filters">
-                <select v-model="taskFilters.status"><option value="all">全部状态</option><option value="pending">待启动</option><option value="in_progress">推进中</option><option value="review">待验收</option><option value="completed">已归档</option></select>
+                <select v-model="taskFilters.status"><option value="all">全部状态</option><option value="pending">待启动</option><option value="in_progress">推进中</option><option value="review">待 Review / Eval</option><option value="completed">已归档</option></select>
                 <select v-model="taskFilters.severity"><option value="all">全部风险</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select>
                 <select v-model="taskFilters.category"><option value="all">全部模块</option><option v-for="item in taskCategoryAnalysis" :key="item.key" :value="item.key">{{ item.label }}</option></select>
                 <select v-model="taskFilters.faultType"><option value="all">全部类型</option><option v-for="item in faultRankAnalysis" :key="item.key" :value="item.key">{{ item.label }}</option></select>
@@ -1227,7 +1345,7 @@
                   <span>{{ statusText(task.status) }}</span>
                   <span class="inline-actions task-row-actions">
                     <button class="task-row-action detail" type="button" @click="openTask(task)"><span>查看</span><b>详情</b></button>
-                    <button class="task-row-action flow" type="button" :disabled="task.status === 'completed'" @click="handleTaskPrimary(task)"><span>{{ task.status === 'review' ? '进入' : '项目' }}</span><b>{{ task.status === 'review' ? '验收' : '推进' }}</b></button>
+                    <button class="task-row-action flow" type="button" :disabled="task.status === 'completed'" @click="handleTaskPrimary(task)"><span>{{ task.status === 'review' ? '进入' : '项目' }}</span><b>{{ task.status === 'review' ? 'Eval' : '推进' }}</b></button>
                   </span>
                 </div>
               </div>
@@ -1279,7 +1397,7 @@
                   <div>
                     <h3>{{ activeConversation?.name }} <span v-if="activeConversation?.kind === 'group'">({{ contactStats.online + 12 }})</span></h3>
                     <nav>
-                      <button type="button" class="active">聊天</button>
+                      <button type="button" class="active" disabled aria-current="page">聊天</button>
                       <button type="button" @click="sendTaskCard()">任务</button>
                       <button type="button" @click="$refs.chatFileInput.click()">文件</button>
                       <button type="button" @click="sendMeetingCard">会议</button>
@@ -1293,7 +1411,7 @@
                   </div>
                 </header>
                 <div class="chat-context-strip">
-                  <span><b>{{ activeConversation?.devices?.join(' / ') || '通用检修' }}</b><small>关联对象</small></span>
+                  <span><b>{{ activeConversation?.devices?.join(' / ') || '通用项目' }}</b><small>关联对象</small></span>
                   <span><b>{{ activeConversation?.currentTask || '待关联任务' }}</b><small>当前任务</small></span>
                   <span><b>{{ activeConversation?.workload || 0 }}%</b><small>负载</small></span>
                 </div>
@@ -1308,7 +1426,7 @@
                       <button v-if="message.card" class="message-card" type="button" @click="openMessageCard(message.card)">
                         <b>{{ message.card.title }}</b><small>{{ message.card.desc }}</small>
                       </button>
-                      <small>{{ message.time }}<em v-if="message.syncFailed"> · 发送失败</em></small>
+                      <small class="message-delivery">{{ message.time }}<em v-if="message.deliveryStatus === 'sending'"> · 发送中</em><em v-else-if="message.syncFailed"> · 未同步</em><button v-if="message.syncFailed" type="button" @click="retryChatMessage(message)">重试</button></small>
                     </div>
                   </article>
                 </div>
@@ -1353,7 +1471,7 @@
                 </div>
                 <div class="detail-grid">
                   <span>专业：{{ activeConversation?.specialty }}</span>
-                  <span>擅长设备：{{ activeConversation?.devices?.join('、') }}</span>
+                  <span>能力领域：{{ activeConversation?.devices?.join('、') }}</span>
                   <span>当前任务：{{ activeConversation?.currentTask }}</span>
                   <span>工作负载：{{ activeConversation?.workload }}%</span>
                 </div>
@@ -1370,15 +1488,15 @@
                 </div>
                 <div class="group-setting-list">
                   <button type="button" @click="openTaskPicker('assign')"><span>群管理</span><b>添加到任务</b></button>
+                  <button type="button" @click="openHandoffForm(tasks.find((task) => task.workOrderNo === activeConversation?.taskNo) || tasks[0])"><span>任务协作</span><b>发起任务交接</b></button>
                   <button type="button" @click="requestSupport"><span>群动态</span><b>请求专家支援</b></button>
                   <button type="button" @click="scheduleMeeting"><span>群会议</span><b>预约会议</b></button>
                   <button type="button" @click="openTaskPicker('send')"><span>分享</span><b>发送任务资料</b></button>
                   <button type="button" @click="summarizeConversation"><span>消息记录</span><b>总结协作重点</b></button>
-                  <button type="button" @click="toast('已清空当前筛选')"><span>清空消息记录</span><b>保留协作档案</b></button>
                 </div>
                 <div class="collab-actions">
                   <button type="button" @click="createCollaborationGroup">创建协作群</button>
-                  <button type="button" class="danger" @click="toast('已退出当前群聊演示')">退出群聊</button>
+                  <button type="button" @click="contactRightCollapsed = true">收起设置</button>
                 </div>
               </aside>
             </div>
@@ -2054,7 +2172,11 @@
             <div class="panel span-all search-update-panel">
               <div class="panel-head">
                 <div><p class="eyebrow">MCP / API Integration</p><h3>给 Codex / Claude 的接入配置</h3><small>外部 AI 通过 MCP 工具或 API 把当前任务总结主动写入一休。</small></div>
-                <button type="button" @click="openMcpConfig">重新生成配置</button>
+                <div class="card-actions">
+                  <button type="button" @click="copyMcpConfig">复制配置</button>
+                  <button type="button" @click="testMcpConnection">{{ mcpTesting ? '测试中…' : '测试连接' }}</button>
+                  <button type="button" @click="openMcpConfig">重新加载</button>
+                </div>
               </div>
               <div class="search-update-layout">
                 <div class="form-grid">
@@ -2069,6 +2191,8 @@
                     <span><small>工具数量</small><em>{{ mcpManifest.tools?.length || 0 }}</em></span>
                     <span><small>同步方向</small><em>外部 AI → 一休</em></span>
                     <span><small>入库策略</small><em>候选资产人工审核</em></span>
+                    <span><small>连接状态</small><em :class="mcpConnectionStatus.tone">{{ mcpConnectionStatus.text }}</em></span>
+                    <span v-if="mcpConnectionStatus.latency"><small>响应耗时</small><em>{{ mcpConnectionStatus.latency }} ms</em></span>
                   </div>
                   <div class="update-rule-list">
                     <b>开放工具</b>
@@ -2228,11 +2352,11 @@
         <span></span>
       </button>
 
-      <aside class="operator-panel" :class="'op-theme-' + (operatorProfile.id || 'tiangong')" aria-label="页面智能体对话">
+      <aside class="operator-panel" :class="'op-theme-' + (operatorProfile.id || 'tiangong')" aria-label="项目工作助手">
         <div class="operator-head">
           <img class="operator-avatar" :src="avatarFor(operatorProfile.avatar, operatorProfile.name)" :alt="operatorProfile.name" @error="handleAvatarError" />
           <div>
-            <p class="eyebrow">智能体协助</p>
+            <p class="eyebrow">项目工作助手</p>
             <h2>{{ operatorProfile.name }}</h2>
             <small class="operator-role">{{ operatorProfile.role }}</small>
           </div>
@@ -2243,6 +2367,26 @@
 
         <p class="operator-duty">{{ operatorProfile.duty }}</p>
         <p class="operator-slogan">{{ operatorProfile.slogan }}</p>
+
+        <div v-if="activePage !== 'profile'" class="router-decision-card">
+          <div><span><small>Skill First Router</small><b>{{ routerRecommendation.title }}</b></span><em>{{ routerRecommendation.risk }}</em></div>
+          <p>{{ routerRecommendation.reason }}</p>
+          <section>
+            <span><small>上下文</small><b>{{ routerRecommendation.context }}</b></span>
+            <span><small>推荐 Skill</small><b>{{ routerRecommendation.skill }}</b></span>
+            <span><small>执行角色</small><b>{{ routerRecommendation.agent }}</b></span>
+            <span><small>建议模型</small><b>{{ routerRecommendation.model }}</b></span>
+          </section>
+          <div class="router-model-summary">
+            <span>预算 {{ routerRecommendation.cost }}</span>
+            <span>预计节省 {{ routerRecommendation.saving }}%</span>
+            <span>{{ modelPolicyModeLabel }}</span>
+          </div>
+          <div class="router-card-actions">
+            <button type="button" @click="applyRouterRecommendation">应用本次路由</button>
+            <button class="secondary" type="button" @click="showModelPolicy = true">模型策略</button>
+          </div>
+        </div>
 
         <section v-if="false" class="aios-recorder" :class="{ active: aiosLive.status !== 'idle' }" aria-label="天工操作过程">
           <header class="aios-recorder-head">
@@ -2426,7 +2570,7 @@
         <div class="floating-chat-thread">
           <div class="bubble assistant">{{ operatorProfile.welcome }}</div>
           <div v-if="selectedGraphNode" class="bubble assistant node-context">
-            当前节点：{{ selectedGraphNode.label }}。我可以基于它检索资料、解释关系或整理检修建议。
+            当前节点：{{ selectedGraphNode.label }}。我可以基于它检索资料、解释关系或整理执行建议。
           </div>
           <div v-for="message in currentOperatorMessages" :key="message.id" :class="['bubble', message.role, { loading: message.loading }]">
             <span v-if="message.loading" class="loading-dots"><i></i><i></i><i></i></span>
@@ -2473,6 +2617,42 @@
       </div>
     </section>
 
+    <div v-if="showModelPolicy" class="modal model-policy-modal" @click.self="showModelPolicy = false">
+      <form class="modal-card model-policy-card" @submit.prevent="saveModelPolicy">
+        <button class="close" type="button" aria-label="关闭模型策略" @click="showModelPolicy = false">×</button>
+        <header>
+          <div><p class="eyebrow">Model Routing</p><h2>按任务选择合适模型</h2></div>
+          <span>{{ modelRoute.tier_label }} · {{ modelRoute.model }}</span>
+        </header>
+        <p class="model-policy-intro">先用任务风险、上下文规模和输出要求判断档位；轻量任务限制输出预算，复杂任务自动升级，高风险任务保留人工确认。</p>
+        <div class="model-policy-modes">
+          <label v-for="item in modelPolicyModes" :key="item.key" :class="{ active: modelPolicy.mode === item.key }">
+            <input v-model="modelPolicy.mode" type="radio" name="model-policy-mode" :value="item.key" />
+            <span><b>{{ item.label }}</b><small>{{ item.desc }}</small></span>
+          </label>
+        </div>
+        <div class="model-policy-fields">
+          <label><span>单任务预算上限（元）</span><input v-model.number="modelPolicy.maxCost" type="number" min="0.01" max="20" step="0.01" /></label>
+          <label><span>质量门槛</span><input v-model.number="modelPolicy.qualityFloor" type="number" min="60" max="100" step="1" /></label>
+        </div>
+        <div class="model-policy-switches">
+          <label><input v-model="modelPolicy.autoEscalate" type="checkbox" /><span><b>失败自动升级</b><small>经济档未达到质量门槛时，仅升级一次</small></span></label>
+          <label><input v-model="modelPolicy.highRiskApproval" type="checkbox" /><span><b>高风险人工确认</b><small>权限、发布、支付和删除类任务执行前暂停</small></span></label>
+        </div>
+        <section class="model-route-preview">
+          <span><small>当前任务</small><b>{{ currentRouteGoal }}</b></span>
+          <span><small>推荐档位</small><b>{{ modelRoute.tier_label }}</b></span>
+          <span><small>输出上限</small><b>{{ modelRoute.max_tokens }} tokens</b></span>
+          <span><small>预计成本</small><b>¥{{ Number(modelRoute.estimated_cost || 0).toFixed(2) }}</b></span>
+          <p>{{ modelRoute.reason }}</p>
+        </section>
+        <footer class="actions">
+          <button type="button" @click="resetModelPolicy">恢复默认</button>
+          <button class="primary" type="submit">保存并重新计算</button>
+        </footer>
+      </form>
+    </div>
+
     <div v-if="selectedTask" class="modal" @click.self="selectedTask = null">
       <article class="modal-card task-modal-card">
         <button class="close" type="button" @click="selectedTask = null">×</button>
@@ -2493,6 +2673,14 @@
           <span><small>下一里程碑</small><b>{{ selectedTask.next_milestone || '待补充' }}</b></span>
           <span><small>最新进展</small><b>{{ selectedTask.latest_update || selectedTask.current_step }}</b></span>
           <span><small>协作成员</small><b>{{ selectedTask.collaborators?.join('、') || '待分配' }}</b></span>
+        </div>
+        <div v-if="selectedTask.pendingHandoff" class="task-handoff-banner">
+          <div><small>待确认交接</small><b>{{ selectedTask.pendingHandoff.from_name }} → {{ selectedTask.pendingHandoff.to_name }}</b><p>{{ selectedTask.pendingHandoff.summary }}</p></div>
+          <span v-if="selectedTask.pendingHandoff.to_account === currentAccount">
+            <button class="primary" type="button" @click="resolveTaskHandoff(selectedTask, 'accept')">接收任务</button>
+            <button type="button" @click="resolveTaskHandoff(selectedTask, 'reject')">退回交接</button>
+          </span>
+          <em v-else>等待 {{ selectedTask.pendingHandoff.to_name }} 确认</em>
         </div>
         <div class="personalized-sop-panel">
           <div>
@@ -2517,6 +2705,31 @@
         </div>
         <div v-if="selectedTask.deliverables?.length" class="safety-reminders"><div><b>项目交付物</b><small>用于验收和沉淀</small></div><span v-for="item in selectedTask.deliverables" :key="item">{{ item }}</span></div>
         <div v-if="selectedTask.risks?.length" class="safety-reminders"><div><b>项目风险</b><small>需要持续跟踪</small></div><span v-for="item in selectedTask.risks" :key="item">{{ item }}</span></div>
+        <div class="task-collaboration-trace">
+          <div class="task-modal-section-title"><span>人机协作执行链路</span><small>输入、执行、验证与沉淀全程可追溯</small></div>
+          <div class="task-trace-actors">
+            <span><small>负责人</small><b>{{ selectedTask.assignee_name }}</b></span>
+            <span><small>协作 Agent</small><b>{{ taskAgentNames(selectedTask).join('、') }}</b></span>
+            <span><small>调用 Skill</small><b>{{ selectedTask.usedSkill || '任务上下文包组装 v2.1' }}</b></span>
+            <span><small>Memory 状态</small><b>{{ selectedTask.memoryStatus || '待任务完成后生成' }}</b></span>
+          </div>
+          <div class="task-execution-timeline">
+            <span v-for="item in taskExecutionTimeline(selectedTask)" :key="item.key" :class="{ done: item.done, current: item.current }">
+              <i>{{ item.done ? '✓' : item.index }}</i><b>{{ item.label }}</b><small>{{ item.desc }}</small>
+            </span>
+          </div>
+          <div class="task-trace-ledger">
+            <div class="task-trace-ledger-head"><span>环节</span><span>负责人 / 使用 Agent</span><span>调用 Skill</span><span>输入</span><span>输出</span><span>操作时间</span></div>
+            <div v-for="item in taskExecutionRecords(selectedTask)" :key="item.key" :class="['task-trace-ledger-row', item.status]">
+              <span><i></i><b>{{ item.stage }}</b><small>{{ item.statusText }}</small></span>
+              <span><b>{{ item.owner }}</b><small>{{ item.agent }}</small></span>
+              <span><b>{{ item.skill }}</b></span>
+              <span><small>{{ item.input }}</small></span>
+              <span><small>{{ item.output }}</small></span>
+              <span><time>{{ item.time }}</time></span>
+            </div>
+          </div>
+        </div>
         <div class="task-modal-section-title"><span>项目推进步骤</span><small>{{ selectedTask.sop?.length || 0 }} 个步骤</small></div>
         <div class="sop-list executable-sop">
           <span v-for="(step, index) in selectedTask.sop" :key="`${stepTitle(step)}-${index}`" :class="{ completed: isTaskStepCompleted(selectedTask, index) }">
@@ -2530,7 +2743,7 @@
         <!-- 关联技术资料：反向联动 -->
         <div class="task-linked-knowledge">
           <h4>📚 关联技术资料
-            <span v-if="taskLinkedKnowledge.length === 0" class="tl-go-kb" @click.stop="activePage = 'search'; searchPanel = 'library'; selectedTask = null">去知识库关联 →</span>
+            <span v-if="taskLinkedKnowledge.length === 0" class="tl-go-kb" @click.stop="activePage = 'search'; searchPanel = 'library'; selectedTask = null">去资料库关联 →</span>
           </h4>
           <div v-if="taskLinkedKnowledge.length === 0" class="tl-empty">暂无关联技术资料</div>
           <div v-else class="task-linked-list">
@@ -2544,9 +2757,12 @@
           </div>
         </div>
 
+        <p class="task-action-gate">{{ taskActionGateText(selectedTask) }}</p>
         <div class="actions task-modal-actions">
           <button class="primary" type="button" @click="handleTaskPrimary(selectedTask)">{{ taskPrimaryLabel(selectedTask) }}</button>
-          <button type="button" :disabled="selectedTask.status === 'pending'" @click="enterTaskRecheck(selectedTask)">进入复检</button>
+          <button type="button" :disabled="selectedTask.status === 'completed' || !!selectedTask.pendingHandoff" :title="selectedTask.pendingHandoff ? '已有待确认交接' : selectedTask.status === 'completed' ? '已归档任务无需交接' : '交接后由接收人确认，确认前负责人不变'" @click="openHandoffForm(selectedTask)">交接任务</button>
+          <button type="button" :disabled="selectedTask.status === 'pending'" :title="selectedTask.status === 'pending' ? '请先接收并启动任务' : '进入质量门禁并记录 Eval 结果'" @click="enterTaskRecheck(selectedTask)">进入 Eval Lab</button>
+          <button type="button" :disabled="!['review', 'completed'].includes(selectedTask.status)" :title="['review', 'completed'].includes(selectedTask.status) ? '从执行 Trace 生成待审核 Memory' : '提交 Review / Eval 后才可生成 Memory 草稿'" @click="prepareMemoryFromTask(selectedTask)">生成 Memory 草稿</button>
           <button type="button" @click="previewTaskReport(selectedTask)">预览报告</button>
         </div>
       </article>
@@ -2556,7 +2772,7 @@
       <article class="modal-card task-picker-card">
         <button class="close" type="button" @click="showTaskPicker = false">×</button>
         <p class="eyebrow">{{ taskPickerMode === 'assign' ? '添加协作人员' : '发送任务卡片' }}</p>
-        <h2>{{ taskPickerMode === 'assign' ? `选择要加入 ${activeConversation?.name} 的任务` : '选择需要发送的检修任务' }}</h2>
+        <h2>{{ taskPickerMode === 'assign' ? `选择要加入 ${activeConversation?.name} 的任务` : '选择需要发送的项目任务' }}</h2>
         <div class="task-picker-list">
           <button v-for="task in tasks" :key="task.id" type="button" @click="selectTaskFromPicker(task)">
             <span><b>{{ task.workOrderNo }}</b><small>{{ task.equipment_name }} · {{ task.current_step }}</small></span>
@@ -2566,14 +2782,34 @@
       </article>
     </div>
 
+    <div v-if="showHandoffForm" class="modal" @click.self="showHandoffForm = false">
+      <article class="modal-card task-handoff-modal">
+        <button class="close" type="button" @click="showHandoffForm = false">×</button>
+        <p class="eyebrow">任务责任交接</p>
+        <h2>交接不是改一个名字</h2>
+        <p class="handoff-intro">接收人确认前，原负责人仍保留责任。交接说明、待办与验证资料会写入任务记录。</p>
+        <label>接收人
+          <select v-model="handoffForm.toAccount">
+            <option value="">请选择团队成员</option>
+            <option v-for="contact in handoffCandidates" :key="contact.id" :value="contact.account">{{ contact.name }} · {{ contact.department }}</option>
+          </select>
+        </label>
+        <p v-if="!handoffCandidates.length" class="handoff-empty">暂无可交接账号。请先让另一位成员注册并登录一次，团队目录同步后即可选择。</p>
+        <label>交接说明<textarea v-model.trim="handoffForm.summary" maxlength="500" placeholder="说明当前进展、关键决策、风险和接收人需要先做的事"></textarea></label>
+        <label>交接清单<textarea v-model="handoffForm.checklistText" placeholder="每行一项"></textarea></label>
+        <div class="handoff-rules"><span>✓ 接收前不改变负责人</span><span>✓ 全程保留操作人和时间</span><span>✓ 接收后原负责人转为协作者</span></div>
+        <div class="actions"><button type="button" @click="showHandoffForm = false">取消</button><button class="primary" type="button" :disabled="handoffSubmitting || !handoffCandidates.length" @click="submitTaskHandoff">{{ handoffSubmitting ? '提交中…' : '发起交接' }}</button></div>
+      </article>
+    </div>
+
     <div v-if="reportTask" class="modal" @click.self="reportTask = null">
       <article class="modal-card task-report-card">
         <button class="close" type="button" @click="reportTask = null">×</button>
-        <header><div><p class="eyebrow">检修报告预览</p><h2>{{ reportTask.title }}</h2><small>{{ reportTask.workOrderNo }} · 生成时间 {{ new Date().toLocaleString('zh-CN') }}</small></div><span :class="['badge', reportTask.severity]">{{ severityText(reportTask.severity) }}</span></header>
-        <div class="report-summary"><span><small>设备</small><b>{{ reportTask.equipment_name }} / {{ reportTask.equipment_model }}</b></span><span><small>负责人</small><b>{{ reportTask.assignee_name }}</b></span><span><small>完成进度</small><b>{{ reportTask.progress }}%</b></span><span><small>当前结论</small><b>{{ statusText(reportTask.status) }}</b></span></div>
-        <section><h3>故障与处置摘要</h3><p>{{ reportTask.description }}</p></section>
-        <section><h3>标准作业记录</h3><ol><li v-for="(step, index) in reportTask.sop || []" :key="index"><b>{{ stepTitle(step) }}</b><span>{{ isTaskStepCompleted(reportTask, index) ? '已确认完成' : '待补充记录' }}</span></li></ol></section>
-        <section v-if="reportTask.recheck"><h3>复检结论</h3><p>{{ reportTask.recheck.result }} · {{ reportTask.recheck.comment || '未填写补充说明' }}</p></section>
+        <header><div><p class="eyebrow">项目执行报告预览</p><h2>{{ reportTask.title }}</h2><small>{{ reportTask.workOrderNo }} · 生成时间 {{ new Date().toLocaleString('zh-CN') }}</small></div><span :class="['badge', reportTask.severity]">{{ severityText(reportTask.severity) }}</span></header>
+        <div class="report-summary"><span><small>项目 / 模块</small><b>{{ reportTask.equipment_name }} / {{ reportTask.equipment_model }}</b></span><span><small>负责人</small><b>{{ reportTask.assignee_name }}</b></span><span><small>完成进度</small><b>{{ reportTask.progress }}%</b></span><span><small>当前结论</small><b>{{ statusText(reportTask.status) }}</b></span></div>
+        <section><h3>任务目标与执行摘要</h3><p>{{ reportTask.description }}</p></section>
+        <section><h3>协作执行记录</h3><ol><li v-for="(step, index) in reportTask.sop || []" :key="index"><b>{{ stepTitle(step) }}</b><span>{{ isTaskStepCompleted(reportTask, index) ? '已确认完成' : '待补充记录' }}</span></li></ol></section>
+        <section v-if="reportTask.recheck"><h3>Eval 结论</h3><p>{{ reportTask.recheck.result }} · {{ reportTask.recheck.comment || '未填写补充说明' }}</p></section>
         <section class="task-report-recommendations">
           <h3>建议生成的专项报告</h3>
           <article v-for="item in buildTaskReportRecommendations(reportTask)" :key="item.id">
@@ -2664,16 +2900,16 @@
         <h2>{{ selectedLearningRecommendation.title }}</h2>
         <p class="learning-detail-desc">{{ selectedLearningRecommendation.desc }}</p>
         <div class="learning-detail-grid">
-          <span><small>适用场景</small><b>{{ selectedLearningRecommendation.tags?.[0] || '检修复用' }}</b></span>
-          <span><small>学习重点</small><b>{{ selectedLearningRecommendation.tags?.slice(1).join('、') || '故障定位' }}</b></span>
+          <span><small>适用场景</small><b>{{ selectedLearningRecommendation.tags?.[0] || '项目复用' }}</b></span>
+          <span><small>学习重点</small><b>{{ selectedLearningRecommendation.tags?.slice(1).join('、') || '方案复盘' }}</b></span>
           <span><small>推荐检索式</small><b>{{ selectedLearningRecommendation.query }}</b></span>
         </div>
         <div class="learning-step-card">
           <b>建议学习路径</b>
           <ol>
-            <li>先查看同型号或同故障类型的历史检索记录，确认共性现象。</li>
-            <li>对照维修手册、SOP 和复检报告，提取可复用的检查位置与安全要求。</li>
-            <li>把已验证的原因、检测方法和验收标准沉淀为知识条目。</li>
+            <li>先查看同类需求、代码变更与历史任务，确认目标、约束和共性问题。</li>
+            <li>对照 Memory、Skill 和 Eval 记录，提取可复用的决策、执行步骤与验收标准。</li>
+            <li>把已验证的结论、适用条件和证据沉淀为 Memory，并评估是否升级为 Skill。</li>
           </ol>
         </div>
         <div class="tag-line"><span v-for="tag in selectedLearningRecommendation.tags" :key="tag">{{ tag }}</span></div>
@@ -2758,13 +2994,13 @@
 
           <div class="kd-meta-bar" :class="{ editing: isKnowledgeEditing }">
             <template v-if="!isKnowledgeEditing">
-              <span><small>适用设备</small><b>{{ selectedKnowledge.equipment || '通用检修设备' }}</b></span>
+              <span><small>适用项目</small><b>{{ selectedKnowledge.equipment || '通用项目' }}</b></span>
               <span><small>型号</small><b>{{ selectedKnowledge.model || '通用型号' }}</b></span>
               <span><small>来源</small><b>{{ selectedKnowledge.source || '一休知识库' }}</b></span>
               <span><small>引用</small><b>{{ selectedKnowledge.citations || 0 }} 次</b></span>
             </template>
             <template v-else>
-              <label class="kd-meta-input"><small>适用设备</small><input v-model="knowledgeDraft.equipment" /></label>
+              <label class="kd-meta-input"><small>适用项目 / 场景</small><input v-model="knowledgeDraft.equipment" /></label>
               <label class="kd-meta-input"><small>型号</small><input v-model="knowledgeDraft.model" /></label>
               <label class="kd-meta-input"><small>标签(逗号分隔)</small><input v-model="knowledgeDraft.tagsText" /></label>
               <label class="kd-meta-input"><small>来源</small><input v-model="knowledgeDraft.source" /></label>
@@ -2798,7 +3034,7 @@
           <section class="kd-links-section">
             <div class="kd-links-head"><h3>🔗 板块联动</h3><small v-if="kdLinks.length">关联 {{ kdLinks.length }} 项</small></div>
             <div v-if="kdTasks.length" class="kd-link-block">
-              <p class="kd-link-label">📋 关联检修任务</p>
+              <p class="kd-link-label">📋 关联项目任务</p>
               <div class="kd-link-list">
                 <div v-for="link in kdTasks" :key="link.id" class="kd-link-item" @click="openTaskById(link.target_id)">
                   <span>{{ link.target_title }}</span>
@@ -2871,15 +3107,15 @@
     <div v-if="showTaskForm" class="modal" @click.self="showTaskForm = false">
       <article class="modal-card">
         <button class="close" type="button" @click="showTaskForm = false">×</button>
-        <p class="eyebrow">新建检修任务</p>
+        <p class="eyebrow">新建项目任务</p>
         <div class="form-grid">
-          <label>设备名称<input v-model="taskForm.equipment_name" /></label>
-          <label>设备编号<input v-model="taskForm.equipment_no" /></label>
-          <label>设备型号<input v-model="taskForm.equipment_model" /></label>
+          <label>项目 / 仓库<input v-model="taskForm.equipment_name" placeholder="如：支付服务" /></label>
+          <label>任务编号<input v-model="taskForm.equipment_no" placeholder="如：BUG-421" /></label>
+          <label>技术栈 / 模块<input v-model="taskForm.equipment_model" placeholder="如：Node.js + MySQL" /></label>
           <label>风险等级<select v-model="taskForm.severity"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
           <label>负责人<input v-model="taskForm.assignee_name" /></label>
           <label>计划完成时间<input v-model="taskForm.due_at" /></label>
-          <label class="wide">故障描述<textarea v-model="taskForm.description"></textarea></label>
+          <label class="wide">任务目标与验收标准<textarea v-model="taskForm.description" placeholder="描述背景、范围、风险以及完成标准"></textarea></label>
         </div>
         <button class="primary" type="button" @click="submitTask">创建任务</button>
       </article>
@@ -2889,12 +3125,12 @@
       <article class="modal-card schedule-editor-card">
         <button class="close" type="button" @click="showScheduleForm = false">×</button>
         <p class="eyebrow">{{ editingScheduleId ? '编辑日程' : '新增日程' }}</p>
-        <h3>{{ editingScheduleId ? '调整日程安排' : '安排新的检修日程' }}</h3>
+        <h3>{{ editingScheduleId ? '调整日程安排' : '安排新的项目日程' }}</h3>
         <div class="form-grid">
-          <label>日程标题<input v-model.trim="scheduleDraft.title" maxlength="40" placeholder="如：配电柜复测确认" /></label>
+          <label>日程标题<input v-model.trim="scheduleDraft.title" maxlength="40" placeholder="如：支付链路 Eval 确认" /></label>
           <label>日期<input v-model="scheduleDraft.date" type="date" /></label>
           <label>时间<input v-model.trim="scheduleDraft.time" maxlength="20" placeholder="09:00~10:00" /></label>
-          <label>类型<select v-model="scheduleDraft.tag"><option>工作安排</option><option>复检安排</option><option>协作会议</option><option>资料整理</option><option>高风险</option></select></label>
+          <label>类型<select v-model="scheduleDraft.tag"><option>工作安排</option><option>Eval 安排</option><option>协作会议</option><option>资料整理</option><option>高风险</option></select></label>
           <label class="wide">参与人员<input v-model.trim="scheduleDraft.people" maxlength="80" placeholder="负责人：聪明的一休" /></label>
           <label class="wide">说明<textarea v-model.trim="scheduleDraft.desc" maxlength="160" placeholder="补充日程目的、地点、注意事项"></textarea></label>
         </div>
@@ -2911,7 +3147,7 @@
         <button class="close" type="button" @click="showProfileEditor = false">×</button>
         <header class="profile-editor-head">
           <img :src="profileDraft.avatar" alt="" @error="handleAvatarError" />
-          <div><p class="eyebrow">个人资料</p><h2>完善检修信息</h2><span>资料将用于工单分配、协作联系和知识贡献署名</span></div>
+          <div><p class="eyebrow">个人资料</p><h2>完善协作信息</h2><span>资料将用于任务分配、协作联系和 Memory / Skill 贡献署名</span></div>
         </header>
         <div class="form-grid profile-editor-grid">
           <label>姓名<input v-model.trim="profileDraft.name" maxlength="20" /></label>
@@ -2920,8 +3156,8 @@
           <label>所属班组<input v-model.trim="profileDraft.department" maxlength="30" /></label>
           <label>技能等级<select v-model="profileDraft.skillLevel"><option>初级</option><option>中级</option><option>高级</option><option>专家</option></select></label>
           <label>联系电话<input v-model.trim="profileDraft.phone" maxlength="20" placeholder="用于任务协作联系" /></label>
-          <label class="wide">专业方向<input v-model.trim="profileDraft.specialtyText" placeholder="使用逗号分隔，如：发动机, 电气系统" /></label>
-          <label class="wide">个人简介<textarea v-model.trim="profileDraft.bio" maxlength="160" placeholder="简要介绍检修经验与擅长领域"></textarea></label>
+          <label class="wide">专业方向<input v-model.trim="profileDraft.specialtyText" placeholder="使用逗号分隔，如：Agent, RAG, 前端工程" /></label>
+          <label class="wide">个人简介<textarea v-model.trim="profileDraft.bio" maxlength="160" placeholder="简要介绍项目经验与擅长领域"></textarea></label>
         </div>
         <p v-if="profileError" class="form-error">{{ profileError }}</p>
         <div class="profile-editor-actions"><button type="button" @click="showProfileEditor = false">取消</button><button class="primary" type="submit">保存资料</button></div>
@@ -2985,11 +3221,11 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import * as echarts from 'echarts'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { yixiuApi } from './src/api/yixiuWeb.js'
 import { createOverviewFromMock, mockAgents, mockUser, mockSkills } from './src/data/yixiuMock.js'
-import EChart from './src/components/EChart.vue'
+
+const EChart = defineAsyncComponent(() => import('./src/components/EChart.vue'))
 
 const navItems = [
   { key: 'home', label: '工作台', title: '项目智能工作台', icon: 'dashboard' },
@@ -3029,6 +3265,7 @@ const SCHEDULE_MARKS_KEY = 'yixiu-schedule-marks'
 const SCHEDULE_DELETED_KEY = 'yixiu-schedule-deleted'
 const CONTACT_DIRECTORY_KEY = 'yixiu-web-contact-directory'
 const CONTACT_READ_KEY = 'yixiu-web-contact-read'
+const CHAT_CACHE_KEY = 'yixiu-web-chat-cache'
 const svgImage = (title, subtitle, accent = '#2f89bd') => {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
     <defs>
@@ -3053,7 +3290,7 @@ const svgImage = (title, subtitle, accent = '#2f89bd') => {
 }
 const newsImageFallback = svgImage('一休 Team Memory OS', 'Context Pack · Skill · Eval Lab')
 const fileImageFallback = svgImage('任务材料预览', '上下文证据已归档', '#4f8062')
-const newsSlides = [
+const defaultNewsSlides = [
   {
     title: 'Vidu S2 技术解析：实时编辑、实时交互、探索空间视频',
     summary: '生数科技发布 Vidu S2-Avatar 与 Vidu S2-Editing 双模型：一边发生一边改写，支持实时数字人、实时视频编辑与空间视频实时传输。',
@@ -3079,8 +3316,32 @@ const newsSlides = [
     image: '/static/yixiu-carousel-gemini-live.webp'
   }
 ]
-// 首页「Skill 推荐榜」：模板按 stars 降序展示高星开源 Agent & RAG 项目
-const skillRankList = [...mockSkills].sort((a, b) => b.stars - a.stars)
+const newsSlides = ref([...defaultNewsSlides])
+const liveProjectSignals = ref([])
+const newsUpdateState = reactive({
+  loading: false,
+  stale: false,
+  label: '每 3 天自动更新',
+  refreshedAt: '',
+  nextRefreshText: '系统每 72 小时自动检查官方来源'
+})
+// 首页「Skill 推荐榜」：既说明热度，也说明为什么适合当前项目、预计怎么用。
+const skillRankList = computed(() => {
+  const signals = new Map(liveProjectSignals.value.map((item) => [String(item.repo || '').toLowerCase(), item]))
+  return [...mockSkills]
+    .map((skill) => {
+      const signal = signals.get(String(skill.repo || '').toLowerCase())
+      return {
+        ...skill,
+        stars: signal?.stars || skill.stars,
+        lang: signal?.language || skill.lang,
+        lastUpdate: signal?.updated_at || skill.lastUpdate,
+        reason: skill.reason || `${skill.category} 与一休的 Context、Agent 或 Skill 闭环高度相关`,
+        purpose: skill.purpose || `用于${skill.trigger}的方案验证与能力补齐`
+      }
+    })
+    .sort((a, b) => b.stars - a.stars)
+})
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Skill Factory｜团队技能工厂
@@ -3553,7 +3814,7 @@ const loadSkills = async () => {
     }
   } catch (error) {
     skillSync.source = 'local'
-    console.warn('[skill-factory] 读取 Skill 库失败，本次使用本地数据：', error)
+    console.info('[skill-factory] 团队服务未连接，已使用内置 Skill 数据。', error?.message || '')
   } finally {
     skillSync.loading = false
   }
@@ -4138,8 +4399,8 @@ const openAgentFromSkill = (agentId) => {
 const openSkillFromAgent = (skillId) => {
   selectedSkillId.value = skillId
   skillDetailTab.value = 'overview'
-  activePage.value = 'tasks'
-  taskPanel.value = 'recheck'
+  activePage.value = 'knowledge'
+  knowledgePanel.value = 'recheck'
 }
 
 const defaultProfile = {
@@ -4155,22 +4416,59 @@ const defaultProfile = {
   bio: '专注人机协作、团队记忆沉淀与 Skill 资产化。'
 }
 const defaultAccount = { account: 'yixiu', password: 'Yixiu2026!', name: '聪明的一休', profile: defaultProfile }
+const demoAccountEnabled = import.meta.env.VITE_ENABLE_DEMO_ACCOUNT === 'true'
 const readStorage = (key, fallback) => {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback } catch { return fallback }
 }
+const PUBLIC_UPDATES_KEY = 'yixiu-public-updates-v1'
+const cachedPublicUpdates = readStorage(PUBLIC_UPDATES_KEY, null)
+if (Array.isArray(cachedPublicUpdates?.items) && cachedPublicUpdates.items.length) newsSlides.value = cachedPublicUpdates.items
+if (Array.isArray(cachedPublicUpdates?.projects)) liveProjectSignals.value = cachedPublicUpdates.projects
 const savedSession = readStorage(AUTH_SESSION_KEY, null) || (() => { try { return JSON.parse(sessionStorage.getItem(AUTH_SESSION_KEY)) } catch { return null } })()
-const isAuthenticated = ref(Boolean(savedSession?.account))
+const savedApiToken = localStorage.getItem('yixiu-token') || localStorage.getItem('token') || ''
+const isAuthenticated = ref(Boolean(savedSession?.account && savedApiToken))
 const currentAccount = ref(savedSession?.account || '')
 const authMode = ref('login')
 const authError = ref('')
-const authForm = reactive({ name: '', account: savedSession?.account || 'yixiu', password: '', confirmPassword: '', remember: true, agreed: false })
+const authForm = reactive({ name: '', account: savedSession?.account || (demoAccountEnabled ? 'yixiu' : ''), password: '', confirmPassword: '', remember: true, agreed: false })
 const showProfileEditor = ref(false)
 const profileError = ref('')
 const profileDraft = reactive({ ...defaultProfile, specialtyText: defaultProfile.specialties.join('，') })
 
 const activePage = ref('home')
+const projectOptions = [
+  { id: 'payment', name: '支付服务稳定性升级', repo: 'repo/payment-service', sprint: 'Sprint 12 · 发布前', flowStep: 4, module: 'Node.js + MySQL', issue: 'BUG-421', taskType: '线上 Bug', taskIds: [1], goal: '修复回调重试造成的重复处理风险，并形成可复用幂等 Skill。', milestone: '9 月 18 日 · 修复 PR 与回归 Eval' },
+  { id: 'permission', name: '成员权限体系改造', repo: 'repo/team-console', sprint: 'Sprint 08 · 开发中', flowStep: 2, module: 'Vue 3 + Flask', issue: 'PR-118', taskType: '功能改造', taskIds: [2], goal: '统一项目、任务、Memory 与 Skill 的权限边界，建立可审计协作链路。', milestone: '9 月 20 日 · 前后端联调完成' },
+  { id: 'memory', name: 'TeamMemory OS 演进', repo: 'repo/yixiu', sprint: 'Milestone 1 · 评测中', flowStep: 5, module: 'Agent Workflow', issue: 'AIC-2026', taskType: 'Skill 回归', taskIds: [3, 4], goal: '完成任务到 Memory、Skill、Eval 的可信闭环，并形成可复核的项目能力资产。', milestone: '9 月 22 日 · 闭环能力验收' }
+]
+const activeProjectId = ref('payment')
+const currentProject = computed(() => projectOptions.find((item) => item.id === activeProjectId.value) || projectOptions[0])
+const projectFlowSteps = [
+  { key: 'task', label: '任务', desc: '查看项目任务、负责人和计划' },
+  { key: 'context', label: 'Context', desc: '生成或查看任务 Context Pack' },
+  { key: 'execution', label: '执行', desc: '查看进行中的执行步骤与 Trace' },
+  { key: 'review', label: 'Review', desc: '查看等待人工审查的任务' },
+  { key: 'eval', label: 'Eval', desc: '进入 Eval Lab 验证质量门禁' },
+  { key: 'memory', label: 'Memory', desc: '查看已沉淀和待审核的团队记忆' },
+  { key: 'skill', label: 'Skill', desc: '进入 Skill 工厂查看可复用能力' }
+]
 const newsIndex = ref(0)
-const activeNews = computed(() => newsSlides[newsIndex.value] || newsSlides[0])
+const activeNews = computed(() => newsSlides.value[newsIndex.value] || newsSlides.value[0] || defaultNewsSlides[0])
+const MODEL_POLICY_KEY = 'yixiu-model-routing-policy-v1'
+const defaultModelPolicy = { mode: 'balanced', maxCost: 0.5, qualityFloor: 85, autoEscalate: true, highRiskApproval: true }
+const modelPolicy = reactive({ ...defaultModelPolicy, ...readStorage(MODEL_POLICY_KEY, {}) })
+const modelPolicyModes = [
+  { key: 'cost', label: '成本优先', desc: '摘要、分类和整理默认使用经济档' },
+  { key: 'balanced', label: '均衡', desc: '按复杂度自动选择经济、均衡或推理档' },
+  { key: 'quality', label: '质量优先', desc: '关键任务更早升级，保留完整验证预算' }
+]
+const showModelPolicy = ref(false)
+const modelRoute = reactive({
+  tier: 'balanced', tier_label: '均衡档', provider: 'configured-provider', model: '当前已配置模型',
+  max_tokens: 1800, temperature: 0.35, estimated_cost: 0.18, saving_percent: 46,
+  risk: 'low', requires_approval: false, reason: '按当前项目风险与上下文规模选择均衡档位'
+})
+const modelPolicyModeLabel = computed(() => modelPolicyModes.find((item) => item.key === modelPolicy.mode)?.label || '均衡')
 const showSplash = ref(true)
 const bootScreenRef = ref(null)
 const bootMarkRef = ref(null)
@@ -4185,12 +4483,13 @@ let stopOperatorResize = null
 let clockTimer = null
 let toastTimer = null
 let newsCarouselTimer = null
+let publicUpdateTimer = null
 const globalKeyword = ref('')
 const globalSearchFocused = ref(false)
 const taskChamberOpen = ref(false)
 const currentNav = computed(() => navItems.find((item) => item.key === activePage.value) || navItems[0])
 const initialRegisteredAccount = readStorage(AUTH_ACCOUNTS_KEY, []).find((item) => item.account === savedSession?.account)
-const initialProfile = savedSession?.account === defaultAccount.account ? readStorage(PROFILE_KEY, {}) : initialRegisteredAccount?.profile || {}
+const initialProfile = demoAccountEnabled && savedSession?.account === defaultAccount.account ? readStorage(PROFILE_KEY, {}) : initialRegisteredAccount?.profile || {}
 const user = reactive({ ...defaultProfile, ...initialProfile })
 const agentProfileMap = Object.fromEntries(mockAgents.map((agent) => [agent.id, agent]))
 const legacyAgentMap = {
@@ -4321,6 +4620,70 @@ const aiosQueueSummary = computed(() => {
   return `${done}/${Math.max(aiosLive.steps.length, 1)}`
 })
 
+const currentProjectTasks = computed(() => {
+  const expectedIds = new Set((currentProject.value.taskIds || []).map(String))
+  const scoped = tasks.value.filter((task) => expectedIds.has(String(task.id)) || task.equipment_no === currentProject.value.repo)
+  return scoped.length ? scoped : tasks.value.filter((task) => `${task.equipment_name || ''}${task.title || ''}`.includes(currentProject.value.name.split(/[｜·]/)[0]))
+})
+const currentProjectProgress = computed(() => {
+  const scoped = currentProjectTasks.value
+  if (scoped.length) return Math.round(scoped.reduce((sum, task) => sum + Number(task.progress || 0), 0) / scoped.length)
+  return Math.round((currentProject.value.flowStep + 1) / projectFlowSteps.length * 100)
+})
+const projectPulseCards = computed(() => {
+  const scoped = currentProjectTasks.value
+  const reviewTasks = scoped.filter((task) => task.status === 'review')
+  const projectKeywords = [currentProject.value.name, currentProject.value.module, currentProject.value.issue]
+  const pendingMemory = knowledge.value.filter((item) => item.status !== 'approved' && projectKeywords.some((word) => word && JSON.stringify(item).includes(word))).length
+  const risks = scoped.reduce((sum, task) => sum + (task.risks?.length || (task.severity === 'high' ? 1 : 0)), 0)
+  const hasHighRisk = scoped.some((task) => task.severity === 'high' && task.status !== 'completed')
+  const runningAgents = aiosLive.status === 'running' ? Math.max(1, aiosLive.steps.filter((item) => item.state === 'running').length) : agents.value.filter((agent) => agent.status === 'online').length
+  return [
+    { key: 'focus', label: '重点任务', value: `${scoped.filter((task) => task.status !== 'completed').length} 项`, desc: scoped.find((task) => task.status !== 'completed')?.title || '当前项目已完成', tone: 'blue', action: () => { activePage.value = 'tasks'; taskPanel.value = 'manage' } },
+    { key: 'agent', label: 'Agent 执行状态', value: aiosLive.status === 'running' ? `${runningAgents} 个运行中` : `${runningAgents} 个可用`, desc: aiosLive.status === 'running' ? (aiosActiveStep.value?.title || '正在执行协作计划') : 'Router 可按 Skill 分派', tone: 'teal', action: () => { selectedAgentId.value = 'tiangong' } },
+    { key: 'memory', label: '待审核 Memory', value: `${pendingMemory} 条`, desc: pendingMemory ? '来源与适用边界需人工确认' : '当前项目暂无待审条目', tone: pendingMemory ? 'amber' : 'green', action: () => { activePage.value = 'search'; searchPanel.value = 'update' } },
+    { key: 'eval', label: '待 Eval Skill', value: `${reviewTasks.length + skillLibrary.filter((item) => item.status === 'Testing').length} 项`, desc: '完成质量门禁后才能发布', tone: 'violet', action: () => openEvalLab() },
+    { key: 'risk', label: '项目风险', value: `${risks} 项`, desc: hasHighRisk ? '高风险操作需人工确认' : risks ? '一般风险，按里程碑持续跟踪' : '当前无阻断风险', tone: hasHighRisk ? 'red' : risks ? 'amber' : 'green', action: () => { activePage.value = 'tasks'; taskPanel.value = 'manage'; taskFilters.severity = hasHighRisk ? 'high' : 'all' } },
+    { key: 'milestone', label: '下一里程碑', value: currentProject.value.milestone.split('·')[0].trim(), desc: currentProject.value.milestone.split('·')[1]?.trim() || currentProject.value.milestone, tone: 'green', action: () => { activePage.value = 'tasks'; taskPanel.value = 'overview' } }
+  ]
+})
+const dynamicProjectActions = computed(() => {
+  const reviewCount = currentProjectTasks.value.filter((task) => task.status === 'review').length
+  const riskTask = currentProjectTasks.value.find((task) => task.severity === 'high' && task.status !== 'completed')
+  const hasContextGap = !searchResult.value || contextPackMeta.value.gaps.length > 0
+  const actions = []
+  if (hasContextGap) actions.push({ key: 'context', label: searchResult.value ? '补齐 Context 证据' : '生成 Context Pack', desc: searchResult.value ? `${contextPackMeta.value.gaps.length} 项材料待补` : '先建立可信执行依据', primary: true, action: () => { activePage.value = 'search'; searchPanel.value = 'multimodal'; searchMultimodalExpanded.value = true } })
+  if (riskTask) actions.push({ key: 'risk', label: '处理重点风险', desc: riskTask.title, primary: !actions.length, action: () => openTask(riskTask) })
+  if (reviewCount) actions.push({ key: 'eval', label: '运行 Eval 门禁', desc: `${reviewCount} 项等待验证`, primary: !actions.length, action: () => openEvalLab() })
+  actions.push({ key: 'collab', label: '同步协作成员', desc: '发送进度、任务或交接卡片', primary: !actions.length, action: () => { activePage.value = 'tasks'; taskPanel.value = 'contacts' } })
+  return actions.slice(0, 4)
+})
+
+const analyticsFilters = reactive({ project: 'all', member: 'all', agent: 'all', range: '30d' })
+const analyticsMembers = computed(() => [...new Set(tasks.value.flatMap((task) => [task.assignee_name, ...(task.collaborators || [])]).filter(Boolean))])
+const analyticsScopeFactor = computed(() => {
+  let factor = analyticsFilters.range === '7d' ? .42 : analyticsFilters.range === '90d' ? 1.65 : 1
+  if (analyticsFilters.project !== 'all') factor *= .62
+  if (analyticsFilters.member !== 'all') factor *= .54
+  if (analyticsFilters.agent !== 'all') factor *= .7
+  return factor
+})
+const teamAnalyticsMetrics = computed(() => {
+  const factor = analyticsScopeFactor.value
+  const scaled = (value, minimum = 1) => Math.max(minimum, Math.round(value * factor))
+  return [
+    { key: 'memory', label: 'Memory 新增', value: `${scaled(overview.stats.newMemories || 9)} 条`, change: '↑ 18%', note: '含待审核候选', action: () => { activePage.value = 'search'; searchPanel.value = 'update' } },
+    { key: 'skill', label: 'Skill 复用', value: `${scaled(37)} 次`, change: '↑ 24%', note: '来自 Agent 调用记录', action: () => { activePage.value = 'knowledge'; knowledgePanel.value = 'recheck' } },
+    { key: 'eval', label: 'Eval 通过率', value: `${Math.max(76, Math.round((overview.stats.evalPassed || 92) - (1 - Math.min(factor, 1)) * 4))}%`, change: '↑ 3.6%', note: '按运行记录统计', action: () => openEvalLab() },
+    { key: 'repeat', label: '重复问题下降', value: `${overview.stats.repeatWorkDown || 24}%`, change: '↑ 7%', note: '对比同类任务基线', action: () => { activePage.value = 'tasks'; taskPanel.value = 'overview' } },
+    { key: 'duration', label: '平均完成时间', value: `${Math.max(3.2, (11.8 / Math.max(factor, .65)).toFixed(1))}h`, change: '↓ 16%', note: '从创建到验收', down: true, action: () => { activePage.value = 'tasks'; taskPanel.value = 'overview' } },
+    { key: 'agent', label: 'Agent 成功率', value: '94.6%', change: '↑ 2.1%', note: '含人工接管记录', action: () => { activePage.value = 'knowledge'; knowledgePanel.value = 'files' } },
+    { key: 'cost', label: 'AI 成本', value: `¥${(12.6 * factor).toFixed(2)}`, change: '↓ 11%', note: '按模型调用估算', down: true, action: () => { selectedAgentId.value = 'tiangong' } },
+    { key: 'saved', label: '节省时间', value: `${scaled(31)}h`, change: '↑ 21%', note: '与人工基线对比', action: () => { activePage.value = 'profile' } }
+  ]
+})
+const resetAnalyticsFilters = () => Object.assign(analyticsFilters, { project: 'all', member: 'all', agent: 'all', range: '30d' })
+
 const agentName = (agentId = '') => {
   const key = resolveAgentId({ id: agentId })
   return agents.value.find((agent) => agent.id === key)?.name || agentProfileMap[key]?.name || agentId || '天工'
@@ -4395,6 +4758,28 @@ const refreshAiosTraceSoon = (runId = '') => {
 }
 
 const searchForm = reactive({ deviceName: '', deviceModel: '', faultCode: '', category: '后端服务', faultType: '线上 Bug', maintenanceLevel: '标准协作', query: '' })
+const syncActiveProject = () => {
+  const project = currentProject.value
+  searchForm.deviceName = project.name
+  searchForm.deviceModel = project.module
+  searchForm.faultCode = project.issue
+  searchForm.faultType = project.taskType
+  toast(`已切换项目上下文：${project.name}`)
+}
+const openProjectFlowStep = (step) => {
+  if (!step) return
+  const routes = {
+    task: () => { activePage.value = 'tasks'; taskPanel.value = 'manage'; taskFilters.status = 'all' },
+    context: () => { activePage.value = 'search'; searchPanel.value = 'multimodal'; searchMultimodalExpanded.value = true },
+    execution: () => { activePage.value = 'tasks'; taskPanel.value = 'manage'; taskFilters.status = 'in_progress' },
+    review: () => { activePage.value = 'tasks'; taskPanel.value = 'manage'; taskFilters.status = 'review' },
+    eval: () => openEvalLab(),
+    memory: () => { activePage.value = 'search'; searchPanel.value = 'update'; knowledgeKeyword.value = currentProject.value.name },
+    skill: () => { activePage.value = 'knowledge'; knowledgePanel.value = 'recheck'; skillStage.value = '' }
+  }
+  routes[step.key]?.()
+  toast(`已进入「${step.label}」阶段：${step.desc}`)
+}
 const searchFiles = ref([])
 const searchAssistantFileInput = ref(null)
 const assistantFiles = ref([])
@@ -4449,8 +4834,99 @@ const searchHistory = ref([
   { id: 'history-2', title: '权限模型重构上下文组包', deviceName: '成员权限模块', model: 'Vue + Flask', faultCode: 'PR-118', category: '前后端协作', faultType: '功能改造', maintenanceLevel: '高风险协作', query: '统一项目、任务、Memory 和 Skill 的权限边界。', confidence: 88, time: '昨日 16:18' },
   { id: 'history-3', title: '登录失败重复问题追溯', deviceName: '登录链路', model: 'JWT + Session', faultCode: 'ISSUE-77', category: '问题演化', faultType: '重复问题', maintenanceLevel: '轻量协作', query: '多次任务重复出现 token 过期提示不清晰，需要资产化。', confidence: 84, time: '本周一 11:05' }
 ])
+const historyViewMode = ref('all')
+const historyFeedback = ref('')
+const visibleSearchHistory = computed(() => {
+  const rows = historyViewMode.value === 'confidence'
+    ? searchHistory.value.filter((item) => item.confidence >= 85)
+    : [...searchHistory.value]
+  if (historyViewMode.value === 'grouped') {
+    return rows.sort((a, b) => String(a.faultType).localeCompare(String(b.faultType), 'zh-CN') || b.confidence - a.confidence)
+  }
+  return rows
+})
+const setHistoryView = (mode) => {
+  historyViewMode.value = historyViewMode.value === mode ? 'all' : mode
+  const active = historyViewMode.value
+  historyFeedback.value = active === 'confidence'
+    ? `已标记 ${visibleSearchHistory.value.length} 条置信度不低于 85% 的 Context Pack。`
+    : active === 'grouped'
+      ? `已按任务类型整理 ${visibleSearchHistory.value.length} 条历史记录。`
+      : '已恢复全部历史记录。'
+}
+const summarizeSearchHistory = () => {
+  const types = [...new Set(searchHistory.value.map((item) => item.faultType))]
+  const high = searchHistory.value.filter((item) => item.confidence >= 85).length
+  historyFeedback.value = `追溯摘要：共 ${searchHistory.value.length} 份 Context Pack，覆盖 ${types.join('、')}；${high} 份可优先复用，建议将“登录失败重复问题”继续沉淀为 Memory。`
+}
+const contextPackVersions = ref([
+  { id: 'cp-demo-v2', version: 'v2.0', project: '支付服务稳定性升级', confidence: 91, evidence: 6, completeness: 86, gaps: ['灰度回滚记录'], summary: '已定位回调重试与数据库唯一约束之间的幂等边界。', createdAt: '09-17 10:18' },
+  { id: 'cp-demo-v1', version: 'v1.0', project: '支付服务稳定性升级', confidence: 82, evidence: 3, completeness: 62, gaps: ['关键代码引用', 'Eval 基线', '灰度回滚记录'], summary: '已确认重复处理现象，根因仍需补充代码证据。', createdAt: '09-16 16:40' }
+])
+const contextCompareBase = ref('cp-demo-v1')
+const contextCompareTarget = ref('cp-demo-v2')
+const contextPackMeta = computed(() => {
+  const required = [searchForm.deviceName, searchForm.deviceModel, searchForm.faultCode, searchForm.query]
+  const gaps = []
+  if (!searchForm.query?.trim()) gaps.push('任务目标与验收标准')
+  if (!searchForm.deviceModel?.trim()) gaps.push('技术栈或影响模块')
+  if (!searchForm.faultCode?.trim()) gaps.push('Issue / PR 关联')
+  if (!searchFiles.value.length) gaps.push('代码、日志或需求附件')
+  const completeness = Math.max(35, Math.round((required.filter(Boolean).length + (searchFiles.value.length ? 1 : 0)) / 5 * 100))
+  return {
+    title: `${searchForm.deviceName || currentProject.value.name} Context Pack`,
+    version: `v${Math.max(1, contextPackVersions.value.length)}.0`,
+    completeness,
+    evidenceCount: (searchResult.value?.references?.length || 0) + searchFiles.value.length,
+    gaps
+  }
+})
+const contextEvidenceChecks = computed(() => {
+  const references = searchResult.value?.references || []
+  const hasType = (pattern) => references.some((item) => pattern.test(`${item.type || ''}${item.category || ''}${item.title || ''}`))
+  return [
+    { key: 'requirement', label: '需求与验收', ok: Boolean(searchForm.query?.trim()), detail: searchForm.query?.trim() ? '任务目标与验收描述已记录' : '缺少可验证的目标或完成条件', action: () => focusEvidenceGap('query') },
+    { key: 'code', label: '代码与影响面', ok: hasType(/代码|PR|仓库|接口/) || searchFiles.value.length > 0, detail: hasType(/代码|PR|仓库|接口/) || searchFiles.value.length ? '已关联代码、PR 或任务附件' : '仅有技术栈，建议补代码路径或 PR', action: () => focusEvidenceGap('files') },
+    { key: 'memory', label: 'Memory 依据', ok: hasType(/Memory|历史|经验/), detail: hasType(/Memory|历史|经验/) ? '已召回团队历史经验' : '暂无适用 Memory，保留空缺', action: () => { activePage.value = 'search'; searchPanel.value = 'library' } },
+    { key: 'eval', label: 'Eval 标准', ok: hasType(/Eval|评测|回归/) || /验收|回归|测试/.test(searchForm.query || ''), detail: hasType(/Eval|评测|回归/) ? '已关联回归或评分基线' : '需补充可量化验收标准', action: () => focusEvidenceGap('query') }
+  ]
+})
+const contextSourceList = computed(() => (searchResult.value?.references || []).slice(0, 5))
+const contextVersionDiff = computed(() => {
+  const base = contextPackVersions.value.find((item) => item.id === contextCompareBase.value)
+  const target = contextPackVersions.value.find((item) => item.id === contextCompareTarget.value)
+  if (!base || !target) return null
+  const sign = (value) => `${value > 0 ? '+' : ''}${value}`
+  const evidenceDelta = Number(target.evidence || 0) - Number(base.evidence || 0)
+  const completenessDelta = Number(target.completeness || 0) - Number(base.completeness || 0)
+  const resolved = Math.max(0, (base.gaps?.length || 0) - (target.gaps?.length || 0))
+  return {
+    evidence: `${sign(evidenceDelta)} 条`,
+    completeness: `${sign(completenessDelta)}%`,
+    gaps: resolved ? `补齐 ${resolved} 项` : `${target.gaps?.length || 0} 项待补`,
+    summary: base.summary === target.summary ? '无实质变化' : '结论已更新'
+  }
+})
+const focusEvidenceGap = (target = 'query') => {
+  searchPanel.value = 'multimodal'
+  searchMultimodalExpanded.value = true
+  nextTick(() => {
+    const selector = target === 'files' ? '.search-upload-zone' : '.search-fusion-input textarea'
+    const element = document.querySelector(selector)
+    element?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    if (target === 'query') element?.focus?.()
+  })
+  toast(target === 'files' ? '请补充代码、PR、日志或需求附件' : '请补充任务目标、约束与可验证验收标准')
+}
+const locateContextSource = (source) => {
+  if (!source) return
+  openKnowledge(source)
+  toast(`已定位引用来源：${source.title}`)
+}
 const externalImports = ref([])
 const mcpManifest = ref({})
+const mcpTesting = ref(false)
+const mcpConnectionStatus = reactive({ text: '未测试', tone: '', latency: 0 })
 const externalImportLoading = ref(false)
 const externalImportForm = reactive({
   provider: 'codex',
@@ -4555,18 +5031,25 @@ const updateQualityRules = [
   { title: '关系可入图', desc: '至少包含任务、问题、Memory、Skill 中的两个实体' }
 ]
 const resultTab = ref('全部')
-const resultTabs = ['全部', '需求文档', '历史任务', 'Memory Unit', 'Skill', 'Eval Case']
+const resultTabs = ['全部', '需求', '代码', 'Memory', 'Skill', 'Eval']
 const resultTabCopy = {
   '全部': '汇总展示与当前任务最相关的上下文资产和执行建议',
-  '需求文档': '查看目标、边界、验收标准和业务背景',
-  '历史任务': '参考相似任务、根因判断和处置记录',
-  'Memory Unit': '复用团队已验证的问题、方案和适用条件',
+  '需求': '查看目标、边界、验收标准和业务背景',
+  '代码': '定位仓库、模块、提交记录和关键实现',
+  'Memory': '复用团队已验证的问题、方案、决策和适用条件',
   'Skill': '按标准工作流执行分析、修改、验证和沉淀',
-  'Eval Case': '核对回归样例、评分标准和质量确认要求'
+  'Eval': '核对回归样例、评分标准和质量确认要求'
 }
 
 const taskPanel = ref('overview')
+const taskAnalyticsExpanded = ref(false)
 const taskTabs = [{ key: 'overview', label: '项目概览' }, { key: 'manage', label: '项目管理' }, { key: 'contacts', label: '协作成员' }]
+const openEvalLab = () => {
+  activePage.value = 'knowledge'
+  knowledgePanel.value = 'recheck'
+  skillStage.value = 'eval'
+  nextTick(() => document.querySelector('.skf-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+}
 const taskFilters = reactive({ status: 'all', severity: 'all', category: 'all', faultType: 'all', assignee: 'all', overdue: 'all', keyword: '' })
 const taskView = ref('table')
 const showTaskForm = ref(false)
@@ -4575,15 +5058,22 @@ const contactKeyword = ref('')
 const contactDepartment = ref('all')
 const contactViewMode = ref('all')
 const contactLeftCollapsed = ref(false)
-const contactRightCollapsed = ref(false)
+// 中等宽度下优先保证会话列表与消息区完整可见，群设置由右上角按钮按需展开。
+const contactRightCollapsed = ref(true)
 const activeConversationId = ref('task-room-1')
-const contactReadState = reactive(readStorage(CONTACT_READ_KEY, {}))
-const persistContactReadState = () => localStorage.setItem(CONTACT_READ_KEY, JSON.stringify(contactReadState))
+const contactReadStorageKey = () => `${CONTACT_READ_KEY}:${currentAccount.value || 'guest'}`
+const contactReadState = reactive(readStorage(contactReadStorageKey(), {}))
+const reloadContactReadState = () => {
+  Object.keys(contactReadState).forEach((key) => delete contactReadState[key])
+  Object.assign(contactReadState, readStorage(contactReadStorageKey(), {}))
+}
+const persistContactReadState = () => localStorage.setItem(contactReadStorageKey(), JSON.stringify(contactReadState))
 const conversationUnread = (id, fallback = 0) => contactReadState[id] ? 0 : fallback
 const markConversationRead = (id) => {
   if (!id || contactReadState[id]) return
   contactReadState[id] = true
   persistContactReadState()
+  if (currentAccount.value) void yixiuApi.markConversationRead(id, currentAccount.value).catch(() => {})
 }
 const chatInput = ref('')
 const chatRecording = ref(false)
@@ -4591,16 +5081,33 @@ const chatRecordSeconds = ref(0)
 const showTaskPicker = ref(false)
 const taskPickerMode = ref('send')
 const reportTask = ref(null)
+const remoteConversations = ref([])
+const showHandoffForm = ref(false)
+const handoffSubmitting = ref(false)
+const taskHandoffHistory = ref([])
+const handoffForm = reactive({ taskId: '', toAccount: '', summary: '', checklistText: '当前进展\n关键决策与风险\n待办事项\n相关代码、文档与 Eval 结果' })
 let chatRecorder = null
 let chatRecordStream = null
 let chatRecordTimer = null
+let chatSyncTimer = null
 let chatRecordChunks = []
 const chatObjectUrls = new Set()
 const chatMessages = ref([
-  { id: 'm1', conversationId: 'task-room-1', mine: false, text: 'ZK-320 配电柜温度仍偏高，建议先确认接触器触点和散热风道。', time: '09:42', card: { type: 'task', title: 'YX-20260803-001', desc: '配电柜过热检修 · 高风险' } },
-  { id: 'm2', conversationId: 'task-room-1', mine: true, text: '已完成停电验电，准备上传红外测温图片。', time: '09:45' },
-  { id: 'm3', conversationId: 'expert-1', mine: false, text: '发动机异响优先复核气门间隙，热车前后各记录一次。', time: '10:15', card: { type: 'knowledge', title: '发动机异响排查知识条目', desc: '气门机构、正时链条、润滑状态' } }
+  { id: 'm1', conversationId: 'task-room-1', mine: false, text: '支付回调幂等改造的影响面已确认，建议先补并发与重复通知 Eval。', time: '09:42', card: { type: 'task', title: 'TASK-20260917-001', desc: '支付回调幂等改造 · 高风险' } },
+  { id: 'm2', conversationId: 'task-room-1', mine: true, text: 'Context Pack 已更新，准备提交代码 Review 和灰度方案。', time: '09:45' },
+  { id: 'm3', conversationId: 'expert-1', mine: false, text: '历史 Memory 显示数据库唯一约束必须作为缓存锁失效后的最终兜底。', time: '10:15', card: { type: 'knowledge', title: '重复扣款问题复盘 Memory', desc: '触发条件、根因、修复与适用边界' } }
 ])
+const cachedChatMessages = readStorage(CHAT_CACHE_KEY, [])
+cachedChatMessages.forEach((item) => {
+  if (item?.id && !chatMessages.value.some((message) => message.id === item.id)) chatMessages.value.push(item)
+})
+const persistLocalChatCache = () => {
+  const portable = chatMessages.value.slice(-300).map(({ rawFile, attachment, ...message }) => ({
+    ...message,
+    attachment: attachment ? { kind: attachment.kind, name: attachment.name, size: attachment.size, type: attachment.type, duration: attachment.duration || 0 } : null
+  }))
+  localStorage.setItem(CHAT_CACHE_KEY, JSON.stringify(portable))
+}
 const loadedConversationIds = reactive({})
 const normalizeConversationMessage = (item = {}, conversationId = '') => {
   const senderId = item.sender_id || item.senderId || ''
@@ -4615,11 +5122,12 @@ const normalizeConversationMessage = (item = {}, conversationId = '') => {
     mine,
     text: item.text || '',
     time,
+    deliveryStatus: 'sent',
     attachment: item.attachment && Object.keys(item.attachment).length ? item.attachment : null,
     card: item.card && Object.keys(item.card).length ? item.card : null,
   }
 }
-const syncConversationMessages = async (conversationId = activeConversationId.value, force = false) => {
+const syncConversationMessages = async (conversationId = activeConversationId.value, force = false, silent = false) => {
   if (!conversationId || (!force && loadedConversationIds[conversationId])) return
   try {
     const rows = await yixiuApi.conversationMessages(conversationId)
@@ -4629,14 +5137,24 @@ const syncConversationMessages = async (conversationId = activeConversationId.va
       .filter((item) => item.text || item.attachment || item.card)
       .filter((item) => !existing.has(item.id))
     if (incoming.length) chatMessages.value.push(...incoming)
+    if (incoming.length) persistLocalChatCache()
     loadedConversationIds[conversationId] = true
   } catch (error) {
-    toast(error.message || '会话消息同步失败')
+    if (!silent) toast(error.message || '会话消息同步失败')
   }
 }
+const refreshCollaboration = async () => {
+  if (!isAuthenticated.value || activePage.value !== 'tasks' || taskPanel.value !== 'contacts') return
+  const [conversationRows] = await Promise.all([
+    yixiuApi.conversations(currentAccount.value).catch(() => remoteConversations.value),
+    syncConversationMessages(activeConversationId.value, true, true)
+  ])
+  remoteConversations.value = conversationRows
+  markConversationRead(activeConversationId.value)
+}
 const contactMeetings = ref([
-  { id: 'morning-review', title: '高风险检修晨会', time: '今日 10:30', status: '待开始', owner: '动力设备检修一组', taskNo: 'YX-20260803-001', members: ['吴鹏', '唐忆哲', '陈程'], agenda: '确认过热原因、停电窗口和复测时间', progress: 40 },
-  { id: 'recheck-sync', title: '复检结论同步会', time: '今日 15:00', status: '已预约', owner: '质量复检组', taskNo: 'YX-20260803-004', members: ['李志勇', '博闻'], agenda: '复盘返工项和验收资料归档', progress: 65 }
+  { id: 'morning-review', title: '高风险变更晨会', time: '今日 10:30', status: '待开始', owner: '支付平台项目组', taskNo: 'TASK-20260917-001', members: ['吴鹏', '唐忆哲', '陈程'], agenda: '确认幂等边界、代码负责人和灰度窗口', progress: 40 },
+  { id: 'eval-sync', title: 'Eval 结论同步会', time: '今日 15:00', status: '已预约', owner: '质量与评测组', taskNo: 'TASK-20260917-004', members: ['李志勇', '明鉴'], agenda: '复盘失败样例、质量门禁和 Memory 归档', progress: 65 }
 ])
 
 const knowledgePanel = ref('recheck')
@@ -4657,7 +5175,7 @@ const mapCanvasRef = ref(null)
 const graphChartRef = ref(null)
 let graphChartInstance = null
 let graphChartInitTimer = null
-const tryInitGraphChart = () => {
+const tryInitGraphChart = async () => {
   if (!graphChartRef.value) {
     if (graphChartInitTimer) return
     graphChartInitTimer = setTimeout(() => {
@@ -4678,7 +5196,9 @@ const tryInitGraphChart = () => {
     }
   }
   try {
-    graphChartInstance = echarts.init(graphChartRef.value)
+    const { init } = await import('./src/lib/echarts.js')
+    if (!graphChartRef.value || graphChartInstance) return
+    graphChartInstance = init(graphChartRef.value)
     graphChartInstance.setOption(buildGraphChartOption())
     graphChartInstance.on('click', (params) => {
       if (params.dataType === 'node') {
@@ -4711,19 +5231,19 @@ const graphInspectorTab = ref('info')
 const tgSuggestion = ref({
   title: '今日优先处理建议',
   level: '高优先级',
-  content: '建议先处理高风险配电柜过热工单，再推进待复检任务，同时关注文件解析异常。',
-  tags: ['高风险', '配电柜', '过热', '待复检', '文件解析']
+  content: '建议先处理支付回调重复问题，再推进待 Eval 任务，同时补齐权限改造的 Context Pack 证据。',
+  tags: ['重复问题', '支付回调', '待 Eval', 'Context Pack', '证据缺口']
 })
 const graphCenterNode = ref(null)
-const knowledgeForm = reactive({ title: '', type: '历史故障案例', equipment: '', model: '', source: '', tagText: '', summary: '' })
+const knowledgeForm = reactive({ title: '', type: 'Memory Unit', equipment: '', model: '', source: '', tagText: '', summary: '' })
 const knowledgeCorrections = reactive({})
 const operatorInput = ref('')
 const floatingAssistantFileInput = ref(null)
 const floatingPromptTemplates = [
-  { label: '解释节点', prompt: () => selectedGraphNode.value ? `请解释「${selectedGraphNode.value.label}」的检修含义和关联风险` : '请解释当前知识图谱里最重要的设备检修节点' },
-  { label: '找资料', prompt: () => selectedGraphNode.value ? `请查找与「${selectedGraphNode.value.label}」相关的维修资料和案例` : '请帮我查找当前设备相关的维修资料' },
-  { label: '整理步骤', prompt: '请把当前故障知识整理成检修步骤和注意事项' },
-  { label: '生成摘要', prompt: '请生成一段适合写入检修记录的知识摘要' }
+  { label: '解释节点', prompt: () => selectedGraphNode.value ? `请解释「${selectedGraphNode.value.label}」与项目、Memory、Skill 和风险的关系` : '请解释当前知识网络中最重要的团队能力节点' },
+  { label: '找资料', prompt: () => selectedGraphNode.value ? `请查找与「${selectedGraphNode.value.label}」相关的需求、代码、Memory 和 Eval` : '请查找当前项目相关的可信资料' },
+  { label: '整理步骤', prompt: '请把当前上下文整理成可执行步骤、负责人和 Eval 标准' },
+  { label: '生成摘要', prompt: '请生成一段适合写入 Memory Unit 的结构化摘要' }
 ]
 const useFloatingPrompt = (template) => {
   operatorInput.value = typeof template.prompt === 'function' ? template.prompt() : template.prompt
@@ -4742,9 +5262,9 @@ const operatorProfiles = {
     statusText: '在线',
     welcome: '我是天工，负责统筹其他 agent，帮你盯住今日任务、系统状态和高风险异常。',
     sampleAsk: '帮我看一下今天优先处理什么？',
-    sampleAnswer: '建议先处理高风险配电柜过热工单，再推进待复检任务，同时关注文件解析异常。',
-    quickTitle: '生成今日检修简报',
-    quickDesc: '汇总任务、风险、知识更新和智能体状态',
+    sampleAnswer: '建议先处理支付回调重复问题，再推进待 Eval 任务，并补齐权限改造的上下文证据。',
+    quickTitle: '生成今日项目简报',
+    quickDesc: '汇总任务、风险、Memory 更新和 Agent 状态',
     placeholder: '询问今日任务、风险或系统状态',
     actions: ['查看高风险', '任务简报', '系统状态', '知识更新']
   },
@@ -4753,48 +5273,48 @@ const operatorProfiles = {
     icon: 'search',
     status: 'online',
     statusText: '在线',
-    welcome: '我是观微，输入故障描述、设备型号或上传图片后，我会查找线索、召回资料并生成引用依据。',
-    sampleAsk: 'CG-125 发动机热车后异响怎么查？',
-    sampleAnswer: '优先检查气门间隙、正时链条张紧器和点火连接，并记录热车复测数据。',
-    quickTitle: '执行一次智能检索',
-    quickDesc: '汇总故障线索、参考资料和可转任务建议',
-    placeholder: '描述故障现象或资料需求',
-    actions: ['生成研判', '生成检修建议', '查看引用', '创建任务']
+    welcome: '我是观微，输入任务目标或上传需求、代码、日志后，我会组装带引用依据的 Context Pack。',
+    sampleAsk: '为支付回调重复问题生成 Context Pack。',
+    sampleAnswer: '我会召回相关代码、历史 Memory、可用 Skill 和 Eval 样例，并标注信息缺口。',
+    quickTitle: '生成 Context Pack',
+    quickDesc: '汇总需求、代码、Memory、Skill、Eval 和风险提示',
+    placeholder: '描述任务目标、影响范围或所需上下文',
+    actions: ['生成 Context Pack', '查看引用', '推荐 Skill', '创建任务']
   },
   tasks: {
     ...agentProfileMap.zhiju,
     icon: 'wrench',
     status: 'online',
     statusText: '在线',
-    welcome: '我是执矩，负责把检修流程拆成可执行步骤，提醒安全要求并推进工单闭环。',
-    sampleAsk: '把当前任务推进到复检阶段。',
-    sampleAnswer: '可以。高风险步骤需要二次确认，完成检测记录后再进入复检评估。',
+    welcome: '我是执矩，负责把项目任务拆成可执行步骤，协调成员与 Agent 并推进任务闭环。',
+    sampleAsk: '把当前任务推进到 Eval 阶段。',
+    sampleAnswer: '可以。高风险动作需要人工确认，完成执行 Trace 与 Review 后再进入 Eval。',
     quickTitle: '打开任务执行',
     quickDesc: '查看项目、筛选风险、跟踪进展状态',
-    placeholder: '输入任务操作或复检意见',
-    actions: ['新建任务', '流转任务', 'Skill 工厂', '联系人']
+    placeholder: '输入任务操作、Review 或 Eval 意见',
+    actions: ['新建任务', '流转任务', 'Skill 工厂', '协作成员']
   },
   contacts: {
     ...agentProfileMap.heming,
     icon: 'user',
     status: 'online',
     statusText: '在线',
-    welcome: '我是和鸣，负责联系人管理、人员协调、专家支援和任务沟通。',
-    sampleAsk: '帮我找一个电气安全负责人。',
-    sampleAnswer: '建议联系赵宁，他当前负责高风险作业确认，可加入 ZK-320 过热检修任务。',
-    quickTitle: '协调现场支援',
-    quickDesc: '筛选联系人、发起消息并加入协作任务',
+    welcome: '我是和鸣，负责协作成员管理、人员协调、专家支援和任务沟通。',
+    sampleAsk: '帮我找一名熟悉支付链路的 Reviewer。',
+    sampleAnswer: '建议联系赵宁，他当前负责高风险变更确认，可加入支付回调修复任务。',
+    quickTitle: '协调项目支援',
+    quickDesc: '筛选成员、发起消息并加入协作任务',
     placeholder: '输入人员、部门或支援需求',
-    actions: ['搜索联系人', '请求支援', '添加至任务', '查看协作记录']
+    actions: ['搜索成员', '请求支援', '添加至任务', '查看协作记录']
   },
   recheck: {
     ...agentProfileMap.mingjian,
     icon: 'check',
     status: 'online',
     statusText: '在线',
-    welcome: '我是明鉴，负责复检评估、安全检查、质量核验和任务验收。',
-    sampleAsk: '这个任务复检不通过怎么处理？',
-    sampleAnswer: '需要记录不通过原因和整改要求，并自动退回检修状态，保留复检数据。',
+    welcome: '我是明鉴，负责 Skill Eval、质量门禁、风险核验和任务验收。',
+    sampleAsk: '这个 Skill Eval 不通过怎么处理？',
+    sampleAnswer: '记录失败样例与整改要求，退回测试阶段并保留本次 Trace 和评分数据。',
     quickTitle: '运行 Skill Eval',
     quickDesc: '回放历史任务，给 Skill 打成功率、一致性与输出完整性分',
     placeholder: '输入要评测的 Skill 或门禁问题',
@@ -4805,9 +5325,9 @@ const operatorProfiles = {
     icon: 'network',
     status: 'busy',
     statusText: '处理中',
-    welcome: '我是博闻，负责整理技术资料、维护知识网络，并把有效检修经验沉淀成系统知识。',
-    sampleAsk: '这份维修资料能不能加入知识库？',
-    sampleAnswer: '需要先通过文件审核和解析，确认设备、型号、故障、SOP 与原始文件一致。',
+    welcome: '我是博闻，负责整理项目资料、维护知识网络，并把有效执行经验沉淀为 Team Memory。',
+    sampleAsk: '这份任务总结能不能加入团队记忆库？',
+    sampleAnswer: '需要先核对来源、权限、适用条件和引用证据，人工确认后再写入 Memory。',
     quickTitle: '进入智能体注册中心',
     quickDesc: '查看团队 Agent 的能力边界、挂载 Skill、权限与运行数据',
     placeholder: '询问 Agent 能力、Skill 挂载或权限配置',
@@ -4818,9 +5338,9 @@ const operatorProfiles = {
     icon: 'check',
     status: 'online',
     statusText: '在线',
-    welcome: '我是明鉴，会帮你检查项目是否满足设备检修、知识检索、作业闭环和多智能体要求。',
+    welcome: '我是明鉴，会帮你检查项目是否具备 Context、执行 Trace、Memory、Skill、Eval 和多 Agent 闭环。',
     sampleAsk: '检查一下当前项目能不能答辩。',
-    sampleAnswer: '当前已具备工作台、智能检索、任务闭环、知识管理和复检核查能力，文件权限与审核流程还可继续深化。',
+    sampleAnswer: '当前已具备项目工作台、Context Pack、任务闭环、Memory、Skill 与 Eval，来源权限和真实执行数据还可继续深化。',
     quickTitle: '运行交付核查',
     quickDesc: '检查页面完整性、业务闭环和演示材料准备情况',
     placeholder: '询问个人记录、核查或交付问题',
@@ -4830,15 +5350,15 @@ const operatorProfiles = {
 
 const operatorKey = computed(() => {
   if (activePage.value === 'tasks' && taskPanel.value === 'contacts') return 'contacts'
-  if (activePage.value === 'tasks' && taskPanel.value === 'recheck') return 'recheck'
+  if (activePage.value === 'knowledge' && knowledgePanel.value === 'recheck') return 'recheck'
   return activePage.value
 })
 const pageDefaultAgentId = computed(() => {
   if (activePage.value === 'home') return 'tiangong'
   if (activePage.value === 'search') return 'guanwei'
+  if (activePage.value === 'knowledge' && knowledgePanel.value === 'recheck') return 'mingjian'
   if (activePage.value === 'knowledge') return 'bowen'
   if (activePage.value === 'tasks' && taskPanel.value === 'contacts') return 'heming'
-  if (activePage.value === 'tasks' && taskPanel.value === 'recheck') return 'mingjian'
   if (activePage.value === 'tasks') return 'zhiju'
   if (activePage.value === 'profile') return 'mingjian'
   return 'tiangong'
@@ -4860,6 +5380,107 @@ const operatorProfile = computed(() => {
     welcome: `我是${selected.name}，${selected.duty}`
   }
 })
+const currentRouteGoal = computed(() => {
+  if (operatorInput.value.trim()) return operatorInput.value.trim()
+  if (activePage.value === 'search') return searchForm.query || `为${currentProject.value.name}生成 Context Pack`
+  if (activePage.value === 'tasks') return `${currentProject.value.name}：推进项目任务并完成 Review 与 Eval`
+  if (activePage.value === 'knowledge') return `${currentProject.value.name}：验证并沉淀可复用 Skill`
+  return `${currentProject.value.name}：${currentProject.value.goal}`
+})
+const localModelRoute = (goal = currentRouteGoal.value) => {
+  const text = String(goal || '')
+  const highRisk = /发布|生产|权限|密钥|支付|迁移|删除|安全|架构|回滚|高风险|review|eval|审计/i.test(text)
+  const complex = /根因|复杂|规划|重构|推理|对比|研究|长任务|跨模块|诊断|证明/i.test(text) || text.length > 500
+  const light = /摘要|提取|分类|改写|格式|翻译|标题|检索|问候|状态|简报|去重|你好|您好|谢谢|在吗|hi|hello/i.test(text)
+  let score = 1 + (highRisk ? 2 : 0) + (complex ? 1 : 0) - (light ? 1 : 0)
+  if (modelPolicy.mode === 'cost') score -= 1
+  if (modelPolicy.mode === 'quality') score += 1
+  if (Number(modelPolicy.qualityFloor) >= 92) score += 1
+  if (Number(modelPolicy.qualityFloor) <= 75) score -= 1
+  let tier = score <= 0 ? 'economy' : score <= 2 ? 'balanced' : 'reasoning'
+  const meta = {
+    economy: { tier_label: '经济档', max_tokens: 800, estimated_cost: 0.04, saving_percent: 78 },
+    balanced: { tier_label: '均衡档', max_tokens: 1800, estimated_cost: 0.18, saving_percent: 46 },
+    reasoning: { tier_label: '推理档', max_tokens: 3200, estimated_cost: 0.42, saving_percent: 12 }
+  }
+  const requestedTier = tier
+  if (!highRisk && Number(modelPolicy.maxCost) < meta[tier].estimated_cost) {
+    if (Number(modelPolicy.maxCost) >= meta.balanced.estimated_cost) tier = 'balanced'
+    else tier = 'economy'
+  }
+  const overBudget = meta[tier].estimated_cost > Number(modelPolicy.maxCost)
+  return {
+    tier,
+    ...meta[tier],
+    provider: 'configured-provider',
+    model: '当前已配置模型',
+    temperature: tier === 'reasoning' ? 0.2 : tier === 'economy' ? 0.25 : 0.35,
+    risk: highRisk ? 'high' : 'low',
+    quality_floor: Number(modelPolicy.qualityFloor),
+    budget_limit: Number(modelPolicy.maxCost),
+    over_budget: overBudget,
+    requires_approval: (highRisk && modelPolicy.highRiskApproval) || overBudget,
+    reason: overBudget ? '任务质量或风险要求高于当前预算，执行前需要确认或压缩上下文' : requestedTier !== tier ? `单任务预算不足，已从${meta[requestedTier].tier_label}降至${meta[tier].tier_label}` : highRisk ? '任务涉及高风险操作，使用推理档并保留人工确认' : complex ? '任务需要多步分析与较长上下文，使用推理档' : light ? '任务属于轻量整理，可使用经济档并限制输出预算' : '按复杂度与成本预算选择均衡档'
+  }
+}
+let modelRouteRequest = 0
+const recomputeModelRoute = async () => {
+  const requestId = ++modelRouteRequest
+  Object.assign(modelRoute, localModelRoute())
+  try {
+    const payload = await yixiuApi.modelRoute({ message: currentRouteGoal.value, policy: { ...modelPolicy }, has_attachments: assistantFiles.value.length > 0 })
+    if (requestId === modelRouteRequest && payload?.route) Object.assign(modelRoute, payload.route)
+  } catch (_error) {
+    // 离线时保留同一套本地规则，保证路由面板与按钮仍可用。
+  }
+}
+const saveModelPolicy = async () => {
+  modelPolicy.maxCost = Math.max(0.01, Number(modelPolicy.maxCost) || defaultModelPolicy.maxCost)
+  modelPolicy.qualityFloor = Math.max(60, Math.min(100, Number(modelPolicy.qualityFloor) || defaultModelPolicy.qualityFloor))
+  localStorage.setItem(MODEL_POLICY_KEY, JSON.stringify({ ...modelPolicy }))
+  await recomputeModelRoute()
+  showModelPolicy.value = false
+  toast(`模型策略已保存：${modelPolicyModeLabel.value}，当前推荐${modelRoute.tier_label}`)
+}
+const resetModelPolicy = async () => {
+  Object.assign(modelPolicy, defaultModelPolicy)
+  localStorage.removeItem(MODEL_POLICY_KEY)
+  await recomputeModelRoute()
+  toast('模型策略已恢复为均衡模式')
+}
+const routerRecommendation = computed(() => {
+  const pageMap = {
+    home: { title: '先复用支付回调 Skill', context: '4 条可信来源', skill: 'bug-fix-loop v1.4', agent: '天工 → 执矩', cost: '≈ ¥0.18', risk: '需确认', reason: '当前项目存在已验证的同类执行轨迹；先复用 Skill，再由明鉴执行回归 Eval，可减少重复探索。' },
+    search: { title: searchResult.value ? 'Context Pack 可进入执行' : '先补齐任务上下文', context: `${contextPackMeta.value.evidenceCount} 条证据`, skill: searchResult.value ? 'context-pack-builder' : '待匹配', agent: '观微 → 天工', cost: searchResult.value ? '≈ ¥0.12' : '待估算', risk: contextPackMeta.value.gaps.length ? '有缺口' : '低风险', reason: contextPackMeta.value.gaps.length ? `仍缺少：${contextPackMeta.value.gaps.join('、')}。补齐后再交给 Agent，可降低错误路由。` : '来源、引用和适用范围已满足，可交给 Router 选择 Skill、Agent 与模型。' },
+    tasks: { title: '按 Trace 推进任务', context: `${taskEvents.value.length} 条事件`, skill: 'task-execution-loop', agent: taskPanel.value === 'contacts' ? '和鸣' : '执矩 → 明鉴', cost: '≈ ¥0.26', risk: overview.stats.highRisk ? '需确认' : '低风险', reason: '先执行已定义的 Skill 步骤，再在 Review 与 Eval 节点进行人工确认，所有输入输出保留在 Trace 中。' },
+    knowledge: { title: knowledgePanel.value === 'recheck' ? '运行 Skill 回归门禁' : '检查能力资产健康度', context: `${skillMetrics.value.total} 个 Skill`, skill: selectedSkill.value?.name || '待选择', agent: knowledgePanel.value === 'recheck' ? '明鉴' : '博闻', cost: '≈ ¥0.34', risk: '可回滚', reason: '使用历史任务样例进行版本对比，质量、成本和成功率达标后再发布；失败版本可立即回滚。' }
+  }
+  const recommendation = pageMap[activePage.value] || pageMap.home
+  return {
+    ...recommendation,
+    model: `${modelRoute.tier_label} · ${modelRoute.model}`,
+    cost: `¥${Number(modelRoute.estimated_cost).toFixed(2)} / 上限 ¥${Number(modelPolicy.maxCost).toFixed(2)}`,
+    saving: modelRoute.saving_percent,
+    risk: modelRoute.requires_approval ? '需确认' : recommendation.risk,
+    reason: `${recommendation.reason} 模型路由：${modelRoute.reason}。`
+  }
+})
+const applyRouterRecommendation = () => {
+  if (activePage.value === 'search') return routeContextPack()
+  if (activePage.value === 'knowledge' && knowledgePanel.value === 'recheck') return runSkillEval(selectedSkill.value)
+  operatorInput.value = `请按${modelRoute.tier_label}执行：${routerRecommendation.value.title}。预算不超过 ¥${Number(modelPolicy.maxCost).toFixed(2)}，说明引用依据、执行步骤、风险和实际成本。`
+  toast(`已应用${modelRoute.tier_label}路由，指令已写入输入框，请确认后发送`)
+}
+let modelRouteTimer = null
+watch(
+  [activePage, activeProjectId, operatorInput, () => searchForm.query, () => modelPolicy.mode, () => modelPolicy.maxCost, () => modelPolicy.qualityFloor, () => modelPolicy.autoEscalate, () => modelPolicy.highRiskApproval],
+  () => {
+    Object.assign(modelRoute, localModelRoute())
+    if (modelRouteTimer) window.clearTimeout(modelRouteTimer)
+    modelRouteTimer = window.setTimeout(() => { void recomputeModelRoute() }, 650)
+  },
+  { immediate: true }
+)
 const operatorMessage = (payload = {}, agentId = activeOperatorAgentId.value) => ({
   ...payload,
   agentId: payload.agentId || agentId || pageDefaultAgentId.value,
@@ -4897,7 +5518,7 @@ const statCards = computed(() => [
   { key: 'done', label: '已完成任务', value: overview.stats.completed, hint: '查看归档', page: 'tasks', panel: 'manage', status: 'completed' },
   { key: 'kb', label: 'Memory 总量', value: overview.stats.knowledgeTotal, hint: '进入团队能力库', page: 'search', panel: 'library' },
   { key: 'week', label: '本周新增 Memory', value: overview.stats.weekKnowledge, hint: '进入 Memory Evolution', page: 'search', panel: 'update' },
-  { key: 'users', label: '在线协作人员', value: overview.stats.onlineUsers, hint: '查看联系人', page: 'tasks', panel: 'contacts' }
+  { key: 'users', label: '在线协作成员', value: overview.stats.onlineUsers, hint: '查看协作成员', page: 'tasks', panel: 'contacts' }
 ])
 
 const visibleTodayTasks = computed(() => tasks.value.slice(0, 6))
@@ -5030,13 +5651,13 @@ const schedulePriorityLabel = (item) => ({
 const alerts = computed(() => [
   { title: '重复问题', desc: `${tasks.value.filter((task) => task.severity === 'high').length} 个任务需要转为 Memory / Skill`, tone: 'danger', icon: 'bell', action: () => goStat({ page: 'tasks', panel: 'manage', severity: 'high' }) },
   { title: '待 Eval 任务', desc: `${tasks.value.filter((task) => task.status === 'review').length} 个任务等待 Skill 回归数据`, tone: 'amber', icon: 'check', action: () => goStat({ page: 'knowledge', panel: 'recheck' }) },
-  { title: 'Memory 审核异常', desc: '1 份资料解析部分成功，请人工复核', tone: 'violet', icon: 'network', action: () => goStat({ page: 'knowledge', panel: 'files' }) },
+  { title: 'Memory 审核异常', desc: '1 份资料解析部分成功，请人工复核', tone: 'violet', icon: 'network', action: () => goStat({ page: 'search', panel: 'update' }) },
   { title: '智能服务状态', desc: systemStatus.ai, tone: 'teal', icon: 'cpu', action: () => activePage.value = 'profile' }
 ])
 const quickActions = [
   { label: '生成 Context Pack', desc: '组装任务上下文', icon: 'search', tone: 'blue', action: () => activePage.value = 'search' },
   { label: '新建项目', desc: '创建人机协作项目', icon: 'wrench', tone: 'teal', action: () => { activePage.value = 'tasks'; taskPanel.value = 'manage'; showTaskForm.value = true } },
-  { label: '上传 Memory 资料', desc: '补充团队记忆文件', icon: 'network', tone: 'violet', action: () => { activePage.value = 'knowledge'; knowledgePanel.value = 'files' } },
+  { label: '上传 Memory 资料', desc: '补充团队记忆文件', icon: 'network', tone: 'violet', action: () => { activePage.value = 'search'; searchPanel.value = 'library' } },
   { label: '查看重复问题', desc: '优先资产化', icon: 'bell', tone: 'amber', action: () => goStat({ page: 'tasks', panel: 'manage', severity: 'high' }) },
   { label: '进入 Eval Lab', desc: '核对回归结果', icon: 'check', tone: 'blue', action: () => goStat({ page: 'knowledge', panel: 'recheck' }) },
   { label: '查看 Memory 图谱', desc: '浏览资产关系', icon: 'network', tone: 'teal', action: () => goStat({ page: 'search', panel: 'network' }) },
@@ -5064,21 +5685,21 @@ const runRecentActivity = (item) => {
     searchForm.query = item.content
     return
   }
-  if (item.action === '上传') return goStat({ page: 'knowledge', panel: 'files' })
+  if (item.action === '上传') return goStat({ page: 'search', panel: 'library' })
   knowledgeKeyword.value = item.content.replace(/\s*SOP$/i, '')
   goStat({ page: 'search', panel: 'library' })
 }
 
 const recommendationResult = computed(() => searchResult.value ? {
   id: 'recommendation-current',
-  title: `${searchForm.deviceModel || searchForm.deviceName} ${searchForm.faultType}推荐检修方案`,
-  type: '推荐检修方案',
-  category: '推荐检修方案',
+  title: `${searchForm.deviceModel || searchForm.deviceName} ${searchForm.faultType}推荐执行方案`,
+  type: 'Skill',
+  category: '执行建议',
   equipment: searchForm.deviceName,
   model: searchForm.deviceModel,
   match: searchResult.value.confidence || 88,
-  summary: `${searchResult.value.stopAdvice || '结合现场安全要求逐项检查'}；共 ${searchResult.value.suggestion?.steps?.length || 0} 个建议步骤。`,
-  tags: ['研判依据', searchForm.faultType, searchForm.maintenanceLevel]
+  summary: `${searchResult.value.stopAdvice || '结合任务目标、引用依据和风险约束逐项执行'}；共 ${searchResult.value.suggestion?.steps?.length || 0} 个建议步骤。`,
+  tags: ['上下文依据', searchForm.faultType, searchForm.maintenanceLevel]
 } : null)
 const stepText = (step) => {
   if (typeof step === 'string') return step
@@ -5091,15 +5712,18 @@ const normalizedSuggestionSteps = computed(() => {
 })
 const filterResultsByTab = (tab) => {
   const list = searchResult.value?.references || []
-  if (tab === '推荐检修方案') return recommendationResult.value ? [recommendationResult.value] : []
   if (tab === '全部') return recommendationResult.value ? [...list, recommendationResult.value] : list
-  const aliases = {
-    '维修手册': ['维修手册'],
-    '历史故障案例': ['历史故障案例', '案例'],
-    '标准作业流程 SOP': ['标准作业流程 SOP', '标准作业流程', 'SOP'],
-    '安全操作规范': ['安全操作规范', '安全规范']
+  const classify = (item = {}) => {
+    const source = [item.type, item.category, item.title, item.summary, ...(item.tags || [])].join(' ').toLowerCase()
+    if (/eval|评测|测试|验收|复检|评分|回归/.test(source)) return 'Eval'
+    if (/skill|sop|流程|作业指引|执行建议|操作规范/.test(source)) return 'Skill'
+    if (/memory|历史任务|历史故障|案例|复盘|决策|经验/.test(source)) return 'Memory'
+    if (/代码|code|commit|pull request|\bpr\b|diff|仓库|接口|实现/.test(source)) return '代码'
+    if (/需求|prd|requirement|spec|目标|业务背景|用户故事/.test(source)) return '需求'
+    return 'Memory'
   }
-  return list.filter((item) => aliases[tab]?.some((name) => item.type === name || item.category === name))
+  const source = recommendationResult.value ? [...list, recommendationResult.value] : list
+  return source.filter((item) => classify(item) === tab)
 }
 const filteredResults = computed(() => filterResultsByTab(resultTab.value))
 const resultTabHint = computed(() => resultTabCopy[resultTab.value])
@@ -5111,9 +5735,9 @@ const historyLearningRecommendations = computed(() => {
   }, {})
   const topFault = Object.entries(byFault).sort((a, b) => b[1] - a[1])[0]?.[0] || searchForm.faultType
   return [
-    { title: `${topFault}类故障复用路径`, desc: `近期 ${topFault} 检索较多，建议优先沉淀现象、定位部位、复测标准和安全隔离要求。`, tags: ['高频故障', topFault, '经验复用'], query: `${topFault} 现场现象 原因定位 复测标准` },
-    { title: `${searchForm.deviceModel || '当前型号'} 资料补全建议`, desc: '历史检索显示型号、故障代码和现场图片同时存在时，检索命中率更高。', tags: ['资料补全', '多模态', '命中率'], query: `${searchForm.deviceModel} ${searchForm.faultType} 维修手册 SOP` },
-    { title: '检索结果沉淀提醒', desc: '将已验证的原因、工具、作业步骤和引用依据提交审核，可减少后续同类问题检索成本。', tags: ['沉淀更新', '审核入库', '知识复用'], query: searchForm.query }
+    { title: `${topFault}类问题复用路径`, desc: `近期 ${topFault} 检索较多，建议优先沉淀触发条件、关键决策、Eval 标准和适用边界。`, tags: ['高频问题', topFault, '经验复用'], query: `${topFault} 触发条件 根因定位 Eval 标准` },
+    { title: `${searchForm.deviceModel || '当前技术栈'} 上下文补全建议`, desc: '历史记录显示需求、仓库、模块与验收标准同时存在时，Context Pack 完整度更高。', tags: ['资料补全', 'Context Pack', '完整度'], query: `${searchForm.deviceModel} ${searchForm.faultType} 需求 代码 Memory Skill Eval` },
+    { title: '检索结果沉淀提醒', desc: '将已验证的结论、执行步骤和引用依据提交审核，可减少后续同类任务的上下文准备成本。', tags: ['Memory Evolution', '审核入库', '团队复用'], query: searchForm.query }
   ]
 })
 const selectResultTab = (tab) => {
@@ -5138,7 +5762,7 @@ const taskOverviewRows = computed(() => {
   return [
     { label: '待启动', value: tasks.value.filter((task) => task.status === 'pending').length, hint: '等待立项确认', filter: { status: 'pending' } },
     { label: '推进中', value: tasks.value.filter((task) => task.status === 'in_progress').length, hint: '人机协作推进中', filter: { status: 'in_progress' } },
-    { label: '待验收', value: tasks.value.filter((task) => task.status === 'review').length, hint: '等待 Eval 与项目验收', filter: { status: 'review' } },
+    { label: '待 Review / Eval', value: tasks.value.filter((task) => task.status === 'review').length, hint: '等待质量验证与负责人确认', filter: { status: 'review' } },
     { label: '重点风险', value: tasks.value.filter((task) => task.severity === 'high').length, hint: '优先处理并沉淀资产', filter: { severity: 'high' } },
     { label: '已逾期', value: tasks.value.filter(isTaskOverdue).length, hint: '需要协调排期', filter: { overdue: 'yes' } }
   ].map((row) => ({
@@ -5177,7 +5801,7 @@ const taskOpsCards = computed(() => {
   return [
     { label: '项目启动', title: `${pending.length} 个待启动`, desc: pending[0]?.equipment_name ? `优先确认 ${pending[0].equipment_name} 范围` : '暂无待启动项目', icon: 'check', tone: 'amber', action: () => filterTaskBy('status', 'pending') },
     { label: '重点风险', title: `${highRisk.length} 个需跟进`, desc: highRisk[0]?.project_phase ? `当前阶段：${highRisk[0].project_phase}` : '高风险项目已清空', icon: 'shield', tone: 'red', action: () => filterTaskBy('severity', 'high') },
-    { label: '项目验收', title: `${review.length} 个待验收`, desc: review[0]?.assignee_name ? `责任人：${review[0].assignee_name}` : '暂无待验收项目', icon: 'file', tone: 'teal', action: () => { taskPanel.value = 'recheck' } },
+    { label: 'Review / Eval', title: `${review.length} 个待验证`, desc: review[0]?.assignee_name ? `责任人：${review[0].assignee_name}` : '暂无待验证项目', icon: 'file', tone: 'teal', action: () => openEvalLab() },
     { label: '排期预警', title: `${overdue.length} 个逾期`, desc: overdue[0]?.workOrderNo ? `${overdue[0].workOrderNo} 需要协调` : '排期正常', icon: 'clock', tone: 'blue', action: () => { taskFilters.overdue = 'yes'; taskPanel.value = 'manage' } }
   ]
 })
@@ -5285,10 +5909,10 @@ const homeQualityOption = computed(() => ({
     axisLine: { lineStyle: { color: '#dce7e9' } },
     indicator: [
       { name: '闭环', max: 100 },
-      { name: '复检', max: 100 },
-      { name: '安全', max: 100 },
+      { name: 'Eval', max: 100 },
+      { name: '可信', max: 100 },
       { name: '协作', max: 100 },
-      { name: '沉淀', max: 100 }
+      { name: '复用', max: 100 }
     ]
   },
   series: [{
@@ -5397,9 +6021,75 @@ const taskEvents = computed(() => tasks.value.flatMap((task, index) => [
   { id: `${task.id}-create`, time: task.created_at, text: `${task.title} 已立项，负责人 ${task.assignee_name}` },
   { id: `${task.id}-step`, time: task.due_at, text: `${task.equipment_name} 当前阶段：${task.project_phase || task.current_step}，进度 ${task.progress}%` },
   ...(task.next_milestone ? [{ id: `${task.id}-milestone`, time: task.due_at, text: `下一里程碑：${task.next_milestone}` }] : []),
-  ...(task.status === 'review' ? [{ id: `${task.id}-review`, time: task.due_at, text: `${task.title} 已提交验收，等待 Eval 数据和人工确认` }] : []),
+  ...(task.status === 'review' ? [{ id: `${task.id}-review`, time: task.due_at, text: `${task.title} 已提交 Review，等待 Eval 数据和负责人确认` }] : []),
   ...(index === 0 ? [{ id: `${task.id}-risk`, time: task.created_at, text: `${task.title} 已标记为重点项目，需确认风险与交付边界` }] : [])
 ]).slice(0, 10))
+const taskAgentNames = (task = {}) => {
+  if (task.agents?.length) return task.agents
+  if (task.status === 'pending') return ['天工｜Router', '观微｜Context']
+  if (task.status === 'in_progress') return ['天工｜Router', '观微｜Context', '执矩｜Execution']
+  return ['天工｜Router', '观微｜Context', '执矩｜Execution', '明鉴｜Eval']
+}
+const taskExecutionTimeline = (task = {}) => {
+  const statusRank = { pending: 1, in_progress: 3, review: 5, completed: 8 }[task.status] || 0
+  const rows = [
+    ['task', '任务创建', '目标、边界和验收标准已登记'],
+    ['context', 'Context Pack', `${task.references?.length || 3} 条依据已组装`],
+    ['assign', '人员分配', `${task.assignee_name || '待分配'}负责，${task.collaborators?.length || 0} 位成员协作`],
+    ['agent', 'Agent 调用', `${taskAgentNames(task).length} 个 Agent / 角色参与`],
+    ['review', 'Review', '检查变更、风险与交付物'],
+    ['eval', 'Eval', '回放样例并执行质量门禁'],
+    ['memory', '完成沉淀', task.memoryStatus || '等待自动生成 Memory 草稿'],
+    ['skill', 'Skill 演化', task.skillCandidate ? '已进入候选队列' : '等待稳定轨迹']
+  ]
+  return rows.map((row, index) => ({ key: row[0], label: row[1], desc: row[2], index: index + 1, done: index < statusRank, current: index === statusRank }))
+}
+const taskExecutionRecords = (task = {}) => {
+  const timeline = taskExecutionTimeline(task)
+  const agentsByStage = ['天工｜Agent Router', '观微｜Context Engine', '执矩｜Task Execution', '执矩｜Task Execution', '负责人 + 执矩', '明鉴｜Eval Lab', '博闻｜Team Memory', '和鸣｜Memory Evolution']
+  const skillsByStage = ['project-intake', 'context-pack-builder v2.1', 'collaboration-assignment v1.0', task.usedSkill || 'task-execution-loop v1.4', 'change-review v1.2', 'skill-eval-gate v1.0', 'memory-extractor v1.3', 'skill-candidate-miner v0.8']
+  const inputs = [
+    task.description || task.title || '项目目标与验收标准',
+    `${task.references?.length || 3} 条需求、代码与历史依据`,
+    `负责人、${task.collaborators?.length || 0} 位协作成员与权限边界`,
+    `${task.sop?.length || 0} 个执行步骤与权限约束`,
+    '代码变更、执行 Trace、风险与交付物',
+    '回归样例、质量 Rubric、成本与失败记录',
+    '任务总结、关键决策、失败原因与 Eval 结论',
+    '稳定轨迹、复用次数与人工修改比例'
+  ]
+  const outputs = [
+    `${task.workOrderNo || '任务'} 已登记`,
+    `Context Pack · ${task.references?.length || 3} 条证据`,
+    `${task.assignee_name || '待分配'}负责，交接与协作权限已登记`,
+    task.latest_update || task.current_step || '执行记录已更新',
+    task.status === 'pending' ? '等待执行结果' : 'Review 清单与风险结论',
+    ['review', 'completed'].includes(task.status) ? (task.status === 'completed' ? 'Eval 通过' : '等待最终确认') : '尚未进入 Eval',
+    task.memoryStatus || '等待任务完成后自动生成',
+    task.skillCandidate ? '已进入 Skill 候选队列' : '等待满足稳定性阈值'
+  ]
+  const baseTime = task.created_at || '2026-09-17 09:30'
+  return timeline.map((item, index) => ({
+    key: item.key,
+    stage: item.label,
+    status: item.done ? 'done' : item.current ? 'current' : 'waiting',
+    statusText: item.done ? '已完成' : item.current ? '进行中' : '等待中',
+    owner: [0, 2, 4].includes(index) ? (task.assignee_name || '待分配') : '系统协作',
+    agent: agentsByStage[index],
+    skill: skillsByStage[index],
+    input: inputs[index],
+    output: outputs[index],
+    time: item.done || item.current ? (index === 0 ? baseTime : task.updated_at || task.due_at || '今日') : '—'
+  }))
+}
+const teamCapabilityLoop = computed(() => [
+  { key: 'task', label: '项目任务', desc: '明确目标与边界', value: `${tasks.value.length} 项`, tone: 'blue', current: currentProject.value.flowStep === 0, action: () => { activePage.value = 'tasks'; taskPanel.value = 'manage' } },
+  { key: 'context', label: 'Context Pack', desc: '组装可信上下文', value: `${searchHistory.value.length} 份`, tone: 'teal', current: currentProject.value.flowStep === 1, action: () => { activePage.value = 'search'; searchPanel.value = 'multimodal' } },
+  { key: 'trace', label: '执行 Trace', desc: '记录人机协作过程', value: `${taskEvents.value.length} 条`, tone: 'violet', current: currentProject.value.flowStep === 2, action: () => { activePage.value = 'tasks'; taskPanel.value = 'overview' } },
+  { key: 'eval', label: 'Eval 门禁', desc: '验证质量与风险', value: `${overview.stats.review} 待评`, tone: 'amber', current: currentProject.value.flowStep === 4, action: openEvalLab },
+  { key: 'memory', label: 'Team Memory', desc: '沉淀可复用经验', value: `${overview.stats.knowledgeTotal} 条`, tone: 'green', current: currentProject.value.flowStep === 5, action: () => { activePage.value = 'search'; searchPanel.value = 'update' } },
+  { key: 'skill', label: 'Skill 资产', desc: '发布并持续演化', value: `${skillMetrics.value.total} 个`, tone: 'blue', current: currentProject.value.flowStep >= 6, action: () => { activePage.value = 'knowledge'; knowledgePanel.value = 'recheck' } }
+])
 const taskBoardColumns = computed(() => ['pending', 'in_progress', 'review', 'completed'].map((key) => ({ key, label: statusText(key), tasks: filteredTasks.value.filter((task) => task.status === key) })))
 const myTasks = computed(() => tasks.value.filter((item) => item.assignee_name === user.name || item.collaborators?.includes(user.name)))
 // ─── 个人空间：个人 AI 协作与能力成长中心 ────────────────────────────────────
@@ -5506,6 +6196,11 @@ const filteredContacts = computed(() => contacts.value.filter((contact) => {
   const deptOk = contactDepartment.value === 'all' || contact.department === contactDepartment.value
   return keywordOk && deptOk
 }))
+const handoffCandidates = computed(() => contacts.value.filter((contact) => {
+  const account = contact.account
+  // 任务交接是异步协作，离线成员仍应能收到待确认交接；只排除当前账号和无账号占位联系人。
+  return account && account !== currentAccount.value
+}))
 const meetingConversations = computed(() => contactMeetings.value.map((meeting) => ({
   id: `meeting-${meeting.id}`,
   kind: 'meeting',
@@ -5523,10 +6218,29 @@ const meetingConversations = computed(() => contactMeetings.value.map((meeting) 
   risk: 'medium',
   meeting
 })))
-const conversations = computed(() => [
-  { id: 'task-room-1', kind: 'group', name: 'ZK-320 过热检修群', avatar: '/static/heming.png', position: '任务群组', department: '动力设备检修一组', specialty: '高风险任务协作', devices: ['配电柜', 'ZK-320'], currentTask: 'ZK-320 配电柜过热检修', workload: 78, lastMessage: '已上传红外测温图片', unread: conversationUnread('task-room-1', 3), taskNo: 'YX-20260803-001', risk: 'high' },
-  ...meetingConversations.value,
-  ...contacts.value.map((contact, index) => {
+const mappedRemoteConversations = computed(() => remoteConversations.value.map((item) => ({
+  id: item.id,
+  kind: item.kind || 'group',
+  name: item.name,
+  avatar: item.metadata?.avatar || '/static/heming.png',
+  position: item.metadata?.position || '团队协作群',
+  department: item.metadata?.department || currentProject.value.name,
+  specialty: item.metadata?.specialty || '项目协作',
+  devices: item.metadata?.devices || [currentProject.value.name],
+  currentTask: item.metadata?.currentTask || item.task_id || '待关联任务',
+  workload: Number(item.metadata?.workload || 0),
+  lastMessage: item.last_message || '暂无消息',
+  unread: Number(item.unread || 0),
+  taskNo: item.task_id || item.metadata?.taskNo || '',
+  risk: item.metadata?.risk || 'medium',
+  members: item.members || []
+})))
+const conversations = computed(() => {
+  const items = [
+    { id: 'task-room-1', kind: 'group', name: '支付幂等改造协作群', avatar: '/static/heming.png', position: '任务群组', department: '支付平台项目组', specialty: '高风险任务协作', devices: ['电商中台', 'payment-service'], currentTask: '支付回调幂等改造', workload: 78, lastMessage: '已更新 Context Pack', unread: conversationUnread('task-room-1', 3), taskNo: 'TASK-20260917-001', risk: 'high' },
+    ...meetingConversations.value,
+    ...mappedRemoteConversations.value,
+    ...contacts.value.map((contact, index) => {
     const id = String(contact.id || '').startsWith('local-group-') ? `contact-${contact.id}` : index === 0 ? 'expert-1' : `contact-${contact.id}`
     return {
       id,
@@ -5539,13 +6253,15 @@ const conversations = computed(() => [
       devices: contact.devices,
       currentTask: contact.currentTask,
       workload: contact.workload,
-      lastMessage: index === 0 ? '已给出异响排查建议' : '等待现场反馈',
+      lastMessage: index === 0 ? '已给出上下文补全建议' : '等待任务反馈',
       unread: conversationUnread(id, index === 1 ? 1 : 0),
       taskNo: contact.currentTask,
       risk: index === 2 ? 'high' : 'medium'
     }
-  })
-])
+    })
+  ]
+  return [...new Map(items.map((item) => [item.id, item])).values()]
+})
 const contactStats = computed(() => ({
   online: contacts.value.filter((item) => ['online', '在线'].includes(item.status)).length,
   groups: conversations.value.filter((item) => item.kind === 'group').length,
@@ -5555,7 +6271,7 @@ const contactModes = computed(() => [
   { key: 'all', label: '全部', count: conversations.value.length },
   { key: 'group', label: '群聊', count: contactStats.value.groups },
   { key: 'meeting', label: '会议', count: contactStats.value.meetings },
-  { key: 'contact', label: '联系人', count: contacts.value.length }
+  { key: 'contact', label: '成员', count: contacts.value.length }
 ])
 const filteredConversations = computed(() => conversations.value.filter((item) => {
   const keywordOk = !contactKeyword.value || JSON.stringify(item).includes(contactKeyword.value)
@@ -5583,40 +6299,40 @@ const layoutPoint = (index, total) => {
   return graphPositions[index % graphPositions.length]
 }
 const graphKindMeta = {
-  equipment: { text: '设备', important: true },
-  model: { text: '设备型号' },
-  part: { text: '零部件' },
-  fault: { text: '故障现象', important: true },
-  cause: { text: '故障原因' },
-  method: { text: '检测方法' },
-  solution: { text: '检修方案' },
-  sop: { text: 'SOP', important: true },
-  risk: { text: '安全风险' },
-  case: { text: '历史案例' },
-  doc: { text: '技术资料', important: true }
+  equipment: { text: '项目', important: true },
+  model: { text: '技术栈' },
+  part: { text: '模块' },
+  fault: { text: '问题', important: true },
+  cause: { text: '根因' },
+  method: { text: '验证方法' },
+  solution: { text: '解决方案' },
+  sop: { text: 'Skill', important: true },
+  risk: { text: '风险' },
+  case: { text: 'Memory' },
+  doc: { text: '资料', important: true }
 }
 const graphLegend = Object.entries(graphKindMeta).filter(([, meta]) => meta.important).map(([kind, meta]) => ({ kind, label: meta.text }))
 const cleanGraphLabel = (value, fallback) => {
   const text = String(value || fallback || '').replace(/[\[\]{}"']/g, '').replace(/\s+/g, ' ').trim()
   return text.length > 12 ? `${text.slice(0, 12)}…` : text
 }
-const isAutoKnowledgeSource = (value) => /goview|OBD|CG-125|engine|circuit|manual|vehicle|auto/i.test(JSON.stringify(value || {}))
+const isAutoKnowledgeSource = (value) => /memory|skill|eval|context|agent|rag|project|code/i.test(JSON.stringify(value || {}))
 const isBridgeGraphKind = (kind) => ['method', 'solution', 'sop', 'risk', 'doc'].includes(kind)
 const graphNodes = computed(() => {
   const keyword = knowledgeKeyword.value.trim()
   const graphKnowledge = knowledge.value.filter((item) => !item.status || item.status === 'approved' || item.status === '已通过')
   const expandedNodes = graphKnowledge.flatMap((item) => [
-    { id: `${item.id}-equipment`, label: cleanGraphLabel(item.equipment, '通用设备'), kind: 'equipment', source: item, level: 1 },
-    { id: `${item.id}-model`, label: cleanGraphLabel(item.model, '通用型号'), kind: 'model', source: item, level: 1 },
-    { id: `${item.id}-part`, label: cleanGraphLabel(item.tags?.[0], '关键部件'), kind: 'part', source: item, level: 2 },
-    { id: `${item.id}-fault`, label: cleanGraphLabel(item.tags?.[1] || item.category || item.type, '故障现象'), kind: 'fault', source: item, level: 1 },
-    { id: `${item.id}-cause`, label: cleanGraphLabel(knowledgeSummaryLines(item)[0], '故障原因'), kind: 'cause', source: item, level: 2 },
-    { id: `${item.id}-method`, label: item.type?.includes('安全') ? '安全检查' : '检测方法', kind: 'method', source: item, level: 2 },
-    { id: `${item.id}-solution`, label: item.category || '检修方案', kind: 'solution', source: item, level: 2 },
-    { id: `${item.id}-sop`, label: cleanGraphLabel(item.type?.includes('SOP') ? item.title : '标准步骤'), kind: 'sop', source: item, level: 2 },
-    { id: `${item.id}-risk`, label: item.tags?.includes('安全') ? '作业风险' : '安全风险', kind: 'risk', source: item, level: 3 },
-    { id: `${item.id}-case`, label: item.type?.includes('案例') ? item.title : '历史案例', kind: 'case', source: item, level: 3 },
-    { id: `${item.id}-doc`, label: cleanGraphLabel(item.title, '技术资料'), kind: 'doc', source: item, level: 1 }
+    { id: `${item.id}-equipment`, label: cleanGraphLabel(item.equipment, '通用项目'), kind: 'equipment', source: item, level: 1 },
+    { id: `${item.id}-model`, label: cleanGraphLabel(item.model, '通用技术栈'), kind: 'model', source: item, level: 1 },
+    { id: `${item.id}-part`, label: cleanGraphLabel(item.tags?.[0], '关键模块'), kind: 'part', source: item, level: 2 },
+    { id: `${item.id}-fault`, label: cleanGraphLabel(item.tags?.[1] || item.category || item.type, '待解决问题'), kind: 'fault', source: item, level: 1 },
+    { id: `${item.id}-cause`, label: cleanGraphLabel(knowledgeSummaryLines(item)[0], '问题根因'), kind: 'cause', source: item, level: 2 },
+    { id: `${item.id}-method`, label: item.type?.includes('Eval') ? 'Eval 方法' : '验证方法', kind: 'method', source: item, level: 2 },
+    { id: `${item.id}-solution`, label: item.category || '解决方案', kind: 'solution', source: item, level: 2 },
+    { id: `${item.id}-sop`, label: cleanGraphLabel(item.type?.includes('Skill') ? item.title : '执行 Skill'), kind: 'sop', source: item, level: 2 },
+    { id: `${item.id}-risk`, label: item.tags?.includes('高风险') ? '高风险变更' : '执行风险', kind: 'risk', source: item, level: 3 },
+    { id: `${item.id}-case`, label: item.type?.includes('Memory') ? item.title : '历史 Memory', kind: 'case', source: item, level: 3 },
+    { id: `${item.id}-doc`, label: cleanGraphLabel(item.title, '项目资料'), kind: 'doc', source: item, level: 1 }
   ])
     .filter((node) => node.level <= graphDepth.value)
     .filter((node) => graphKindFilter.value === 'all' || node.kind === graphKindFilter.value)
@@ -5648,8 +6364,8 @@ const graphNodes = computed(() => {
       y: fixed?.y ?? defaultY,
       kindText: meta.text,
       important: Boolean(meta.important),
-      summary: node.source?.summary || node.source?.content || '该节点已关联设备、故障现象、维修资料和检修任务，可继续展开查看上下游依据。',
-      tags: node.source?.tags?.length ? node.source.tags : [meta.text, node.source?.model || '通用型号', node.source?.type || '知识条目'],
+      summary: node.source?.summary || node.source?.content || '该节点已关联项目、问题、代码、Memory、Skill 与 Eval，可继续展开查看上下游依据。',
+      tags: node.source?.tags?.length ? node.source.tags : [meta.text, node.source?.model || '通用技术栈', node.source?.type || '上下文资产'],
       matched: keyword ? JSON.stringify(node).includes(keyword) || JSON.stringify(node.source || {}).includes(keyword) : false
     }
   })
@@ -5712,9 +6428,9 @@ const selectedGraphAttributes = computed(() => {
   return [
     { label: '实体类型', value: graphKindMeta[selected.kind]?.text || '知识实体' },
     { label: '节点层级', value: `${selected.level || 1} 级` },
-    { label: '关联设备', value: source.equipment || selected.label || '通用设备' },
-    { label: '设备型号', value: source.model || '通用型号' },
-    { label: '资料来源', value: source.source || source.title || '知识库资料' },
+    { label: '关联项目', value: source.equipment || selected.label || '通用项目' },
+    { label: '技术栈/模块', value: source.model || '通用技术栈' },
+    { label: '资料来源', value: source.source || source.title || '上下文资料库' },
     { label: '更新时间', value: source.updated_at || source.uploaded_at || '已同步' },
     { label: '关联标签', value: tags || '暂无标签' }
   ]
@@ -5724,34 +6440,30 @@ const filteredKnowledge = computed(() => {
   return knowledge.value.filter((item) => JSON.stringify(item).includes(knowledgeKeyword.value))
 })
 const extraFileSamples = [
-  { id: 'sample-file-gearbox', name: '减速机轴承温升排查记录.docx', type: 'Word', size: '1.8 MB', category: '检修报告', folder: '检修报告', equipment: '减速机', model: 'RX-450', uploader: '唐忆哲', uploaded_at: '2026-08-02 09:26', auditStatus: '已审核', parseStatus: '解析完成', version: 'v1.2' },
-  { id: 'sample-file-air-compressor', name: '空压机保养周期与点检表.xlsx', type: 'Excel', size: '860 KB', category: '标准作业流程', folder: '标准作业流程', equipment: '空压机', model: 'GA-75', uploader: '陈程', uploaded_at: '2026-08-01 15:44', auditStatus: '已审核', parseStatus: '解析完成', version: 'v1.0' },
-  { id: 'sample-file-hydraulic', name: '液压系统油路清洗规范.pdf', type: 'PDF', size: '3.4 MB', category: '液压系统', folder: '液压系统', equipment: '液压站', model: 'HYD-220', uploader: '聪明的一休', uploaded_at: '2026-07-30 11:12', auditStatus: '已审核', parseStatus: '解析完成', version: 'v2.0' },
-  { id: 'sample-file-motor', name: '三相电机绝缘测试报告.pdf', type: 'PDF', size: '2.1 MB', category: '电气系统', folder: '电气系统', equipment: '三相异步电机', model: 'Y2-160M', uploader: '李志勇', uploaded_at: '2026-07-29 14:08', auditStatus: '已审核', parseStatus: '解析完成', version: 'v1.1' },
-  { id: 'sample-file-install', name: '现场安装验收照片-配电柜.png', type: '图片', size: '4.7 MB', category: '现场图片', folder: '现场图片', equipment: '配电柜', model: 'ZK-320', uploader: '唐忆罗', uploaded_at: '2026-07-27 17:36', auditStatus: '待审核', parseStatus: '图片识别完成', version: 'v1.0', url: '/static/industrial-banner-2.png' },
-  { id: 'sample-file-engine', name: '发动机气门间隙调整 SOP.docx', type: 'Word', size: '1.2 MB', category: '发动机资料', folder: '发动机资料', equipment: '发动机总成', model: 'CG-125', uploader: '博闻', uploaded_at: '2026-07-26 10:51', auditStatus: '已审核', parseStatus: '解析完成', version: 'v1.4' },
-  { id: 'sample-file-recheck', name: '复检数据归档模板.xlsx', type: 'Excel', size: '540 KB', category: '复检报告', folder: '复检报告', equipment: '通用设备', model: '通用', uploader: '明鉴', uploaded_at: '2026-07-24 16:20', auditStatus: '已审核', parseStatus: '解析完成', version: 'v1.0' },
-  { id: 'goview-file-manual', name: '汽修宝典-汽车维修手册资料索引.pdf', type: 'PDF', size: '2.6 MB', category: '维修手册', folder: '汽车维修资料', equipment: '汽车发动机系统', model: '通用乘用车', uploader: '博闻', uploaded_at: '2026-08-15 10:12', auditStatus: '已审核', parseStatus: '解析完成', version: 'v1.0', source: 'https://www.goviewtech.com/index.html' },
-  { id: 'goview-file-circuit', name: '汽修宝典-汽车电路图检索说明.pdf', type: 'PDF', size: '1.9 MB', category: '电气原理图', folder: '汽车维修资料', equipment: '汽车电气系统', model: '通用乘用车', uploader: '博闻', uploaded_at: '2026-08-15 10:16', auditStatus: '已审核', parseStatus: '解析完成', version: 'v1.0', source: 'https://www.goviewtech.com/index.html' },
-  { id: 'goview-file-dtc', name: '汽修宝典-热门故障码问答整理.docx', type: 'Word', size: '980 KB', category: '故障案例', folder: '汽车维修资料', equipment: 'OBD诊断系统', model: '通用', uploader: '观微', uploaded_at: '2026-08-15 10:20', auditStatus: '已审核', parseStatus: '解析完成', version: 'v1.0', source: 'https://www.goviewtech.com/index.html' },
-  { id: 'goview-file-video', name: '汽修宝典-维修视频学习清单.xlsx', type: 'Excel', size: '620 KB', category: '检修视频', folder: '汽车维修资料', equipment: '汽车底盘与发动机', model: '通用', uploader: '博闻', uploaded_at: '2026-08-15 10:24', auditStatus: '已审核', parseStatus: '解析完成', version: 'v1.0', source: 'https://www.goviewtech.com/index.html' }
+  { id: 'sample-file-prd', name: '支付回调幂等改造-PRD.pdf', type: 'PDF', size: '1.8 MB', category: '需求文档', folder: '需求文档', equipment: '电商中台', model: '支付服务', uploader: '唐忆哲', uploaded_at: '2026-09-15 09:26', auditStatus: '已审核', parseStatus: '解析完成', version: 'v1.3' },
+  { id: 'sample-file-design', name: '幂等键与重试策略设计.md', type: '文本', size: '86 KB', category: '代码与设计', folder: '代码与设计', equipment: '电商中台', model: 'Spring Boot', uploader: '陈程', uploaded_at: '2026-09-15 15:44', auditStatus: '已审核', parseStatus: '解析完成', version: 'v2.0' },
+  { id: 'sample-file-context', name: '支付回调-Context Pack 快照.docx', type: 'Word', size: '740 KB', category: 'Context Pack', folder: 'Context Pack', equipment: '电商中台', model: 'payment-service', uploader: '聪明的一休', uploaded_at: '2026-09-16 11:12', auditStatus: '已审核', parseStatus: '解析完成', version: 'v1.2' },
+  { id: 'sample-file-memory', name: '重复扣款问题复盘 Memory.md', type: '文本', size: '124 KB', category: 'Memory', folder: 'Memory', equipment: '电商中台', model: '支付回调', uploader: '李志勇', uploaded_at: '2026-09-16 14:08', auditStatus: '已审核', parseStatus: '解析完成', version: 'v1.1' },
+  { id: 'sample-file-skill', name: 'API 变更风险审查 Skill.yaml', type: '文本', size: '42 KB', category: 'Skill', folder: 'Skill', equipment: '研发协作平台', model: 'Skill Runner', uploader: '唐忆罗', uploaded_at: '2026-09-16 17:36', auditStatus: '已审核', parseStatus: '解析完成', version: 'v2.4' },
+  { id: 'sample-file-eval', name: '支付幂等 Eval 数据集.xlsx', type: 'Excel', size: '620 KB', category: 'Eval 数据', folder: 'Eval 数据', equipment: '电商中台', model: 'payment-service', uploader: '明鉴', uploaded_at: '2026-09-17 10:51', auditStatus: '已审核', parseStatus: '解析完成', version: 'v1.4' },
+  { id: 'sample-file-trace', name: 'Agent 协作执行 Trace.json', type: '文本', size: '540 KB', category: '执行记录', folder: 'Context Pack', equipment: '研发协作平台', model: 'Agent Runtime', uploader: '观微', uploaded_at: '2026-09-17 11:20', auditStatus: '待审核', parseStatus: '解析完成', version: 'v1.0' },
+  { id: 'sample-file-meeting', name: '迭代复盘与决策纪要.docx', type: 'Word', size: '380 KB', category: '会议记录', folder: '会议记录', equipment: '电商中台', model: 'Sprint 24', uploader: '和鸣', uploaded_at: '2026-09-17 14:20', auditStatus: '已审核', parseStatus: '解析完成', version: 'v1.0' }
 ]
 const extraKnowledgeSamples = [
-  { id: 'goview-kb-manual', title: '汽修宝典官网：汽车维修手册资料库概括', type: '维修手册', category: '汽车维修资料', equipment: '汽车发动机系统', model: '通用乘用车', summary: '汽修宝典官网定位为汽修资料与维修技术入口，可用于归纳汽车维修手册、车型资料、部件拆装与检测信息。', content: '来源页面公开说明其面向汽修技师提供维修资料、找资料、问问题和学知识能力。本条目仅作检修知识索引，用于一休知识检索和图谱关联。', tags: ['汽车维修', '维修手册', '资料库', '找资料'], source: 'https://www.goviewtech.com/index.html', status: 'approved', citations: 18, updated_at: '2026-08-15 10:12' },
-  { id: 'goview-kb-circuit', title: '汽车电路图与电气诊断资料索引', type: '技术资料', category: '电气原理图', equipment: '汽车电气系统', model: '通用乘用车', summary: '围绕电路图、线束、传感器、执行器和供电接地关系建立诊断索引，适合与工业电气系统检测方法形成共享节点。', content: '汽修宝典官网栏目包含电路图相关入口。本条目抽象为汽车电气图纸检索节点，便于一休图谱关联电气检测、故障码和安全断电流程。', tags: ['汽车电气', '电路图', '检测方法', '线束'], source: 'https://www.goviewtech.com/index.html', status: 'approved', citations: 12, updated_at: '2026-08-15 10:16' },
-  { id: 'goview-kb-dtc', title: '热门故障码与汽修问答知识整理', type: '历史故障案例', category: '故障案例', equipment: 'OBD诊断系统', model: '通用', summary: '将故障码、现象描述、可能原因、检查路径和维修问答抽象为可检索案例，用于故障定位和检修建议生成。', content: '汽修宝典官网描述了汽修问答与知识学习能力。本条目用于承接故障码、问答经验和检修案例，不包含网站原文内容。', tags: ['故障码', '汽修问答', '历史案例', '诊断流程'], source: 'https://www.goviewtech.com/index.html', status: 'approved', citations: 16, updated_at: '2026-08-15 10:20' },
-  { id: 'goview-kb-video', title: '汽修笔记与视频学习资料沉淀', type: '培训资料', category: '检修视频', equipment: '汽车底盘与发动机', model: '通用', summary: '把汽修笔记、视频学习和维修经验沉淀为培训型知识节点，辅助新人员理解拆装、检测和复检要点。', content: '来源页面出现学知识、笔记和视频等公开栏目线索。本条目作为学习资料索引，用于知识库文件、图谱和检索建议联动。', tags: ['汽修笔记', '视频学习', 'SOP', '培训资料'], source: 'https://www.goviewtech.com/index.html', status: 'approved', citations: 9, updated_at: '2026-08-15 10:24' }
+  { id: 'context-kb-prd', title: '支付回调幂等改造：需求边界与验收口径', type: '需求', category: '需求文档', equipment: '电商中台', model: '支付服务', summary: '明确重复通知、并发回调和第三方重试场景下的业务边界、失败策略与验收标准。', content: '该节点把业务目标、非目标、验收口径和依赖系统组成可追溯的需求上下文，供任务拆解与 Eval 设计复用。', tags: ['需求', '支付回调', '幂等', '验收标准'], source: '项目资料库', status: 'approved', citations: 18, updated_at: '2026-09-15 10:12' },
+  { id: 'context-kb-code', title: 'payment-service 幂等实现与关键提交索引', type: '代码', category: '代码与设计', equipment: '电商中台', model: 'Spring Boot', summary: '关联幂等键生成、Redis 锁、数据库唯一约束、重试补偿和关键提交记录。', content: '该节点用于在需求、代码实现、Pull Request、Eval 用例之间建立可追溯关系，避免只看文档不看真实实现。', tags: ['代码', 'Pull Request', 'Redis', '事务'], source: 'Git 仓库', status: 'approved', citations: 12, updated_at: '2026-09-15 10:16' },
+  { id: 'context-kb-memory', title: '重复扣款问题复盘 Memory', type: 'Memory', category: '历史任务', equipment: '电商中台', model: '支付回调', summary: '沉淀一次重复扣款事故中的触发条件、根因、有效修复、失败尝试和适用范围。', content: 'Memory 保留来源证据和适用边界，可被 Context Pack 检索，也可作为 Skill 候选的训练与评测依据。', tags: ['Memory', '事故复盘', '根因', '适用边界'], source: '任务归档', status: 'approved', citations: 16, updated_at: '2026-09-16 10:20' },
+  { id: 'context-kb-eval', title: '支付幂等 Eval 基准与回归样例', type: 'Eval', category: 'Eval 数据', equipment: '电商中台', model: 'payment-service', summary: '覆盖并发请求、重复通知、超时重试、缓存失效与数据库冲突等关键场景。', content: 'Eval 节点绑定数据集版本、评分规则、运行结果和失败样例，为 Skill 发布和版本回滚提供质量门禁。', tags: ['Eval', '回归测试', '评分标准', '质量门禁'], source: 'Eval Lab', status: 'approved', citations: 9, updated_at: '2026-09-17 10:24' }
 ]
 const fileFolders = computed(() => {
-  const fixed = ['全部文件', '维修手册', '标准作业流程', '现场图片', '检修报告', '复检报告', '其他技术资料', '发动机资料', '电气系统', '液压系统', '汽车维修资料']
+  const fixed = ['全部文件', '需求文档', '代码与设计', 'Context Pack', 'Memory', 'Skill', 'Eval 数据', '会议记录', '外部 AI 导入']
   const dynamic = files.value.map((file) => file.folder || file.category).filter(Boolean)
   return [...new Set([...fixed, ...customFileFolders.value, ...dynamic])]
 })
 const fileFolderParent = (folder) => {
   if (customFolderParents.value[folder]) return customFolderParents.value[folder]
   if (folder === '全部文件') return '项目'
-  if (['维修手册', '标准作业流程', '现场图片', '检修报告', '复检报告', '其他技术资料'].includes(folder)) return '全部文件'
-  if (['发动机资料', '电气系统', '液压系统', '汽车维修资料'].includes(folder)) return '其他技术资料'
+  if (['需求文档', '代码与设计', 'Context Pack', 'Memory', 'Skill', 'Eval 数据', '会议记录', '外部 AI 导入'].includes(folder)) return '全部文件'
   return '全部文件'
 }
 const fileFolderChildren = computed(() => {
@@ -5770,16 +6482,16 @@ const isFileFolderExpanded = (folder) => expandedFileFolders.value.includes(fold
 
 const getAccounts = () => {
   const stored = readStorage(AUTH_ACCOUNTS_KEY, [])
-  return [defaultAccount, ...stored.filter((item) => item.account !== defaultAccount.account)]
+  return [...(demoAccountEnabled ? [defaultAccount] : []), ...stored.filter((item) => item.account !== defaultAccount.account || !demoAccountEnabled)]
 }
 const profileToContact = (profile, account = currentAccount.value) => ({
   id: `account-${account || profile.employeeId}`,
   account,
   name: profile.name,
   avatar: profile.avatar || '',
-  position: profile.role || '检修人员',
+  position: profile.role || '项目成员',
   department: profile.department || '待分配班组',
-  specialty: (profile.specialties || []).join(' / ') || '设备检修',
+  specialty: (profile.specialties || []).join(' / ') || '项目协作',
   devices: profile.specialties || [],
   currentTask: '暂无在办任务',
   workload: 0,
@@ -5810,6 +6522,37 @@ const applyAccountProfile = (account) => {
   const savedProfile = account.account === defaultAccount.account ? readStorage(PROFILE_KEY, {}) : account.profile || {}
   Object.assign(user, defaultProfile, savedProfile, { name: savedProfile.name || account.name || defaultProfile.name })
 }
+const rememberAccountShell = (account, password = '') => {
+  if (!account?.account || account.account === defaultAccount.account) return
+  const accounts = readStorage(AUTH_ACCOUNTS_KEY, [])
+  const index = accounts.findIndex((item) => item.account === account.account)
+  const next = {
+    ...(index >= 0 ? accounts[index] : {}),
+    account: account.account,
+    name: account.name || account.profile?.name || account.account,
+    profile: account.profile || {},
+    ...(password ? { password } : {})
+  }
+  if (index >= 0) accounts[index] = next
+  else accounts.push(next)
+  localStorage.setItem(AUTH_ACCOUNTS_KEY, JSON.stringify(accounts))
+}
+const finishAuthentication = async (account, token = '', remember = true) => {
+  applyAccountProfile(account)
+  const session = JSON.stringify({ account: account.account, loginAt: Date.now() })
+  localStorage.removeItem(AUTH_SESSION_KEY)
+  sessionStorage.removeItem(AUTH_SESSION_KEY)
+  if (remember) localStorage.setItem(AUTH_SESSION_KEY, session)
+  else sessionStorage.setItem(AUTH_SESSION_KEY, session)
+  if (token) localStorage.setItem('yixiu-token', token)
+  currentAccount.value = account.account
+  reloadContactReadState()
+  authError.value = ''
+  isAuthenticated.value = true
+  authForm.password = ''
+  syncProfileContact(account.profile || { ...defaultProfile, name: account.name }, account.account)
+  await startWorkspace()
+}
 const startWorkspace = async () => {
   updateClock()
   if (!clockTimer) clockTimer = window.setInterval(updateClock, 1000)
@@ -5818,36 +6561,26 @@ const startWorkspace = async () => {
   playBootAnimation()
   window.setTimeout(() => { refreshAll() }, 260)
 }
-const establishYixiuBackendSession = async (account) => {
-  try {
-    const session = await yixiuApi.createSession({
-      account: account.account,
-      name: account.name || account.profile?.name || user.name,
-    })
-    if (session?.token) localStorage.setItem('yixiu-token', session.token)
-    return true
-  } catch (error) {
-    authError.value = error.message || '后端工作台会话建立失败，写入功能可能不可用'
-    return false
-  }
-}
 const login = async () => {
   const accountName = authForm.account.trim()
   if (!accountName || !authForm.password) return (authError.value = '请输入账号和密码')
-  const account = getAccounts().find((item) => item.account === accountName)
-  if (!account || account.password !== authForm.password) return (authError.value = '账号或密码不正确，请重新输入')
-  applyAccountProfile(account)
-  const session = JSON.stringify({ account: account.account, loginAt: Date.now() })
-  localStorage.removeItem(AUTH_SESSION_KEY)
-  sessionStorage.removeItem(AUTH_SESSION_KEY)
-  if (authForm.remember) localStorage.setItem(AUTH_SESSION_KEY, session)
-  else sessionStorage.setItem(AUTH_SESSION_KEY, session)
-  currentAccount.value = account.account
   authError.value = ''
-  isAuthenticated.value = true
-  authForm.password = ''
-  await establishYixiuBackendSession(account)
-  await startWorkspace()
+  try {
+    const result = await yixiuApi.login({ account: accountName, password: authForm.password })
+    const account = {
+      account: result.user.account,
+      name: result.user.name,
+      profile: result.user.profile || { ...defaultProfile, name: result.user.name }
+    }
+    rememberAccountShell(account)
+    await finishAuthentication(account, result.token, authForm.remember)
+  } catch (error) {
+    if (error?.status) return (authError.value = error.message || '账号或密码不正确，请重新输入')
+    const localAccount = getAccounts().find((item) => item.account === accountName && item.password === authForm.password)
+    if (!localAccount) return (authError.value = '当前无法连接团队服务，本机也没有可用的离线账号')
+    await finishAuthentication(localAccount, '', authForm.remember)
+    toast('团队服务未连接，当前为本机演示模式；消息与交接不会同步到其他浏览器')
+  }
 }
 const register = async () => {
   const name = authForm.name.trim()
@@ -5857,20 +6590,21 @@ const register = async () => {
   if (authForm.password.length < 8) return (authError.value = '密码至少需要 8 位')
   if (authForm.password !== authForm.confirmPassword) return (authError.value = '两次输入的密码不一致')
   if (!authForm.agreed) return (authError.value = '请先同意平台使用规范')
-  if (getAccounts().some((item) => item.account === accountName)) return (authError.value = '该账号已存在，请直接登录')
   const profile = { ...defaultProfile, name, employeeId: `YX-${String(Date.now()).slice(-6)}` }
-  const accounts = readStorage(AUTH_ACCOUNTS_KEY, [])
-  accounts.push({ account: accountName, password: authForm.password, name, profile })
-  localStorage.setItem(AUTH_ACCOUNTS_KEY, JSON.stringify(accounts))
-  sessionStorage.removeItem(AUTH_SESSION_KEY)
-  localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({ account: accountName, loginAt: Date.now() }))
-  currentAccount.value = accountName
-  Object.assign(user, profile)
-  syncProfileContact(profile, accountName)
   authError.value = ''
-  isAuthenticated.value = true
-  await establishYixiuBackendSession({ account: accountName, name, profile })
-  await startWorkspace()
+  try {
+    const result = await yixiuApi.register({ account: accountName, password: authForm.password, name, profile })
+    const account = { account: result.user.account, name: result.user.name, profile: result.user.profile || profile }
+    rememberAccountShell(account)
+    await finishAuthentication(account, result.token, true)
+  } catch (error) {
+    if (error?.status) return (authError.value = error.message || '注册失败，请稍后重试')
+    if (getAccounts().some((item) => item.account === accountName)) return (authError.value = '该账号已存在，请直接登录')
+    const account = { account: accountName, password: authForm.password, name, profile }
+    rememberAccountShell(account, authForm.password)
+    await finishAuthentication(account, '', true)
+    toast('团队服务未连接，账号仅保存在当前浏览器；服务恢复后请重新注册以启用多人协作')
+  }
 }
 const logout = () => {
   if (assistantSpeechRecognition) assistantSpeechRecognition.stop()
@@ -5888,7 +6622,7 @@ const logout = () => {
   activePage.value = 'home'
   showSplash.value = false
   authMode.value = 'login'
-  authForm.account = 'yixiu'
+  authForm.account = demoAccountEnabled ? 'yixiu' : ''
   authForm.password = ''
   authForm.confirmPassword = ''
   showProfileEditor.value = false
@@ -5910,7 +6644,7 @@ const openProfileEditor = () => {
   profileError.value = ''
   showProfileEditor.value = true
 }
-const saveProfile = () => {
+const saveProfile = async () => {
   if (!profileDraft.name || !profileDraft.employeeId || !profileDraft.role || !profileDraft.department) {
     profileError.value = '姓名、工号、岗位和所属班组不能为空'
     return
@@ -5940,6 +6674,11 @@ const saveProfile = () => {
   }
   taskForm.assignee_name = user.name
   syncProfileContact(saved)
+  try {
+    await yixiuApi.updateProfile({ account: currentAccount.value, profile: saved })
+  } catch (error) {
+    if (error?.status) return (profileError.value = error.message || '团队资料同步失败')
+  }
   showProfileEditor.value = false
   toast('个人资料已保存并同步')
 }
@@ -5949,7 +6688,8 @@ const updateClock = () => {
 }
 
 const setNewsSlide = (index) => {
-  newsIndex.value = (index + newsSlides.length) % newsSlides.length
+  const total = Math.max(1, newsSlides.value.length)
+  newsIndex.value = (index + total) % total
 }
 const nextNewsSlide = () => setNewsSlide(newsIndex.value + 1)
 const prevNewsSlide = () => setNewsSlide(newsIndex.value - 1)
@@ -5962,14 +6702,49 @@ const resumeNewsCarousel = () => {
   newsCarouselTimer = window.setInterval(nextNewsSlide, 4800)
 }
 
+const safePublicItems = (items = []) => items.filter((item) => (
+  item && /^https:\/\//i.test(String(item.link || '')) && String(item.title || '').trim()
+)).slice(0, 3)
+
+const refreshPublicUpdates = async (silent = false) => {
+  if (newsUpdateState.loading) return
+  newsUpdateState.loading = true
+  try {
+    const payload = await yixiuApi.contentUpdates()
+    const items = safePublicItems(payload.items)
+    if (items.length) {
+      newsSlides.value = items
+      newsIndex.value = Math.min(newsIndex.value, items.length - 1)
+    }
+    if (Array.isArray(payload.projects) && payload.projects.length) liveProjectSignals.value = payload.projects
+    newsUpdateState.stale = Boolean(payload.stale)
+    newsUpdateState.refreshedAt = payload.refreshed_at || new Date().toISOString()
+    const refreshHours = Number(payload.refresh_hours) || 72
+    newsUpdateState.label = payload.stale ? '本地精选 · 待联网' : `官方源 · ${Math.round(refreshHours / 24)} 天更新`
+    const refreshed = new Date(newsUpdateState.refreshedAt)
+    const next = payload.next_refresh_at ? new Date(payload.next_refresh_at) : new Date(refreshed.getTime() + refreshHours * 3600000)
+    newsUpdateState.nextRefreshText = `最近同步：${refreshed.toLocaleString('zh-CN')}；下次检查：${next.toLocaleString('zh-CN')}`
+    localStorage.setItem(PUBLIC_UPDATES_KEY, JSON.stringify({ items: newsSlides.value, projects: liveProjectSignals.value, refreshed_at: newsUpdateState.refreshedAt }))
+    if (!silent) toast(payload.stale ? '公网来源暂不可用，已保留本地精选内容' : '已检查官方来源，动态和项目热度均为最新缓存')
+  } catch (error) {
+    newsUpdateState.stale = true
+    newsUpdateState.label = '本地精选 · 待联网'
+    newsUpdateState.nextRefreshText = `自动更新暂未连接：${error.message || '后端服务不可用'}`
+    if (!silent) toast('自动更新服务暂未连接，当前仍可打开已保存的原文链接')
+  } finally {
+    newsUpdateState.loading = false
+  }
+}
+
 const refreshAll = async () => {
-  const [overviewData, healthData, taskData, knowledgeData, fileData, contactData] = await Promise.all([
+  const [overviewData, healthData, taskData, knowledgeData, fileData, contactData, conversationData] = await Promise.all([
     yixiuApi.overview(),
     yixiuApi.health(),
     yixiuApi.tasks(),
     yixiuApi.knowledge(),
     yixiuApi.files(),
-    yixiuApi.contacts()
+    yixiuApi.contacts(),
+    yixiuApi.conversations(currentAccount.value).catch(() => [])
   ])
   Object.assign(overview, overviewData)
   Object.assign(systemStatus, healthData)
@@ -5986,6 +6761,7 @@ const refreshAll = async () => {
     else contacts.value.push(contact)
   })
   agents.value = normalizeAgentList(overviewData.agents)
+  remoteConversations.value = conversationData
 }
 
 
@@ -6068,7 +6844,7 @@ const openScheduleItem = (item) => {
 }
 const runGlobalSearch = () => {
   const keyword = globalKeyword.value.trim()
-  if (!keyword) return toast('请输入工单、设备、资料或联系人关键词')
+  if (!keyword) return toast('请输入任务、项目、资料或成员关键词')
   const matchedTask = tasks.value.some((item) => JSON.stringify(item).includes(keyword))
   const matchedKnowledge = knowledge.value.some((item) => JSON.stringify(item).includes(keyword))
   const matchedContact = contacts.value.some((item) => JSON.stringify(item).includes(keyword))
@@ -6076,7 +6852,7 @@ const runGlobalSearch = () => {
     activePage.value = 'tasks'
     taskPanel.value = 'manage'
     taskFilters.keyword = keyword
-    return toast(`已定位相关检修任务：${keyword}`)
+    return toast(`已定位相关项目任务：${keyword}`)
   }
   if (matchedKnowledge) {
     activePage.value = 'search'
@@ -6088,7 +6864,7 @@ const runGlobalSearch = () => {
     activePage.value = 'tasks'
     taskPanel.value = 'contacts'
     contactKeyword.value = keyword
-    return toast(`已定位相关联系人：${keyword}`)
+    return toast(`已定位相关协作成员：${keyword}`)
   }
   activePage.value = 'search'
   searchForm.query = keyword
@@ -6127,7 +6903,7 @@ const relayoutGraph = () => {
   updateGraphChart()
 }
 const applyTgSuggestion = () => {
-  toast('已应用天工建议，正在跳转到高风险工单...')
+  toast('已应用天工建议，正在跳转到高风险任务...')
   activePage.value = 'tasks'
   taskPanel.value = 'manage'
   taskFilters.severity = 'high'
@@ -6372,7 +7148,10 @@ watch([activePage, knowledgePanel], () => {
   if (activePage.value === 'knowledge' && knowledgePanel.value === 'network') settleGraphChart()
 })
 watch([activePage, taskPanel, activeConversationId], () => {
-  if (activePage.value === 'tasks' && taskPanel.value === 'contacts') markConversationRead(activeConversationId.value)
+  if (activePage.value === 'tasks' && taskPanel.value === 'contacts') {
+    markConversationRead(activeConversationId.value)
+    void refreshCollaboration()
+  }
 })
 watch([activePage, taskPanel], () => {
   const defaultAgent = pageDefaultAgentId.value
@@ -6421,10 +7200,10 @@ const loadTemplates = async () => {
   } catch {
     availableTemplates.value = [
       { id: 'tpl-blank', name: '空白文档', icon: '📝', category: '通用', description: '从零开始创建', skeleton: { content: '# 文档标题\n\n在此输入内容...' } },
-      { id: 'tpl-sop', name: '检修作业 SOP', icon: '📋', category: '检修流程', description: '标准作业流程模板', skeleton: { content: '# 检修作业 SOP\n\n## 安全确认\n- [ ] 停机断电\n\n## 作业步骤\n1. 检查\n2. 处置' } },
-      { id: 'tpl-fault', name: '故障排查报告', icon: '🔍', category: '故障分析', description: '故障排查过程记录', skeleton: { content: '# 故障排查报告\n\n## 故障现象\n\n## 排查过程\n\n## 处置措施' } },
-      { id: 'tpl-meeting', name: '检修会议纪要', icon: '📒', category: '协作沟通', description: '班组例会纪要', skeleton: { content: '# 会议纪要\n\n## 议题\n\n## 行动计划' } },
-      { id: 'tpl-safety', name: '安全操作规范', icon: '🛡️', category: '安全规范', description: '高风险作业规程', skeleton: { content: '# 安全操作规范\n\n## 防护用品\n- [ ] 安全帽\n\n## 安全流程' } }
+      { id: 'tpl-context-pack', name: 'Context Pack', icon: '🧩', category: '上下文', description: '汇总目标、代码、证据和缺口', skeleton: { content: '# Context Pack\n\n## 目标与范围\n\n## 关键代码\n\n## Memory / Skill\n\n## 信息缺口与风险' } },
+      { id: 'tpl-memory', name: 'Memory 复盘', icon: '🧠', category: 'Memory', description: '沉淀问题、决策与适用边界', skeleton: { content: '# Memory Unit\n\n## 问题与触发条件\n\n## 决策与证据\n\n## 有效方案 / 失败尝试\n\n## 适用边界' } },
+      { id: 'tpl-skill', name: 'Skill 规范', icon: '⚙️', category: 'Skill', description: '定义输入、步骤、输出和异常处理', skeleton: { content: '# Skill 规范\n\n## 输入\n\n## 执行步骤\n\n## 输出\n\n## 风险与回滚' } },
+      { id: 'tpl-eval', name: 'Eval 计划', icon: '◎', category: 'Eval', description: '定义数据集、评分与质量门禁', skeleton: { content: '# Eval 计划\n\n## 评测目标\n\n## 数据集与样例\n\n## 评分规则\n\n## 发布门禁' } }
     ]
   }
 }
@@ -6440,39 +7219,39 @@ const loadKnowledgeDocs = () => {
   const mockDocs = [
     {
       id: 'kb-sop-001',
-      title: 'CG-125 发动机检修作业 SOP',
-      type: 'SOP', category: '检修流程',
-      content: '# 发动机检修作业 SOP\n## 基本信息\n- 设备：CG-125 摩托车发动机\n- 型号：MTR-CG125-12\n## 安全确认\n- 停机断电\n- 验电挂牌\n- 穿戴劳保用品\n## 作业步骤\n1. 外观检查\n2. 参数测量\n3. 故障定位\n4. 维修处置',
-      tags: ['发动机', 'SOP', '异响'],
+      title: 'API 变更风险审查 Skill',
+      type: 'Skill', category: '研发流程',
+      content: '# API 变更风险审查 Skill\n## 输入\n- 需求与验收标准\n- API Diff 与调用方清单\n## 执行步骤\n1. 识别破坏性变更\n2. 检查兼容策略\n3. 生成回归用例\n4. 输出风险与回滚方案',
+      tags: ['API', 'Skill', '变更审查'],
       collaborators: [collaboratorPool[0], collaboratorPool[1], collaboratorPool[2]],
       starred: true,
       updated_at: '2026-08-06 16:30',
     },
     {
       id: 'kb-fault-001',
-      title: '配电柜过热故障排查报告',
-      type: '故障案例', category: '故障分析',
-      content: '# 故障排查报告\n## 故障现象\n配电柜PD-ZK-320-07运行中温度异常升高，超过报警阈值。\n## 排查过程\n1. 红外测温确认发热点位于母排连接处\n2. 检查螺栓紧固力矩，发现松动\n3. 热成像分析确认接触电阻增大\n## 处置措施\n停电检修，重新紧固螺栓，涂抹导电膏，复测温度正常。',
-      tags: ['配电柜', '过热', '案例'],
+      title: '支付回调重复处理问题 Memory',
+      type: 'Memory', category: '问题复盘',
+      content: '# 支付回调重复处理问题 Memory\n## 问题\n第三方重试与并发回调导致订单重复推进。\n## 根因\n幂等校验晚于状态写入，且缓存锁失效后缺少数据库兜底。\n## 有效方案\n统一业务幂等键，引入唯一约束与补偿任务，并补齐并发 Eval。\n## 适用边界\n适用于至少一次投递的异步回调链路。',
+      tags: ['支付回调', '幂等', 'Memory'],
       collaborators: [collaboratorPool[0], collaboratorPool[1]],
       starred: false,
       updated_at: '2026-08-05 14:20',
     },
     {
       id: 'kb-safety-001',
-      title: '高压电气设备安全操作规范',
-      type: '安全规范', category: '安全规范',
-      content: '# 安全操作规范\n## 适用范围\n适用于10kV及以上高压电气设备的检修与维护作业。\n## 防护用品\n- 绝缘手套\n- 绝缘鞋\n- 安全帽\n- 防电弧服\n## 安全流程\n1. 办理工作票\n2. 验电\n3. 装设接地线\n4. 悬挂标示牌',
-      tags: ['安全', '高压', '电气'],
+      title: '高风险代码变更治理规范',
+      type: '规范', category: '研发治理',
+      content: '# 高风险代码变更治理规范\n## 适用范围\n核心交易、权限、数据迁移和公共 API 变更。\n## 必要证据\n- 需求与影响面\n- Review 结论\n- Eval 报告\n- 回滚方案\n## 发布流程\n1. 风险分级\n2. 双人 Review\n3. Eval 门禁\n4. 灰度与回滚确认',
+      tags: ['高风险', '代码审查', '发布门禁'],
       collaborators: [collaboratorPool[0]],
       starred: true,
       updated_at: '2026-08-04 09:15',
     },
     {
       id: 'kb-meeting-001',
-      title: '8月检修班组例会纪要',
+      title: 'Sprint 24 项目协作纪要',
       type: '会议纪要', category: '协作沟通',
-      content: '# 检修班组例会纪要\n## 时间\n2026年8月3日 14:00\n## 参会人员\n聪明的一休、李志勇、唐忆罗、陈程\n## 议题\n1. 本周检修任务进展\n2. 配电柜过热工单风险确认\n3. CG-125发动机异响排查方案\n## 行动计划\n- 聪明的一休负责配电柜停机检修\n- 李志勇跟进发动机拆检',
+      content: '# Sprint 24 项目协作纪要\n## 时间\n2026年9月17日 14:00\n## 参会人员\n聪明的一休、李志勇、唐忆罗、陈程\n## 议题\n1. 支付幂等任务进展\n2. 高风险变更与 Eval 门禁\n3. Memory 与 Skill 候选沉淀\n## 行动计划\n- 聪明的一休负责生成 Context Pack\n- 李志勇跟进代码 Review 与 Eval',
       tags: ['会议', '纪要'],
       collaborators: [collaboratorPool[0], collaboratorPool[1], collaboratorPool[2], collaboratorPool[3]],
       starred: false,
@@ -6480,20 +7259,20 @@ const loadKnowledgeDocs = () => {
     },
     {
       id: 'kb-manual-001',
-      title: '液压千斤顶使用维护手册',
-      type: '维修手册', category: '通用',
-      content: '# 液压千斤顶使用维护手册\n## 型号\nYZ-50T 液压千斤顶\n## 使用前检查\n1. 检查油位是否正常\n2. 检查活塞有无划伤\n3. 确认底座稳固\n## 维护保养\n- 每月更换液压油\n- 每季度检查密封圈\n- 每年校验压力表',
-      tags: ['液压', '千斤顶', '手册'],
+      title: 'Context Pack 字段与引用规范',
+      type: '规范', category: '上下文',
+      content: '# Context Pack 字段与引用规范\n## 必填字段\n目标、范围、仓库、分支、关键模块、引用依据与信息缺口。\n## 引用要求\n每项关键结论必须指向需求、代码、Memory、Skill 或 Eval 来源。\n## 质量要求\n标注版本、生成时间、覆盖率与未确认信息。',
+      tags: ['Context Pack', '引用', '规范'],
       collaborators: [],
       starred: false,
       updated_at: '2026-08-02 10:30',
     },
     {
       id: 'kb-sop-002',
-      title: '点火线圈更换作业指导书',
-      type: 'SOP', category: '检修流程',
-      content: '# 点火线圈更换 SOP\n## 适用设备\nDLI-001 点火线圈\n## 准备工具\n- 扭力扳手\n- 绝缘手套\n- 万用表\n## 作业步骤\n1. 断开蓄电池负极\n2. 拆卸旧点火线圈\n3. 清洁安装面\n4. 安装新线圈，紧固至规定力矩\n5. 连接线束，复测电阻值',
-      tags: ['点火线圈', 'SOP'],
+      title: '支付幂等 Eval 用例设计',
+      type: 'Eval', category: '质量评测',
+      content: '# 支付幂等 Eval 用例设计\n## 评测范围\n重复通知、并发请求、超时重试、缓存失效与数据库冲突。\n## 评分维度\n正确性、数据一致性、可恢复性、可观测性。\n## 质量门禁\n核心样例必须全部通过，长尾样例通过率不低于 95%。',
+      tags: ['支付', 'Eval', '回归'],
       collaborators: [collaboratorPool[0], collaboratorPool[2]],
       starred: false,
       updated_at: '2026-08-01 11:45',
@@ -6577,9 +7356,9 @@ const goTopbarTask = (type) => {
     return toast('已进入待办任务')
   }
   if (type === 'review') {
-    taskPanel.value = 'recheck'
     taskFilters.status = 'review'
-    return toast('已进入待复检任务')
+    openEvalLab()
+    return toast('已进入 Skill 工厂 · Eval Lab')
   }
   taskPanel.value = 'manage'
   taskFilters.severity = 'high'
@@ -6594,7 +7373,7 @@ const openUnreadContacts = () => {
     openConversation(unread)
     toast(`已打开未读会话：${unread.name}`)
   } else {
-    toast('暂无未读联系人消息')
+    toast('暂无未读成员消息')
   }
 }
 const runQuickAction = (item) => item.action()
@@ -6608,6 +7387,9 @@ const runProfileItem = (item) => {
   else toast(item.title)
 }
 const persistChatMessage = async (message, extra = {}) => {
+  message.deliveryStatus = 'sending'
+  message.syncFailed = false
+  persistLocalChatCache()
   try {
     const saved = await yixiuApi.sendConversationMessage(message.conversationId, {
       ...message,
@@ -6616,18 +7398,28 @@ const persistChatMessage = async (message, extra = {}) => {
       sender_name: user.name,
     })
     if (saved?.id) message.id = saved.id
+    message.deliveryStatus = 'sent'
+    message.syncFailed = false
+    persistLocalChatCache()
     return true
   } catch (error) {
     message.syncFailed = true
+    message.deliveryStatus = 'failed'
+    persistLocalChatCache()
     toast(error.message || '消息发送失败，请稍后重试')
     return false
   }
 }
+const retryChatMessage = async (message) => {
+  if (!message || message.deliveryStatus === 'sending') return
+  await persistChatMessage(message, { attachment: message.attachment || undefined, card: message.card || undefined, message_type: message.card ? `${message.card.type}-card` : message.attachment?.kind || 'text' })
+}
 const sendChatMessage = async (text) => {
   const value = String(text || '').trim()
   if (!value || !activeConversation.value) return
-  const message = { id: `msg-${Date.now()}`, conversationId: activeConversation.value.id, mine: true, text: value, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }
+  const message = { id: `msg-${Date.now()}`, conversationId: activeConversation.value.id, mine: true, text: value, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }), deliveryStatus: 'sending' }
   chatMessages.value.push(message)
+  persistLocalChatCache()
   await persistChatMessage(message)
   chatInput.value = ''
 }
@@ -6635,6 +7427,7 @@ const pushAttachmentMessage = async (attachment, text) => {
   if (!activeConversation.value) return
   const message = { id: `attachment-${Date.now()}-${Math.random()}`, conversationId: activeConversation.value.id, mine: true, text, attachment, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }
   chatMessages.value.push(message)
+  persistLocalChatCache()
   const portableAttachment = { kind: attachment.kind, name: attachment.name, size: attachment.size, type: attachment.type, duration: attachment.duration || 0 }
   await persistChatMessage(message, { attachment: portableAttachment, message_type: attachment.kind })
 }
@@ -6644,7 +7437,7 @@ const addChatAttachments = (event, kind) => {
   selected.forEach((file) => {
     const url = URL.createObjectURL(file)
     chatObjectUrls.add(url)
-    pushAttachmentMessage({ kind, name: file.name, size: readableSize(file.size), type: file.type, url, rawFile: file }, kind === 'image' ? '发送现场图片' : '发送检修资料')
+    pushAttachmentMessage({ kind, name: file.name, size: readableSize(file.size), type: file.type, url, rawFile: file }, kind === 'image' ? '发送截图图片' : '发送项目资料')
   })
   event.target.value = ''
 }
@@ -6736,33 +7529,59 @@ const selectTaskFromPicker = (task) => {
   if (taskPickerMode.value === 'assign') {
     const collaborator = activeConversation.value?.name
     task.collaborators = [...new Set([...(task.collaborators || []), collaborator].filter(Boolean))]
+    void yixiuApi.updateTaskCollaboration(task.id, { collaborators: task.collaborators, operator: user.name }).catch((error) => toast(`协作成员仅保存在本地：${error.message}`))
     sendChatMessage(`协作邀请：已将 ${collaborator} 加入任务 ${task.workOrderNo}`)
     toast('协作人员已加入任务')
   } else sendTaskCard(task)
   showTaskPicker.value = false
 }
-const summarizeConversation = () => {
+const summarizeConversation = async () => {
   const recent = activeMessages.value.slice(-6).map((item) => item.text).filter(Boolean)
   const focus = recent.length ? recent.join('；') : '当前会话暂无有效消息'
-  chatMessages.value.push({ id: `summary-${Date.now()}`, conversationId: activeConversation.value.id, mine: false, text: `协作重点：${focus.slice(0, 180)}。建议明确负责人、下一步动作与复测时间。`, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) })
+  const message = { id: `summary-${Date.now()}`, conversationId: activeConversation.value.id, mine: true, text: `协作重点：${focus.slice(0, 180)}。建议明确负责人、下一步动作与验证时间。`, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }
+  chatMessages.value.push(message)
+  await persistChatMessage(message, { message_type: 'summary' })
 }
 const requestSupport = () => {
   const task = tasks.value.find((item) => item.workOrderNo === activeConversation.value?.taskNo) || tasks.value.find((item) => item.severity === 'high')
-  sendChatMessage(`专家支援请求：${task?.workOrderNo || '当前检修任务'} 需要协助判断故障原因，请携带检测结论反馈。`)
+  sendChatMessage(`专家支援请求：${task?.workOrderNo || '当前项目任务'} 需要协助判断问题根因，请附引用依据与验证结论反馈。`)
   toast('支援请求已发送到当前协作会话')
 }
-const createCollaborationGroup = () => {
+const createCollaborationGroup = async () => {
   const source = activeConversation.value
-  const id = `local-group-${Date.now()}`
-  contacts.value.unshift({ id, name: `${source?.name || '检修'}协作群`, avatar: '', position: '临时协作群', department: source?.department || user.department, specialty: source?.specialty || '检修协作', devices: source?.devices || [], currentTask: source?.currentTask || '待关联任务', workload: 0, status: '在线' })
-  activeConversationId.value = `contact-${id}`
+  const id = `group-${Date.now()}`
+  const group = {
+    id,
+    name: `${source?.currentTask || source?.name || currentProject.value.name}协作群`,
+    kind: 'group',
+    project_id: activeProjectId.value,
+    task_id: source?.taskNo || '',
+    created_by: currentAccount.value,
+    members: [
+      { account: currentAccount.value, name: user.name },
+      ...(source?.members || []).filter((member) => member?.account !== currentAccount.value)
+    ],
+    metadata: { department: source?.department || user.department, specialty: source?.specialty || '项目协作', devices: source?.devices || [], currentTask: source?.currentTask || '待关联任务', risk: source?.risk || 'medium' },
+    last_message: '协作群已创建',
+    unread: 0
+  }
+  remoteConversations.value.unshift(group)
+  activeConversationId.value = id
   contactViewMode.value = 'group'
   chatMessages.value.push({ id: `group-${Date.now()}`, conversationId: activeConversationId.value, mine: false, text: `协作群已创建。创建人：${user.name}，请先发送任务卡片并明确分工。`, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) })
-  toast('协作群已创建并打开')
+  persistLocalChatCache()
+  try {
+    const saved = await yixiuApi.createConversation(group)
+    remoteConversations.value = [saved, ...remoteConversations.value.filter((item) => item.id !== id)]
+    activeConversationId.value = saved.id
+    toast('协作群已创建，团队成员可以同步查看')
+  } catch (error) {
+    toast(`协作群已离线创建；后端连接后再同步：${error.message}`)
+  }
 }
 const scheduleMeeting = () => {
   const source = activeConversation.value
-  const title = window.prompt('请输入会议主题', `${source?.name || '检修'}协同会议`)
+  const title = window.prompt('请输入会议主题', `${source?.name || '项目'}协同会议`)
   if (!title) return
   const meeting = {
     id: `meeting-${Date.now()}`,
@@ -6772,7 +7591,7 @@ const scheduleMeeting = () => {
     owner: source?.department || user.department,
     taskNo: source?.taskNo || tasks.value[0]?.workOrderNo || '待关联任务',
     members: [user.name, source?.name, ...(source?.devices || []).slice(0, 1)].filter(Boolean),
-    agenda: `围绕 ${source?.currentTask || '当前检修任务'} 明确分工、资料和复测时间`,
+    agenda: `围绕 ${source?.currentTask || '当前项目任务'} 明确分工、资料和 Eval 时间`,
     progress: 25
   }
   contactMeetings.value.unshift(meeting)
@@ -6784,7 +7603,7 @@ const startInstantMeeting = () => {
   const source = activeConversation.value
   const meeting = {
     id: `instant-${Date.now()}`,
-    title: `${source?.name || '检修'}即时会议`,
+    title: `${source?.name || '项目'}即时会议`,
     time: '现在',
     status: '进行中',
     owner: source?.department || user.department,
@@ -6801,21 +7620,99 @@ const startInstantMeeting = () => {
 const inviteContactToMeeting = () => {
   const meeting = currentMeeting.value
   const contact = filteredContacts.value[0]
-  if (!meeting || !contact) return toast('暂无可邀请联系人')
+  if (!meeting || !contact) return toast('暂无可邀请成员')
   meeting.members = [...new Set([...meeting.members, contact.name])]
   sendChatMessage(`会议邀请：已邀请 ${contact.name} 参加「${meeting.title}」。`)
   toast('已邀请推荐成员加入会议')
 }
 const openMessageCard = (card) => {
-  if (card.type === 'task') return goStat({ page: 'tasks', panel: 'manage' })
+  if (card.type === 'task' || card.type === 'handoff') return goStat({ page: 'tasks', panel: 'manage' })
   if (card.type === 'knowledge') return goStat({ page: 'search', panel: 'network' })
   if (card.type === 'meeting') return contactViewMode.value = 'meeting'
   toast(card.title)
+}
+const loadTaskHandoffs = async (task) => {
+  if (!task?.id) return
+  try {
+    taskHandoffHistory.value = await yixiuApi.taskHandoffs(task.id)
+    const pending = taskHandoffHistory.value.find((item) => item.status === 'pending')
+    if (pending) task.pendingHandoff = pending
+  } catch {
+    taskHandoffHistory.value = task.handoffHistory || []
+  }
+}
+const openHandoffForm = (task) => {
+  if (!task) return toast('请先选择需要交接的任务')
+  if (task.status === 'completed') return toast('已归档任务无需交接')
+  if (task.pendingHandoff) return toast(`当前已有一笔交接等待 ${task.pendingHandoff.to_name} 确认`)
+  selectedTask.value = task
+  Object.assign(handoffForm, {
+    taskId: task.id,
+    toAccount: '',
+    summary: `当前进度 ${task.progress || 0}%，阶段：${task.current_step || '待确认'}。请接续处理 ${task.next_milestone || '下一里程碑'}。`,
+    checklistText: '当前进展\n关键决策与风险\n待办事项\n相关代码、文档与 Eval 结果'
+  })
+  showHandoffForm.value = true
+}
+const submitTaskHandoff = async () => {
+  const task = tasks.value.find((item) => item.id === handoffForm.taskId)
+  const contact = handoffCandidates.value.find((item) => (item.account || item.employeeId || String(item.id)) === handoffForm.toAccount)
+  if (!task || !contact) return toast('请选择有效的接收人')
+  if (!handoffForm.summary.trim()) return toast('请填写交接说明')
+  handoffSubmitting.value = true
+  try {
+    const handoff = await yixiuApi.createTaskHandoff(task.id, {
+      from_account: currentAccount.value,
+      from_name: user.name,
+      to_account: handoffForm.toAccount,
+      to_name: contact.name,
+      summary: handoffForm.summary.trim(),
+      checklist: handoffForm.checklistText.split(/\n+/).map((item) => item.trim()).filter(Boolean)
+    })
+    task.pendingHandoff = handoff
+    taskHandoffHistory.value = [handoff, ...taskHandoffHistory.value.filter((item) => item.id !== handoff.id)]
+    const message = {
+      id: `handoff-card-${Date.now()}`,
+      conversationId: activeConversation.value?.taskNo === task.workOrderNo ? activeConversation.value.id : 'task-room-1',
+      mine: true,
+      text: `任务交接已发起：${user.name} → ${contact.name}。接收人确认前，原负责人继续负责。`,
+      time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+      card: { type: 'handoff', title: task.workOrderNo, desc: handoffForm.summary.trim() },
+      deliveryStatus: 'sending'
+    }
+    chatMessages.value.push(message)
+    void persistChatMessage(message, { message_type: 'handoff-card', card: message.card })
+    showHandoffForm.value = false
+    toast(`交接已发给 ${contact.name}，等待确认`)
+  } catch (error) {
+    toast(`交接未提交：${error.message}`)
+  } finally {
+    handoffSubmitting.value = false
+  }
+}
+const resolveTaskHandoff = async (task, action) => {
+  const handoff = task?.pendingHandoff
+  if (!task || !handoff) return
+  try {
+    const result = await yixiuApi.resolveTaskHandoff(task.id, handoff.id, { action, account: currentAccount.value })
+    if (action === 'accept') {
+      const previousOwner = task.assignee_name
+      task.assignee_name = result.assignee_name || handoff.to_name
+      task.collaborators = [...new Set([...(task.collaborators || []), previousOwner, handoff.from_name].filter(Boolean))]
+    }
+    task.handoffHistory = [...(task.handoffHistory || []), { ...handoff, status: result.status, resolved_at: new Date().toISOString() }]
+    task.pendingHandoff = null
+    await loadTaskHandoffs(task)
+    toast(action === 'accept' ? '任务已接收，原负责人已转为协作者' : '交接已退回，任务负责人保持不变')
+  } catch (error) {
+    toast(`交接处理失败：${error.message}`)
+  }
 }
 const openTask = (task) => {
   if (task && (!task.sop || !task.sop.length)) task.sop = recommendedSopForTask(task)
   if (task && (!task.safety || !task.safety.length)) task.safety = taskComplianceChecks(task).filter((item) => item.required).map((item) => item.hint)
   selectedTask.value = task
+  void loadTaskHandoffs(task)
 }
 const openKnowledge = async (item) => {
   selectedKnowledge.value = item
@@ -6873,7 +7770,7 @@ const onKnowledgeContentInput = () => {
   kdAutoSaveTimer.value = setTimeout(() => saveKnowledgeContent(true), 1500)
 }
 const insertMarkdown = (type) => {
-  const map = { heading: '\n## ', bold: '**加粗内容**', list: '\n- ', todo: '\n- [ ] ', table: '\n| 设备 | 参数 | 检测值 |\n|------|------|--------|\n| CG125 | 气门间隙 | 0.08mm |\n' }
+  const map = { heading: '\n## ', bold: '**加粗内容**', list: '\n- ', todo: '\n- [ ] ', table: '\n| 项目 | 字段 | 内容 |\n|------|------|------|\n| 当前任务 | 验收标准 | 待补充 |\n' }
   knowledgeDraft.content += map[type] || ''
   onKnowledgeContentInput()
 }
@@ -6985,9 +7882,9 @@ const selectFileFolder = (node) => {
       : [...expandedFileFolders.value, node.name]
   }
   if (!['系统知识库', '项目', '文档', '客户'].includes(node.name)) activeFolder.value = node.name
-  if (node.name === '文档') activeFolder.value = '维修手册'
+  if (node.name === '文档') activeFolder.value = '需求文档'
 }
-const protectedFileFolders = ['系统知识库', '项目', '文档', '客户', '全部文件', '维修手册', '标准作业流程', '现场图片', '检修报告', '复检报告', '其他技术资料']
+const protectedFileFolders = ['系统知识库', '项目', '文档', '客户', '全部文件', '需求文档', '代码与设计', 'Context Pack', 'Memory', 'Skill', 'Eval 数据', '会议记录', '外部 AI 导入']
 const canEditFileFolder = (folder) => !protectedFileFolders.includes(folder)
 const createFileFolder = (parentName = '') => {
   const name = window.prompt('请输入新文件夹名称')
@@ -7074,8 +7971,8 @@ const toast = (text) => {
   }, 1800)
 }
 const statusClass = (value) => String(value).includes('异常') || String(value).includes('离线') ? 'bad' : 'ok'
-const severityText = (value) => ({ low: '低', medium: '中', high: '重复问题', critical: '严重阻塞' }[value] || value || '中')
-const statusText = (value) => ({ pending: '待启动', in_progress: '推进中', review: '待验收', completed: '已归档', paused: '已暂停', rejected: '已退回', overdue: '已逾期' }[value] || value || '待启动')
+const severityText = (value) => ({ low: '低', medium: '中', high: '高', critical: '严重阻塞' }[value] || value || '中')
+const statusText = (value) => ({ pending: '待启动', in_progress: '推进中', review: '待 Review / Eval', completed: '已归档', paused: '已暂停', rejected: '已退回', overdue: '已逾期' }[value] || value || '待启动')
 const knowledgeStatusText = (value) => ({ pending: '待人工审核', approved: '已审核入库', rejected: '已退回修改' }[value] || value || '待人工审核')
 const modalityText = (value) => ({ text: '文本描述', equipment_model: '技术栈', task_context: '任务上下文', image: '截图图片', document: '任务文档', file: '附件材料' }[value] || value)
 const cleanKnowledgePart = (value) => String(value ?? '').replace(/^\s*[.。·]{1,}\s*$/, '').trim()
@@ -7113,64 +8010,64 @@ const searchFromKnowledge = (item) => {
   activePage.value = 'search'
   resultTab.value = '全部'
 }
-const stepTitle = (step) => typeof step === 'string' ? step : step?.title || '检修步骤'
+const stepTitle = (step) => typeof step === 'string' ? step : step?.title || '执行步骤'
 const stepDetail = (step) => typeof step === 'object' ? step?.detail || '' : ''
 const isTaskStepCompleted = (task, index) => (task.completedSteps || []).includes(index)
-const taskLevel = (task = {}) => task.maintenanceLevel || task.maintenance_level || task.level || (task.severity === 'high' ? '三级大修' : '二级检修')
-const taskCategory = (task = {}) => task.equipment_category || task.category || (task.equipment_name?.includes('配电') ? '电气系统' : task.equipment_name?.includes('发动机') ? '发动机' : '通用设备')
+const taskLevel = (task = {}) => task.maintenanceLevel || task.maintenance_level || task.level || (task.severity === 'high' ? '高风险协作' : '标准协作')
+const taskCategory = (task = {}) => task.equipment_category || task.category || '通用项目'
 const recommendedSopForTask = (task = {}) => {
   const category = taskCategory(task)
   const level = taskLevel(task)
-  const fault = task.fault_type || '故障'
+  const issue = task.fault_type || '待解决问题'
   const base = [
-    { title: '作业许可与安全隔离', detail: `确认${category}${level}作业票，执行停机、断电、验电和挂牌。`, required: true, evidence: '安全确认' },
-    { title: '故障现象记录', detail: `记录${fault}出现条件、报警、温度、声音及现场图片，禁止带故障盲目拆机。`, required: true, evidence: '数据或图片' },
-    { title: '按依据逐项检测', detail: '按照召回手册和相似案例测量关键参数，先确认原因再更换部件。', required: true, evidence: '检测值' },
-    { title: '维修处置与过程复核', detail: '执行紧固、清洁、调整或更换，记录工具、部件及关键扭矩。', required: true, evidence: '过程记录' },
-    { title: '复测验收', detail: '恢复防护后试运行，对照标准复测并确认故障消除。', required: true, evidence: '复测结果' },
-    { title: '报告与知识沉淀', detail: '提交检修报告、引用依据和证据；有效经验进入知识审核队列。', required: true, evidence: '检修报告' }
+    { title: '确认目标与验收标准', detail: `确认${category}中「${issue}」的范围、非目标、负责人和 ${level} 交付口径。`, required: true, evidence: '需求/任务说明' },
+    { title: '生成 Context Pack', detail: '汇总需求、相关代码、历史 Memory、可用 Skill、Eval 与信息缺口。', required: true, evidence: 'Context Pack' },
+    { title: '方案与影响面分析', detail: '基于引用依据定位关键模块、上下游依赖、数据风险和回滚路径。', required: true, evidence: '方案/代码引用' },
+    { title: '执行与协作留痕', detail: '由人员与 Agent 按职责完成修改、审查和工具调用，保存关键 Trace。', required: true, evidence: '提交/Trace' },
+    { title: 'Review 与 Eval', detail: '运行数据集和质量门禁，记录失败样例、评分结果与人工 Review 结论。', required: true, evidence: 'Eval 报告' },
+    { title: 'Memory 与 Skill 演化', detail: '把已验证结论沉淀为 Memory；高复用流程进入 Skill 候选与版本管理。', required: true, evidence: 'Memory/Skill' }
   ]
-  if (category.includes('电气')) base.splice(1, 0, { title: '电气合规确认', detail: '复核工作票、验电、接地线、绝缘防护和禁止合闸标识。', required: true, evidence: '工作票/照片' })
-  if (level.includes('三级') || task.severity === 'high') base.splice(2, 0, { title: '高风险二次确认', detail: '由安全负责人复核风险隔离、应急措施和复测窗口。', required: true, evidence: '二次确认记录' })
+  if (task.severity === 'high') base.splice(3, 0, { title: '高风险二次确认', detail: '由项目负责人复核权限、数据迁移、发布窗口、降级与回滚方案。', required: true, evidence: '二次确认记录' })
   return base
 }
 const taskFlowProfile = (task = {}) => {
   const category = taskCategory(task)
   const level = taskLevel(task)
   return {
-    title: `${category} · ${level}标准流程包`,
-    reason: `根据设备类型「${category}」、检修等级「${level}」和故障类型「${task.fault_type || '待确认'}」推送 ${recommendedSopForTask(task).length} 步流程。`,
-    tags: [category, level, task.fault_type || '故障确认', task.severity === 'high' ? '高风险二次确认' : '常规合规校验']
+    title: `${category} · ${level} Skill 指引`,
+    reason: `根据项目类型「${category}」、协作等级「${level}」和问题类型「${task.fault_type || '待确认'}」推荐 ${recommendedSopForTask(task).length} 步执行路径。`,
+    tags: [category, level, task.fault_type || '问题确认', task.severity === 'high' ? '高风险二次确认' : '常规质量门禁']
   }
 }
 const taskComplianceChecks = (task = {}) => {
   const completed = task.completedSteps?.length || 0
   const total = task.sop?.length || recommendedSopForTask(task).length
-  const isElectric = taskCategory(task).includes('电气')
   const isHighRisk = task.severity === 'high'
   return [
-    { label: '流程已推送', hint: `${taskFlowProfile(task).title}`, ok: Boolean(task.sop?.length), required: true },
-    { label: '安全隔离确认', hint: isElectric ? '停电、验电、挂牌、接地线' : '停机、泄压、温度确认', ok: completed > 0 || task.status !== 'pending', required: true },
-    { label: '证据记录完整', hint: '图片/检测值/过程记录至少一项', ok: completed >= Math.max(1, Math.floor(total / 2)) || task.status === 'review' || task.status === 'completed', required: true },
-    { label: '高风险复核', hint: isHighRisk ? '需安全负责人二次确认' : '常规风险，无需额外复核', ok: !isHighRisk || completed >= 2 || ['review', 'completed'].includes(task.status), required: isHighRisk },
-    { label: '复测闭环', hint: '全部步骤完成后才可进入复检', ok: completed >= total || ['review', 'completed'].includes(task.status), required: true }
+    { label: 'Skill 已匹配', hint: `${taskFlowProfile(task).title}`, ok: Boolean(task.sop?.length), required: true },
+    { label: '上下文可追溯', hint: '需求、代码、Memory 与引用依据完整', ok: completed > 0 || task.status !== 'pending', required: true },
+    { label: '执行证据完整', hint: '提交、Review、Trace 或产出至少一项', ok: completed >= Math.max(1, Math.floor(total / 2)) || task.status === 'review' || task.status === 'completed', required: true },
+    { label: '高风险复核', hint: isHighRisk ? '需项目负责人二次确认并提供回滚方案' : '常规风险，执行标准 Review', ok: !isHighRisk || completed >= 2 || ['review', 'completed'].includes(task.status), required: isHighRisk },
+    { label: 'Eval 闭环', hint: '全部必要步骤完成后才能通过质量门禁', ok: completed >= total || ['review', 'completed'].includes(task.status), required: true }
   ]
 }
 const applyRecommendedSop = (task) => {
   if (!task) return
   task.sop = recommendedSopForTask(task)
   task.safety = [...new Set([...(task.safety || []), ...taskComplianceChecks(task).filter((item) => item.required).map((item) => item.hint)])]
-  task.current_step = task.status === 'pending' ? '作业许可与安全隔离' : task.current_step
-  toast('已应用个性化标准作业流程')
+  task.current_step = task.status === 'pending' ? '确认目标与验收标准' : task.current_step
+  toast('已应用个性化 Skill 指引')
 }
 const folderIcon = (folder) => ({
   全部文件: '▦',
-  维修手册: '▣',
-  标准作业流程: '✓',
-  现场图片: '◉',
-  检修报告: '▤',
-  复检报告: '◎',
-  其他技术资料: '□'
+  需求文档: '▣',
+  代码与设计: '</>',
+  'Context Pack': '◈',
+  Memory: '◇',
+  Skill: '✓',
+  'Eval 数据': '◎',
+  会议记录: '▤',
+  '外部 AI 导入': '⇩'
 }[folder] || '□')
 const fileIconClass = (file) => ({
   PDF: 'pdf',
@@ -7251,7 +8148,7 @@ const clearOperatorMessages = () => {
 const askAgentAboutNode = (node) => {
   floatingAgent.open = true
   if (!node) return sendOperatorPrompt('请帮我解释当前知识图谱的重点关系')
-  sendOperatorPrompt(`请围绕知识图谱节点「${node.label}」解释它的关联资料、上下游关系和检修建议`)
+  sendOperatorPrompt(`请围绕知识网络节点「${node.label}」解释它的关联资料、上下游关系和执行建议`)
 }
 const inferFileType = (file) => {
   const name = file.name.toLowerCase()
@@ -7301,39 +8198,9 @@ const cloneAssistantFileForSearch = (file) => ({
   status: '已由天工转入智能检索',
   progress: file.progress || 0
 })
-const inferSearchScene = (text = '', files = []) => {
-  const content = `${text || ''} ${files.map((file) => file.name || '').join(' ')}`.toLowerCase()
-  const hasWaterIntent = hasAffirmativeWaterScene(content)
-  const hasAutoVehicleIntent = /汽车|轿车|车辆/.test(content)
-  const hasMotorcycleEngineIntent = /摩托|cg-?125/.test(content) || (!hasAutoVehicleIntent && /发动机异响|发动机|气门|怠速|正时链条|张紧器|火花塞|化油器|凸轮轴|摇臂/.test(content))
-  if (hasMotorcycleEngineIntent && !hasWaterIntent) {
-    return {
-      type: 'motorcycle_engine',
-      deviceName: '摩托车发动机总成',
-      deviceModel: /cg-?125/.test(content) ? 'CG-125' : '',
-      faultCode: '',
-      category: '发动机',
-      faultType: /怠速/.test(content) ? '异响/怠速不稳' : '发动机异响',
-      query: '基于本次输入和图片检索摩托车发动机异响；只根据当前图片、文字和本轮检索依据回答，不混入历史检索。重点检查气门间隙、正时链条/张紧器、摇臂/凸轮轴、机油润滑、火花塞、化油器怠速油路、进气漏气和曲轴连杆轴承。'
-    }
-  }
-  if (hasWaterIntent) {
-    return {
-      type: 'vehicle_water',
-      deviceName: '',
-      deviceModel: '',
-      faultCode: '',
-      category: '',
-      faultType: '',
-      query: '基于本次输入和图片进行检索；只根据当前图片、文字和本轮检索依据回答，不套用旧案例。若现场确认为泡水/涉水，再检查发动机进气、机油乳化、变速箱油、电气线束、制动系统、底盘和安全启动风险。'
-    }
-  }
-  return null
-}
-const WATER_SCENE_RE = /车淹|泡水|涉水|积水|淹水|水淹|进水/
-const WATER_RESULT_RE = /泡水|涉水|水淹|积水|进水|汽车涉水/
-const WATER_NEGATION_RE = /没有泡水|无泡水|未泡水|不是泡水|非泡水|没有涉水|无涉水|未涉水|不涉水|不是涉水|非涉水|没有积水|无积水|未积水|不是积水|非积水|没有进水|无进水|未进水|不进水|不是进水|非进水|没有水淹|无水淹|未水淹|不涉及水/
-const hasAffirmativeWaterScene = (value = '') => WATER_SCENE_RE.test(String(value || '')) && !WATER_NEGATION_RE.test(String(value || ''))
+// 旧版设备场景识别已停用。当前 Context Engine 只根据项目表单和本轮证据组装上下文，
+// 不再用设备关键词覆盖用户选定的项目、模块与任务类型。
+const inferSearchScene = () => null
 const resetSearchIdentityFields = () => {
   Object.assign(searchForm, {
     deviceName: '',
@@ -7351,7 +8218,7 @@ const applySearchScene = (scene = {}) => {
 }
 const isVisualSearchTransferPrompt = (value) => {
   const text = String(value || '')
-  return assistantFiles.value.length > 0 && /图片|图像|照片|附件|资料|上传|转交|交给|智能检索|观微|查看|分析/.test(text) && /智能检索|观微|查看|分析|什么问题|故障/.test(text)
+  return assistantFiles.value.length > 0 && /图片|图像|照片|附件|资料|上传|转交|交给|上下文|观微|查看|分析/.test(text) && /上下文|观微|查看|分析|影响范围|项目/.test(text)
 }
 const addFiles = async (event, target) => {
   const selected = Array.from(event.target.files || []).map(toFileMeta)
@@ -7517,51 +8384,40 @@ const buildLocalSearchResult = () => {
       ]
     }
   }
-  const isHighRisk = ['过热', '点火故障'].includes(searchForm.faultType)
-  const subject = [searchForm.deviceModel, searchForm.deviceName].filter(Boolean).join(' ') || '待确认设备'
-  const fault = searchForm.faultType || '待确认故障'
+  const isHighRisk = searchForm.maintenanceLevel?.includes('高风险') || ['线上 Bug', '数据变更', '权限改造'].includes(searchForm.faultType)
+  const subject = [searchForm.deviceName, searchForm.deviceModel].filter(Boolean).join(' / ') || '待确认项目'
+  const issue = searchForm.faultType || '待确认问题'
   return {
-    phenomenonSummary: `${subject} 出现${fault}现象，建议结合现场记录、图片和历史案例优先定位高频故障部位；未知型号和未知部位保持待确认。`,
+    phenomenonSummary: `${subject} 的「${issue}」已进入上下文组装，建议结合需求、代码、历史 Memory 与 Eval 优先确认目标、影响面和验收标准；缺失信息保持待确认。`,
     risk: isHighRisk ? 'high' : 'medium',
     confidence: searchFiles.value.length ? 88 : 82,
-    stopAdvice: isHighRisk ? '先执行安全隔离并确认温度、供电和联锁状态' : '可在安全确认后按标准流程分步排查',
-    modalities: ['text', ...(searchFiles.value.length ? ['image', 'file'] : [])],
-    visualFindings: searchFiles.value.length ? ['已接入现场附件，建议核对异常区域、油迹、温升或磨损痕迹'] : [],
-    causes: searchForm.faultType === '异响'
-      ? ['气门间隙异常', '紧固件松动', '润滑状态不足']
-      : searchForm.faultType === '过热'
-        ? ['散热通道堵塞', '接触器触点异常', '负载偏高']
-        : ['密封件老化', '连接处松动', '作业后复检不足'],
-    positions: searchForm.faultType === '异响' ? ['气门室', '正时链条', '轴承座'] : ['异常部位', '连接点', '关键测量点'],
-    tools: ['红外测温仪', '扭矩扳手', '万用表', '复检记录表'],
+    stopAdvice: isHighRisk ? '先确认权限、数据影响、灰度窗口和回滚方案，再进入执行' : '可在上下文完整后按 Skill 指引分步执行',
+    modalities: ['text', ...(searchFiles.value.length ? ['document', 'file'] : [])],
+    visualFindings: searchFiles.value.length ? ['已接入本轮附件，建议核对需求版本、代码分支、关键模块与验收证据'] : [],
+    causes: ['需求边界或验收口径不完整', '关键代码与依赖关系未纳入上下文', '历史 Memory 或 Eval 覆盖不足'],
+    positions: ['需求与验收标准', '关键模块与上下游依赖', '测试数据与发布门禁'],
+    tools: ['代码检索', 'Context Pack', 'Agent 协作', 'Eval Lab'],
     suggestion: {
-      steps: ['确认作业安全隔离', '复核现场现象和设备参数', '检查高频故障部位', '记录处理措施并执行复测', '将有效结论提交沉淀审核'],
-      tools: ['红外测温仪', '扭矩扳手', '万用表'],
-      risks: ['带电作业风险', '高温部位烫伤', '复测数据缺失']
+      steps: ['确认目标、范围和验收标准', '定位相关代码与历史 Memory', '选择 Skill 并明确人机分工', '执行修改、Review 与 Eval', '将有效结论沉淀为 Memory 或 Skill 候选'],
+      tools: ['代码检索', 'Agent 协作', 'Eval Lab'],
+      risks: ['目标或边界漂移', '引用依据不完整', '回归样例覆盖不足']
     },
     references: [
-      { id: 'local-ref-1', title: `${subject} ${fault}历史故障案例`, type: '历史故障案例', category: '历史故障案例', equipment: searchForm.deviceName, model: searchForm.deviceModel, match: 86, summary: '同类现象常见于关键连接、润滑、散热或密封状态异常，需结合复测记录确认。', tags: [fault, '历史案例', '复检'] },
-      { id: 'local-ref-2', title: `${searchForm.category}标准作业流程`, type: '标准作业流程 SOP', category: '标准作业流程 SOP', equipment: searchForm.deviceName, model: searchForm.deviceModel, match: 82, summary: '按安全确认、部位检查、处理记录、复测验收的顺序执行，保证后续沉淀可复用。', tags: ['SOP', searchForm.maintenanceLevel, '安全确认'] }
+      { id: 'local-ref-1', title: `${subject} ${issue}历史 Memory`, type: 'Memory', category: '历史任务', equipment: searchForm.deviceName, model: searchForm.deviceModel, match: 86, summary: '相似任务中的目标、关键决策、有效方案与失败尝试，可作为本次执行的参考而非最终结论。', tags: [issue, 'Memory', '适用边界'] },
+      { id: 'local-ref-2', title: `${searchForm.category}协作执行 Skill`, type: 'Skill', category: '执行建议', equipment: searchForm.deviceName, model: searchForm.deviceModel, match: 82, summary: '按上下文确认、方案分析、执行留痕、Review、Eval 和沉淀的顺序推进。', tags: ['Skill', searchForm.maintenanceLevel, '质量门禁'] },
+      { id: 'local-ref-3', title: `${subject} ${issue} Eval 基准`, type: 'Eval', category: 'Eval 数据', equipment: searchForm.deviceName, model: searchForm.deviceModel, match: 79, summary: '覆盖核心路径、异常输入、兼容性和回滚场景，并保留失败样例用于迭代。', tags: ['Eval', '回归', '发布门禁'] }
     ]
   }
 }
 const runSearch = async () => {
   const startedAt = Date.now()
-  const currentScene = inferSearchScene(searchForm.query, searchFiles.value)
-  const currentInputText = `${searchForm.query || ''} ${searchFiles.value.map((file) => file.name || '').join(' ')}`
-  if (currentScene) {
-    resetSearchIdentityFields()
-    applySearchScene(currentScene)
-  } else if (!hasAffirmativeWaterScene(currentInputText) && WATER_RESULT_RE.test(`${searchForm.deviceName}${searchForm.category}${searchForm.faultType}`)) {
-    resetSearchIdentityFields()
-  }
   loading.search = true
   searchPanel.value = 'results'
   try {
     for (const file of searchFiles.value.filter((item) => !item.id)) {
       file.status = '上传中'
       try {
-        const saved = await yixiuApi.uploadFile(file.raw, { purpose: 'search', category: '多模态检索', folder: '检索附件', uploader: user.name, equipment: searchForm.deviceName, model: searchForm.deviceModel }, (progress) => { file.progress = progress })
+        const saved = await yixiuApi.uploadFile(file.raw, { purpose: 'context-pack', category: 'Context Pack', folder: '上下文证据', uploader: user.name, equipment: searchForm.deviceName, model: searchForm.deviceModel }, (progress) => { file.progress = progress })
         Object.assign(file, saved, { raw: file.raw, localId: file.localId, status: '解析完成', progress: 100 })
       } catch (error) {
         file.status = '上传失败'
@@ -7572,7 +8428,7 @@ const runSearch = async () => {
     searchHistory.value = [
       {
         id: `history-${Date.now()}`,
-        title: `${searchForm.deviceModel || searchForm.deviceName} ${searchForm.faultType}检索`,
+        title: `${searchForm.deviceModel || searchForm.deviceName} ${searchForm.faultType} Context Pack`,
         deviceName: searchForm.deviceName,
         model: searchForm.deviceModel,
         faultCode: searchForm.faultCode,
@@ -7586,13 +8442,13 @@ const runSearch = async () => {
       ...searchHistory.value
     ].slice(0, 8)
     searchPanel.value = 'results'
-    toast('检索完成')
+    toast('Context Pack 已生成')
   } catch (error) {
     searchResult.value = buildLocalSearchResult()
     searchHistory.value = [
       {
         id: `history-${Date.now()}`,
-        title: `${searchForm.deviceModel || searchForm.deviceName} ${searchForm.faultType}检索`,
+        title: `${searchForm.deviceModel || searchForm.deviceName} ${searchForm.faultType} Context Pack`,
         deviceName: searchForm.deviceName,
         model: searchForm.deviceModel,
         faultCode: searchForm.faultCode,
@@ -7605,16 +8461,52 @@ const runSearch = async () => {
       },
       ...searchHistory.value
     ].slice(0, 8)
-    toast(error.message ? '接口暂不可用，已生成本地检索研判' : '已生成本地检索研判')
+    toast(error.message ? '接口暂不可用，已生成本地 Context Pack' : '已生成本地 Context Pack')
   } finally {
     const elapsed = Date.now() - startedAt
     if (elapsed < 1400) await new Promise((resolve) => setTimeout(resolve, 1400 - elapsed))
+    if (searchResult.value) {
+      contextPackVersions.value.unshift({
+        id: `cp-${Date.now()}`,
+        version: `v${contextPackVersions.value.length + 1}.0`,
+        project: searchForm.deviceName || currentProject.value.name,
+        confidence: searchResult.value.confidence || 0,
+        evidence: (searchResult.value.references?.length || 0) + searchFiles.value.length,
+        completeness: contextPackMeta.value.completeness,
+        gaps: [...contextPackMeta.value.gaps],
+        summary: searchResult.value.phenomenonSummary,
+        createdAt: new Date().toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      })
+      contextPackVersions.value = contextPackVersions.value.slice(0, 8)
+      contextCompareTarget.value = contextPackVersions.value[0]?.id || ''
+      contextCompareBase.value = contextPackVersions.value[1]?.id || contextPackVersions.value[0]?.id || ''
+    }
     loading.search = false
   }
 }
+const routeContextPack = () => {
+  if (!searchResult.value) return toast('请先生成 Context Pack')
+  selectedAgentId.value = 'tiangong'
+  operatorInput.value = `请基于 ${contextPackMeta.value.title} 选择合适的 Skill、Agent 和模型，并说明推荐理由、预计成本与风险。`
+  toast('Context Pack 已送入 Skill First Router，可在右侧面板确认执行')
+}
+const shareContextPack = async () => {
+  if (!searchResult.value) return toast('请先生成 Context Pack')
+  const summary = [
+    `【Context Pack ${contextPackMeta.value.version}】${contextPackMeta.value.title}`,
+    `结论：${searchResult.value.phenomenonSummary}`,
+    `证据完整度：${contextPackMeta.value.completeness}% · 引用 ${contextPackMeta.value.evidenceCount} 条`,
+    contextPackMeta.value.gaps.length ? `待补材料：${contextPackMeta.value.gaps.join('、')}` : '证据检查：已满足当前执行条件'
+  ].join('\n')
+  activePage.value = 'tasks'
+  taskPanel.value = 'contacts'
+  await nextTick()
+  await sendChatMessage(summary)
+  toast('Context Pack 已发送到当前协作会话')
+}
 const createTaskFromSearch = async (item) => {
   const created = await yixiuApi.createTask({
-    title: `${searchForm.deviceModel} ${searchForm.faultType}检修任务`,
+    title: `${searchForm.deviceModel || searchForm.deviceName} ${searchForm.faultType}协作任务`,
     deviceName: searchForm.deviceName,
     deviceModel: searchForm.deviceModel,
     category: searchForm.category,
@@ -7623,6 +8515,7 @@ const createTaskFromSearch = async (item) => {
     description: searchForm.query,
     severity: searchResult.value?.risk || 'medium',
     assignee_name: user.name,
+    assignee_account: currentAccount.value,
     sop: searchResult.value?.suggestion?.steps || [],
     tools: searchResult.value?.suggestion?.tools || [],
     safety: searchResult.value?.suggestion?.risks || [],
@@ -7632,7 +8525,7 @@ const createTaskFromSearch = async (item) => {
   localTask.sop = localTask.sop?.length ? localTask.sop : recommendedSopForTask(localTask)
   localTask.safety = localTask.safety?.length ? localTask.safety : taskComplianceChecks(localTask).filter((item) => item.required).map((item) => item.hint)
   tasks.value.unshift(localTask)
-  toast('已从检索结果创建检修任务')
+  toast('已从 Context Pack 创建项目任务')
 }
 const applySearchHistory = (item) => {
   Object.assign(searchForm, {
@@ -7657,6 +8550,7 @@ const openLearningRecommendation = (item) => {
 }
 const externalArtifactTypeText = (type = '') => ({
   project_update: '项目进展',
+  code_change: '代码修改',
   decision: '关键决策',
   risk: '风险提醒',
   todo: '待办事项',
@@ -7693,7 +8587,7 @@ const loadExternalImports = async () => {
     const data = await yixiuApi.externalImports()
     externalImports.value = data.imports || []
   } catch (error) {
-    toast(`导入记录加载失败：${error.message}`)
+    if (activePage.value === 'search' && searchPanel.value === 'external') toast(`导入记录加载失败：${error.message}`)
   }
 }
 const openMcpConfig = async () => {
@@ -7703,6 +8597,41 @@ const openMcpConfig = async () => {
     mcpManifest.value = await yixiuApi.mcpManifest()
   } catch (error) {
     toast(`MCP 配置加载失败：${error.message}`)
+  }
+}
+const testMcpConnection = async () => {
+  if (mcpTesting.value) return
+  mcpTesting.value = true
+  mcpConnectionStatus.text = '连接中'
+  mcpConnectionStatus.tone = ''
+  const startedAt = performance.now()
+  try {
+    const manifest = await yixiuApi.mcpManifest()
+    mcpManifest.value = manifest
+    mcpConnectionStatus.latency = Math.max(1, Math.round(performance.now() - startedAt))
+    mcpConnectionStatus.text = manifest?.tools?.length ? '连接正常' : '已连接，未发现工具'
+    mcpConnectionStatus.tone = manifest?.tools?.length ? 'ok' : 'warn'
+    toast(`MCP 连接正常，发现 ${manifest?.tools?.length || 0} 个工具`)
+  } catch (error) {
+    mcpConnectionStatus.latency = 0
+    mcpConnectionStatus.text = '连接失败'
+    mcpConnectionStatus.tone = 'bad'
+    toast(`MCP 连接失败：${error.message}`)
+  } finally {
+    mcpTesting.value = false
+  }
+}
+const copyMcpConfig = async () => {
+  const payload = JSON.stringify({
+    name: mcpManifest.value.name || 'yixiu-ai-import',
+    endpoint: mcpManifest.value.endpoint || 'http://127.0.0.1:5000/api/yixiu/mcp',
+    auth: mcpManifest.value.auth || { header: 'Authorization: Bearer <YIXIU_IMPORT_TOKEN>' }
+  }, null, 2)
+  try {
+    await navigator.clipboard.writeText(payload)
+    toast('MCP 配置已复制')
+  } catch {
+    toast('浏览器未授权剪贴板，请手动复制接入地址和鉴权信息')
   }
 }
 const submitExternalImport = async () => {
@@ -7748,62 +8677,105 @@ const reviewExternalArtifact = async (artifact, status) => {
 const prepareKnowledgeFromSearch = () => {
   if (!searchResult.value) {
     searchPanel.value = 'multimodal'
-    return toast('请先完成一次多模态检索')
+    return toast('请先生成一次 Context Pack')
   }
   Object.assign(knowledgeForm, {
-    title: `${searchForm.deviceModel || searchForm.deviceName} ${searchForm.faultType}检索沉淀`,
-    type: '历史故障案例',
+    title: `${searchForm.deviceModel || searchForm.deviceName} ${searchForm.faultType}执行经验`,
+    type: 'Memory Unit',
     equipment: searchForm.deviceName,
     model: searchForm.deviceModel,
-    source: `${searchForm.faultCode || '检索结果'} · 智能检索`,
-    tagText: [searchForm.faultType, searchForm.maintenanceLevel, '多模态检索'].filter(Boolean).join(','),
+    source: `${searchForm.faultCode || 'Context Pack'} · Context Engine`,
+    tagText: [searchForm.faultType, searchForm.maintenanceLevel, 'Context Pack'].filter(Boolean).join(','),
     summary: [
-      `故障现象：${searchForm.query}`,
-      `研判结论：${searchResult.value.phenomenonSummary}`,
-      `可能原因：${(searchResult.value.causes || []).join('、')}`,
+      `任务背景：${searchForm.query}`,
+      `上下文结论：${searchResult.value.phenomenonSummary}`,
+      `关键线索：${(searchResult.value.causes || []).join('、')}`,
       `推荐步骤：${(searchResult.value.suggestion?.steps || []).join('；')}`,
       `引用依据：${(searchResult.value.references || []).slice(0, 3).map((item) => item.title).join('、')}`
     ].filter(Boolean).join('\n')
   })
   searchPanel.value = 'update'
-  toast('已根据当前检索生成沉淀草稿')
+  toast('已根据当前 Context Pack 生成 Memory 草稿')
 }
 const submitTask = async () => {
-  const created = await yixiuApi.createTask(taskForm)
-  tasks.value.unshift({ ...created, collaborators: [], sop: created.sop?.length ? created.sop : ['安全确认', '故障记录', '部件检测', '复测提交'] })
+  const created = await yixiuApi.createTask({ ...taskForm, assignee_account: currentAccount.value })
+  tasks.value.unshift({ ...created, collaborators: [], sop: created.sop?.length ? created.sop : ['确认目标与验收标准', '组装 Context Pack', '执行与记录 Trace', 'Review 与 Eval'] })
   showTaskForm.value = false
-  toast('检修任务创建成功')
+  toast(created.offline ? '项目任务已保存到本机；团队服务恢复后需重新同步' : '项目任务创建成功')
 }
 const advanceTask = async (task) => {
   const next = task.status === 'pending' ? 'in_progress' : task.status === 'in_progress' ? 'review' : task.status === 'review' ? 'completed' : 'completed'
-  try { await yixiuApi.updateTaskStatus(task.id, next, { operator: user.name }) } catch (_error) { /* local-first fallback; server interface remains available */ }
+  let statusResult = null
+  try {
+    statusResult = await yixiuApi.updateTaskStatus(task.id, next, { operator: user.name })
+  } catch (error) {
+    if (error?.status) return toast(error.message || '当前账号无权更新该任务')
+    task.offline = true
+  }
   task.status = next
   task.progress = next === 'in_progress' ? Math.max(task.progress, 45) : next === 'review' ? 86 : 100
-  task.current_step = next === 'in_progress' ? '作业执行' : next === 'review' ? '复测确认' : '归档'
+  task.current_step = next === 'in_progress' ? '协作执行' : next === 'review' ? 'Eval 验证' : '归档与沉淀'
+  if (next === 'completed') {
+    const deposit = statusResult?.auto_deposit
+    task.memoryStatus = deposit?.memory?.status === 'pending' ? 'AI 草稿待审核' : (task.memoryStatus || '草稿待审核')
+    task.skillCandidate = deposit?.skill_candidate ?? true
+    if (deposit?.memory && !knowledge.value.some((item) => item.id === deposit.memory.id)) knowledge.value.unshift(deposit.memory)
+    if (deposit?.memory?.id) task.autoMemoryId = deposit.memory.id
+    toast(deposit?.created === false ? '任务已完成，已有自动沉淀草稿等待审核' : '任务已完成，AI 已提炼 Memory 草稿并识别 Skill 候选')
+    return
+  }
   toast(`任务已流转为：${statusText(next)}`)
 }
-const taskPrimaryLabel = (task) => ({ pending: '接收并开始任务', in_progress: '提交复检', review: '打开复检评估', completed: '查看归档报告' }[task?.status] || '处理任务')
+const taskPrimaryLabel = (task) => ({ pending: '接收并开始任务', in_progress: '提交 Review / Eval', review: '打开 Eval Lab', completed: '查看归档报告' }[task?.status] || '处理任务')
+const taskActionGateText = (task = {}) => ({
+  pending: '先接收并启动任务，之后才能进入 Eval；所有状态变化都会写入执行 Trace。',
+  in_progress: '当前可继续执行、发起交接或提交 Review / Eval；Memory 将在质量门禁后开放。',
+  review: '任务已进入质量门禁，可在 Eval 通过后生成待审核 Memory 草稿。',
+  completed: '任务已归档，可查看报告或从完整执行 Trace 生成 Memory 草稿。'
+}[task.status] || '按当前阶段继续推进，系统会保留负责人、Agent、Skill、输入输出和操作时间。')
 const handleTaskPrimary = async (task) => {
   if (!task) return
   if (task.status === 'review') return enterTaskRecheck(task)
   if (task.status === 'completed') return previewTaskReport(task)
   if (task.status === 'in_progress' && (task.completedSteps?.length || 0) < (task.sop?.length || 0)) {
-    return toast(`还有 ${(task.sop?.length || 0) - (task.completedSteps?.length || 0)} 个作业步骤未确认`)
+    return toast(`还有 ${(task.sop?.length || 0) - (task.completedSteps?.length || 0)} 个协作步骤未确认`)
   }
   await advanceTask(task)
 }
 const enterTaskRecheck = (task) => {
-  if (!task || task.status === 'pending') return toast('任务接收并完成作业步骤后才能进入复检')
-  if (task.status === 'in_progress' && (task.completedSteps?.length || 0) < (task.sop?.length || 0)) return toast('请先完成全部标准作业步骤')
+  if (!task || task.status === 'pending') return toast('任务接收并完成协作步骤后才能进入 Eval')
+  if (task.status === 'in_progress' && (task.completedSteps?.length || 0) < (task.sop?.length || 0)) return toast('请先完成全部 Skill 指引步骤')
   if (task.status === 'in_progress') {
     task.status = 'review'
     task.progress = Math.max(task.progress || 0, 86)
-    task.current_step = '复测确认'
+    task.current_step = 'Eval 验证'
   }
-  taskPanel.value = 'recheck'
-  activePage.value = 'tasks'
   selectedTask.value = null
-  nextTick(() => document.querySelector('.skf-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  openEvalLab()
+}
+const prepareMemoryFromTask = (task) => {
+  if (!task || !['review', 'completed'].includes(task.status)) return toast('任务进入 Eval 后才能生成 Memory 草稿')
+  Object.assign(knowledgeForm, {
+    title: `${task.title || task.equipment_name} 执行经验`,
+    type: 'Memory Unit',
+    equipment: task.equipment_name || currentProject.value.name,
+    model: task.equipment_model || currentProject.value.module,
+    source: `${task.workOrderNo || '项目任务'} · Execution Trace`,
+    tagText: ['任务执行', '根因', '解决方案', 'Eval 待确认'].join(','),
+    summary: [
+      `任务目标：${task.description || task.title}`,
+      `执行路径：${(task.sop || []).map(stepTitle).join(' → ')}`,
+      `参与角色：${task.assignee_name}、${taskAgentNames(task).join('、')}`,
+      `验证状态：${task.status === 'completed' ? 'Eval 已通过，待审核入库' : '等待 Eval 完成'}`,
+      '适用条件：同项目、同模块或同类任务可优先召回。',
+      '不适用条件：上下文证据不足或涉及未授权写入时必须人工确认。'
+    ].join('\n')
+  })
+  task.memoryStatus = '草稿待审核'
+  activePage.value = 'search'
+  searchPanel.value = 'update'
+  selectedTask.value = null
+  toast('已从执行 Trace 生成 Memory 草稿，请审核后入库')
 }
 const previewTaskReport = (task) => { reportTask.value = task; selectedTask.value = null }
 const windowPrint = () => window.print()
@@ -7817,10 +8789,10 @@ const loadKnowledge = async () => {
 const saveKnowledge = async () => {
   try {
     const tags = knowledgeForm.tagText.split(/[,，]/).map((item) => item.trim()).filter(Boolean)
-    const saved = await yixiuApi.updateKnowledge({ ...knowledgeForm, tags: tags.length ? tags : ['沉淀', '检修案例'] })
+    const saved = await yixiuApi.updateKnowledge({ ...knowledgeForm, tags: tags.length ? tags : ['Memory', '项目经验'] })
     knowledge.value.unshift(saved)
-    Object.assign(knowledgeForm, { title: '', type: '历史故障案例', equipment: '', model: '', source: '', tagText: '', summary: '' })
-    toast('知识条目已进入人工审核队列')
+    Object.assign(knowledgeForm, { title: '', type: 'Memory Unit', equipment: '', model: '', source: '', tagText: '', summary: '' })
+    toast('Memory 已进入人工审核队列')
   } catch (error) {
     toast(error.message || '知识提交失败')
   }
@@ -7829,7 +8801,7 @@ const reviewKnowledge = async (item, status) => {
   try {
     const saved = await yixiuApi.reviewKnowledge(item.id, { status, correction: knowledgeCorrections[item.id] || '', tags: item.tags || [], reviewer: user.name })
     Object.assign(item, saved)
-    toast(status === 'approved' ? '审核通过，已同步知识状态' : '已退回修改')
+    toast(status === 'approved' ? '审核通过，已同步 Memory 状态' : '已退回修改')
   } catch (error) {
     toast(error.message || '审核保存失败')
   }
@@ -7837,23 +8809,43 @@ const reviewKnowledge = async (item, status) => {
 const completeTaskStep = async (task, index) => {
   try {
     let saved
-    try { saved = await yixiuApi.completeTaskStep(task.id, index, { evidence: `由${user.name}确认` }) } catch (_error) {
+    try { saved = await yixiuApi.completeTaskStep(task.id, index, { evidence: `由${user.name}确认` }) } catch (error) {
+      if (error?.status) throw error
       const completedSteps = [...new Set([...(task.completedSteps || []), index])]
       const progress = Math.min(100, Math.round(completedSteps.length / Math.max(task.sop?.length || 1, 1) * 86))
       saved = { completedSteps, progress, status: completedSteps.length >= (task.sop?.length || 1) ? 'review' : 'in_progress' }
+      task.offline = true
     }
     task.completedSteps = saved.completedSteps
     task.progress = saved.progress
     task.status = saved.status
-    task.current_step = saved.status === 'review' ? '等待复检' : stepTitle(task.sop[index + 1])
-    toast(saved.status === 'review' ? '作业步骤完成，任务已进入复检' : '步骤完成并已保存')
+    task.current_step = saved.status === 'review' ? '等待 Eval' : stepTitle(task.sop[index + 1])
+    toast(saved.status === 'review' ? '协作步骤完成，任务已进入 Eval' : '步骤完成并已保存')
   } catch (error) {
     toast(error.message || '步骤保存失败')
   }
 }
 const runAudit = async () => {
-  const result = await yixiuApi.audit({ references: true, safety_checked: true, measurements: true, retested: true, report_ready: true })
-  auditResult.value = JSON.stringify(result, null, 2)
+  try {
+    const result = await yixiuApi.audit({ references: true, safety_checked: true, measurements: true, retested: true, report_ready: true })
+    auditResult.value = JSON.stringify(result, null, 2)
+    toast('核查完成')
+  } catch (error) {
+    const localResult = {
+      status: '待连接后端复核',
+      checked_at: new Date().toLocaleString('zh-CN'),
+      checks: {
+        references: searchResult.value?.references?.length > 0,
+        context_pack: Boolean(searchResult.value),
+        execution_trace: taskEvents.value.length > 0,
+        eval_gate: tasks.value.some((task) => ['review', 'completed'].includes(task.status)),
+        human_confirmation: true
+      },
+      note: '当前展示本地核查结果；后端恢复后需再次执行服务端审计。'
+    }
+    auditResult.value = JSON.stringify(localResult, null, 2)
+    toast(error?.message ? '后端未连接，已完成本地核查' : '已完成本地核查')
+  }
 }
 
 const runOperatorPrimary = () => {
@@ -7862,9 +8854,9 @@ const runOperatorPrimary = () => {
       id: `brief-${Date.now()}`,
       page: 'home',
       role: 'assistant',
-      text: `今日共 ${tasks.value.length} 项任务，高风险 ${tasks.value.filter((task) => task.severity === 'high').length} 项，待复检 ${tasks.value.filter((task) => task.status === 'review').length} 项。建议先处理高风险和已逾期工单。`
+      text: `今日共 ${tasks.value.length} 项任务，高风险 ${tasks.value.filter((task) => task.severity === 'high').length} 项，待 Eval ${tasks.value.filter((task) => task.status === 'review').length} 项。建议先处理高风险、已逾期和信息缺口较多的任务。`
     }, 'tiangong'))
-    return toast('今日检修简报已生成')
+    return toast('今日项目简报已生成')
   }
   if (activePage.value === 'search') return runSearch()
   if (activePage.value === 'tasks') {
@@ -7906,12 +8898,12 @@ const createRunContextSnapshot = (prompt = '', attachments = []) => {
 }
 
 const AGENT_REPLY_FALLBACKS = {
-  tiangong: '已收到本次任务。我会按当前输入和本轮上传资料处理，未确认的设备型号、检测值和现场状态会保留为待确认。',
+  tiangong: '已收到本次任务。我会按当前输入和本轮资料处理，未确认的项目、模块和验收条件会保留为信息缺口。',
   guanwei: '已收到本次检索请求。我会优先使用当前输入和本轮上传资料检索知识库，不套用上一轮案例。',
-  zhiju: '已收到本次作业编排请求。我会围绕当前设备、故障现象和已确认资料整理可执行步骤。',
+  zhiju: '已收到本次执行编排请求。我会围绕当前目标、代码影响面和已确认资料整理可执行步骤。',
   bowen: '已收到本次知识整理请求。我会基于当前资料生成可审核的知识候选，缺失信息保持待补充。',
-  heming: '已收到本次协作请求。我会根据当前任务内容选择合适联系人和协作动作。',
-  mingjian: '已收到本次核查请求。我会按当前任务依据、检测记录和复检要求给出核查意见。'
+  heming: '已收到本次协作请求。我会根据当前任务内容选择合适成员和协作动作。',
+  mingjian: '已收到本次核查请求。我会按当前任务依据、执行记录和 Eval 要求给出核查意见。'
 }
 
 const agentFallbackReply = (agentId = '', agentName = '智能体') => AGENT_REPLY_FALLBACKS[agentId] || `${agentName}已收到本次问题。我会基于当前输入和本轮资料给出建议，未确认信息保持待确认。`
@@ -7949,7 +8941,7 @@ const sendOperatorPrompt = async (prompt) => {
   operatorInput.value = ''
   if (visualTransferIntent) {
     try {
-      await runTiangongLongTask(value || '请将现场图片交给观微进行智能检索和故障判断', sourcePage, { attachments: assistantFiles.value.slice(), context: runContext, agentId: requestAgentId })
+      await runTiangongLongTask(value || '请将任务附件交给观微生成 Context Pack，并提取风险与待办', sourcePage, { attachments: assistantFiles.value.slice(), context: runContext, agentId: requestAgentId })
       return
     } catch (error) {
       Object.assign(tgRunUi, {
@@ -7993,6 +8985,26 @@ const sendOperatorPrompt = async (prompt) => {
       return toast(error.message || '附件分析失败')
     }
   }
+  const replyLocally = (text, notice = '操作已完成') => {
+    operatorMessages.value.push(operatorMessage({ id: `assistant-${Date.now()}`, page: sourcePage, role: 'assistant', text }, requestAgentId))
+    toast(notice)
+  }
+  // 高频快捷动作必须立即给出页面结果，不依赖公网模型或后端是否在线。
+  if (value === '任务简报') return runOperatorPrimary()
+  if (value === '系统状态') return replyLocally(`当前项目：${currentProject.value.name}；活跃任务 ${tasks.value.filter((task) => task.status !== 'completed').length} 项，待 Eval ${tasks.value.filter((task) => task.status === 'review').length} 项，Agent 可用 ${connectedAgents.value.length} 个。后端未连接时，消息会明确标记“未同步”，不会伪装成已送达。`, '系统状态已生成')
+  if (value === '知识更新') { activePage.value = 'search'; searchPanel.value = 'update'; return toast('已打开 Memory Evolution') }
+  if (value === '生成 Context Pack') { activePage.value = 'search'; searchPanel.value = 'multimodal'; searchMultimodalExpanded.value = true; return toast('已打开 Context Pack 组装台') }
+  if (value === '查看引用') { activePage.value = 'search'; searchPanel.value = searchResult.value ? 'results' : 'multimodal'; return toast(searchResult.value ? '已打开引用依据' : '请先生成 Context Pack') }
+  if (value === '推荐 Skill') { activePage.value = 'knowledge'; knowledgePanel.value = 'recheck'; skillStage.value = ''; return toast('已打开 Skill 工厂') }
+  if (value === '协作成员') { activePage.value = 'tasks'; taskPanel.value = 'contacts'; return toast('已打开协作成员') }
+  if (value === '搜索成员') { activePage.value = 'tasks'; taskPanel.value = 'contacts'; contactKeyword.value = ''; return replyLocally('已打开团队成员目录。可按姓名、部门或能力方向筛选，并发起单聊、支援请求或任务交接。', '已打开成员搜索') }
+  if (value === '请求支援') { activePage.value = 'tasks'; taskPanel.value = 'contacts'; requestSupport(); return }
+  if (value === '添加至任务') { activePage.value = 'tasks'; taskPanel.value = 'contacts'; openTaskPicker('assign'); return toast('请选择要关联的项目任务') }
+  if (value === '查看协作记录') { activePage.value = 'tasks'; taskPanel.value = 'contacts'; void summarizeConversation(); return toast('已生成协作重点') }
+  if (value === '查看门禁标准') { activePage.value = 'knowledge'; knowledgePanel.value = 'recheck'; skillStage.value = 'eval'; return replyLocally('Eval 门禁包含回放通过率、结果一致性、证据完整度、人工评分、成本与失败样例；存在阻断项时不可发布。', '已打开 Eval 门禁') }
+  if (value === '生成 Eval 报告') { activePage.value = 'knowledge'; knowledgePanel.value = 'recheck'; skillStage.value = 'eval'; void runSkillEval(selectedSkill.value); return }
+  if (value === '资料检索') { activePage.value = 'search'; searchPanel.value = 'library'; return toast('已打开项目资料库') }
+  if (value === '项目说明') return replyLocally('一休面向软件研发与高校创新团队，以 Task → Context Pack → 人 / Agent 执行 → Review / Eval → Memory → Skill 为主线，让项目进展、协作责任和团队能力沉淀都可追溯。', '项目说明已生成')
   if (isTiangongLongTaskPrompt(value)) {
     try {
       await runTiangongLongTask(value, sourcePage, { context: runContext, agentId: requestAgentId })
@@ -8032,8 +9044,9 @@ const sendOperatorPrompt = async (prompt) => {
     return toast('暂无可流转任务')
   }
   if (value.includes('Skill 工厂') || value.includes('运行 Skill Eval') || value.includes('复检')) {
-    activePage.value = 'tasks'
-    taskPanel.value = 'recheck'
+    activePage.value = 'knowledge'
+    knowledgePanel.value = 'recheck'
+    skillStage.value = 'eval'
     if (value.includes('运行 Skill Eval')) runSkillEval(selectedSkill.value)
     return
   }
@@ -8106,11 +9119,26 @@ const sendOperatorPrompt = async (prompt) => {
       // 只调用 /miniclaw/chat，让天工在 ReAct 循环中自主决定：
       // 1. 先调什么工具了解系统（system_overview / maintenance_task / knowledge_search 等）
       // 2. 基于了解到的真实数据，决定是否输出 [UI_PLAN] 遥控界面
-      const chatPayload = await fetch(`${host}/miniclaw/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: value, conversation_id: `tiangong-${sourcePage}` })
-      }).then(r => r.json().catch(() => ({})))
+      let chatPayload
+      try {
+        chatPayload = await fetch(`${host}/miniclaw/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: value, conversation_id: `tiangong-${sourcePage}` })
+        }).then(async (response) => {
+          const payload = await response.json().catch(() => ({}))
+          if (!response.ok) throw new Error(payload.message || `智能体服务返回 ${response.status}`)
+          if (payload?.data?.success === false) throw new Error(payload.data.error || payload.data.reply || '智能体模型尚未连接')
+          return payload
+        })
+      } catch (miniclawError) {
+        const history = operatorMessages.value
+          .filter((item) => item && item.agentId === 'tiangong' && item.role && item.text && !item.loading)
+          .slice(-8)
+          .map((item) => ({ role: item.role, content: item.text }))
+        const fallback = await yixiuApi.agentChat('tiangong', { message: value, history })
+        chatPayload = { data: { reply: fallback.response, tool_calls: 0, steps: [], fallback: true, fallback_reason: miniclawError.message } }
+      }
       refreshAiosTraceSoon()
       
       const data = chatPayload.data || chatPayload || {}
@@ -8200,18 +9228,30 @@ const sendOperatorPrompt = async (prompt) => {
         steps: []
       })
     }
+    const failedLoading = operatorMessages.value.find((message) => message.loading && message.agentId === requestAgentId)
+    if (failedLoading) operatorMessages.value = operatorMessages.value.filter((message) => message.id !== failedLoading.id)
+    const connectionIssue = /fetch|network|连接|refused|failed/i.test(String(error.message || error))
+    operatorMessages.value.push(operatorMessage({
+      id: `assistant-error-${Date.now()}`,
+      page: sourcePage,
+      role: 'assistant',
+      text: connectionIssue
+        ? `${operatorProfile.value.name}当前未连接到智能体服务。页面功能仍可使用；启动后端并配置模型后，可重新发送这条消息。`
+        : `${operatorProfile.value.name}处理失败：${error.message || '未知错误'}。输入已保留，请检查后重试。`,
+      error: true
+    }, requestAgentId))
     toast(error.message || '智能体暂时无法响应')
   }
 }
 
 const EXECUTION_STAGE_META = {
   parse: { label: '问题解析', desc: '读取用户问题、附件和当前页面上下文。' },
-  intent: { label: '意图识别', desc: '确认任务类型、设备范围、风险等级和需要调用的业务模块。' },
+  intent: { label: '意图识别', desc: '确认任务类型、项目范围、风险等级和需要调用的协作能力。' },
   plan: { label: '任务拆解', desc: '把目标拆成可执行的页面动作、检索动作和智能体协作动作。' },
   context: { label: '上下文定位', desc: '进入对应页面或业务面板，锁定当前可处理的数据。' },
   retrieve: { label: '知识检索', desc: '从知识库、知识图谱、历史案例或多模态附件中召回依据。' },
-  agent: { label: '智能体协作', desc: '调用专业智能体或联系人协作，获取角色结论。' },
-  operate: { label: '作业编排', desc: '生成或匹配 SOP、工单、安全确认和复检动作。' },
+  agent: { label: '智能体协作', desc: '调用专业 Agent 或协作成员，获取角色结论。' },
+  operate: { label: '执行编排', desc: '生成或匹配 Skill、任务、风险确认和 Eval 动作。' },
   synthesize: { label: '信息整合', desc: '汇总检索依据、页面状态、智能体回复和任务上下文。' },
   verify: { label: '校验确认', desc: '核查关键结论、人工确认项和未确定信息。' },
   report: { label: '结果生成', desc: '生成可查看、可导出、可继续补充的业务结果。' },
@@ -8380,10 +9420,10 @@ const buildReportContext = (data = {}, uiSteps = []) => {
   ].join(' ')
   const hasAutoVehicleIntent = /汽车|轿车|车辆/.test(sceneText)
   const hasMotorcycleEngineIntent = scene?.type === 'motorcycle_engine' || /摩托|cg-?125/.test(sceneText) || (!hasAutoVehicleIntent && /发动机异响|气门|怠速|正时链条|张紧器|火花塞|化油器/.test(sceneText))
-  const hasWaterIntent = hasAffirmativeWaterScene(sceneText)
-  const device = firstTruthy(contextSearchResult?.device?.name, contextSearchResult?.device_name, focus.equipment_name, focus.equipment, scene?.deviceName, contextSearchForm.deviceName, '待确认设备')
+  const hasWaterIntent = false
+  const device = firstTruthy(contextSearchResult?.device?.name, contextSearchResult?.device_name, focus.equipment_name, focus.equipment, scene?.deviceName, contextSearchForm.deviceName, '待确认项目')
   const model = firstTruthy(contextSearchResult?.device?.model, contextSearchResult?.device_model, focus.equipment_model, focus.model, scene?.deviceModel, contextSearchForm.deviceModel)
-  const fault = firstTruthy(contextSearchResult?.fault?.type, contextSearchResult?.fault_type, focus.fault_type, scene?.faultType, contextSearchForm.faultType, focus.description, data.goal, '待确认故障')
+  const fault = firstTruthy(contextSearchResult?.fault?.type, contextSearchResult?.fault_type, focus.fault_type, scene?.faultType, contextSearchForm.faultType, focus.description, data.goal, '待确认任务')
   const risk = firstTruthy(contextSearchResult?.risk?.level, contextSearchResult?.risk, focus.severity, contextSearchResult?.riskLevel, '待评估')
   const rawRefs = Array.isArray(contextSearchResult?.references)
     ? contextSearchResult.references
@@ -8399,7 +9439,7 @@ const buildReportContext = (data = {}, uiSteps = []) => {
     ...uiSteps.map((step) => traceAgentName(step))
   ])
   return {
-    goal: data.goal || contextSearchForm.query || focus.title || '当前检修任务',
+    goal: data.goal || contextSearchForm.query || focus.title || '当前项目任务',
     device,
     model,
     fault,
@@ -8432,9 +9472,50 @@ const makeReportItem = (id, type, title, reason, sections, tags = [], priority =
 })
 
 const buildReportRecommendations = (ctx = {}) => {
-  const subject = `${ctx.device || '待确认设备'}${ctx.model ? ` / ${ctx.model}` : ''}`
-  const fault = ctx.fault || '待确认故障'
-  const refsText = ctx.refs?.length ? `已召回 ${ctx.refs.length} 份资料/案例，可列为报告依据。` : '当前未召回明确资料，报告中应保留“依据待补充”。'
+  const subject = `${ctx.device || '待确认项目'}${ctx.model ? ` / ${ctx.model}` : ''}`
+  const fault = ctx.fault || '待确认任务'
+  const refsText = ctx.refs?.length ? `已关联 ${ctx.refs.length} 份需求、代码、Memory、Skill 或 Eval 依据。` : '当前缺少明确引用依据，应在归档前补齐。'
+  return [
+    makeReportItem(
+      'project-execution-summary',
+      '项目执行',
+      `${subject}执行与决策摘要`,
+      '用于同步目标、进展、负责人、关键决策、阻塞项与下一步动作。',
+      [
+        `项目 / 模块：${subject}。`,
+        `任务目标：${fault}。`,
+        ...(ctx.sop?.length ? ctx.sop.slice(0, 3) : ['补充执行步骤、负责人和完成条件。']),
+        `当前风险：${ctx.risk || '待评估'}。`
+      ],
+      ['项目进展', '责任人', '决策记录'],
+      '高优先级'
+    ),
+    makeReportItem(
+      'context-evidence',
+      '上下文依据',
+      `${subject}Context Pack 与证据清单`,
+      '确保需求、代码、历史经验和验收标准可追溯，避免凭结论推进。',
+      [refsText, '列出需求版本、代码分支、Issue / PR、聊天决策和适用边界。', '未确认的信息保留为缺口，不自动补写。'],
+      ['Context Pack', '引用依据', '信息缺口']
+    ),
+    makeReportItem(
+      'review-eval',
+      'Review / Eval',
+      `${subject}Review 与 Eval 结论`,
+      '用于记录质量门禁、失败样例、成本与回归结果，明确是否可以发布。',
+      ['核对目标与实现是否一致。', '记录关键回归样例、失败原因和修复结果。', '高风险写入必须附回滚方案和人工确认记录。'],
+      ['Review', 'Eval', '发布门禁']
+    ),
+    makeReportItem(
+      'memory-skill-candidate',
+      '能力沉淀',
+      `${subject}Memory / Skill 候选`,
+      '把已验证的问题、方案、边界和执行步骤沉淀为可复用团队能力。',
+      ['提取有效方案、失败尝试与适用条件。', '绑定任务、Issue、PR、聊天与 Eval 证据。', '人工审核后再进入 Memory 或 Skill 正式库。'],
+      ['Memory', 'Skill', '人工审核']
+    )
+  ]
+  /* 以下为旧领域兼容分支，保留数据读取兼容但不再进入当前项目报告。 */
   const base = []
   if (ctx.isMotorcycleEngine) {
     base.push(
@@ -8598,9 +9679,9 @@ const buildReportRecommendations = (ctx = {}) => {
 const buildTaskReportRecommendations = (task = {}) => {
   const taskText = `${task?.equipment_name || ''}${task?.equipment || ''}${task?.equipment_model || ''}${task?.model || ''}${task?.description || ''}${task?.title || ''}${task?.fault_type || ''}`
   const ctx = {
-    device: task?.equipment_name || task?.equipment || '待确认设备',
+    device: task?.equipment_name || task?.equipment || '待确认项目',
     model: task?.equipment_model || task?.model || '',
-    fault: task?.fault_type || task?.description || task?.title || '待确认故障',
+    fault: task?.fault_type || task?.description || task?.title || '待确认任务',
     risk: task?.severity || '',
     refs: [],
     sop: Array.isArray(task?.sop) ? task.sop.map(stepTitle) : [],
@@ -8621,7 +9702,7 @@ const buildAiosReport = (data = {}, uiSteps = []) => {
   return {
     title: `${ctx.device}${ctx.fault ? ` · ${ctx.fault}` : ''}执行报告`,
     subtitle: data.summary || '天工已完成本轮跨页面协同执行',
-    conclusion: `已完成${ctx.device}${ctx.model ? `/${ctx.model}` : ''}的检修线索整理、资料检索、智能体协作、作业/复检定位和报告推荐。未确认的设备参数、检测值、现场状态已保留为待确认；正式归档前需要负责人复核。`,
+    conclusion: `已完成 ${ctx.device}${ctx.model ? ` / ${ctx.model}` : ''} 的上下文整理、协作执行、Review / Eval 定位和沉淀建议。未确认的目标边界、代码影响面、引用依据与验收结果保留为信息缺口；正式归档前需要负责人复核。`,
     metrics: [
       { label: '执行步骤', value: `${uiSteps.length || digest.length || 0} 步` },
       { label: '协作智能体', value: `${agents.length || 1} 个` },
@@ -8633,8 +9714,8 @@ const buildAiosReport = (data = {}, uiSteps = []) => {
         title: '真实执行链路',
         items: [
           '读取用户问题、附件和当前页面上下文。',
-          '识别设备/故障/风险字段，无法确认的信息保持待确认。',
-          '按需要进入智能检索、检修任务、知识库、联系人或复检页面。',
+          '识别项目、模块、任务目标与风险字段，无法确认的信息保持待确认。',
+          '按需要进入 Context、任务执行、协作成员、Memory、Skill 或 Eval 页面。',
           '仅把可观察的页面动作、检索动作、智能体协作和校验结果展示出来。'
         ]
       },
@@ -8642,29 +9723,29 @@ const buildAiosReport = (data = {}, uiSteps = []) => {
         title: '智能体分工',
         items: [
           `参与：${readableAgents}`,
-          '观微负责资料召回与故障研判，执矩负责作业步骤和任务联动。',
-          '和鸣负责协作沟通，博闻负责知识网络，明鉴负责复检核查。'
+          '观微负责 Context Pack，执矩负责任务编排和执行 Trace。',
+          '和鸣负责协作与交接，博闻负责 Team Memory，明鉴负责 Review / Eval。'
         ]
       },
       {
         title: '本次关键依据',
         items: highlights.length ? highlights : [
-          `设备：${ctx.device}${ctx.model ? ` / ${ctx.model}` : ''}`,
-          `故障：${ctx.fault}`,
-          '当前缺少明确检索依据或现场检测数据，正式报告需继续补充。'
+          `项目 / 模块：${ctx.device}${ctx.model ? ` / ${ctx.model}` : ''}`,
+          `任务：${ctx.fault}`,
+          '当前缺少明确引用依据或 Eval 结果，正式报告需继续补充。'
         ]
       },
       {
         title: '待人工确认',
         items: [
-          '高风险处置、复电/启动、拆检结论和知识入库必须人工确认。',
-          '未知设备型号、故障程度、检测值和现场环境保持空缺或待确认。',
-          '最终归档前建议补充图片、检测数据、负责人签字和复检结果。'
+          '生产发布、权限变更、数据写入、外部发送和知识入库必须人工确认。',
+          '未知需求边界、影响模块、成本和回归结果保持空缺或待确认。',
+          '最终归档前建议补充引用依据、Eval 结果、负责人确认和回滚方案。'
         ]
       }
     ],
     recommendations,
-    tags: compactList(['真实执行链路', '动态报告', ctx.device, ctx.fault, ctx.isMotorcycleEngine ? '发动机检修' : (ctx.isVehicleWater ? '泡水车辆' : '设备检修')]).slice(0, 6)
+    tags: compactList(['真实执行链路', '动态报告', ctx.device, ctx.fault, '项目协作']).slice(0, 6)
   }
 }
 
@@ -8843,21 +9924,21 @@ const tgActionDetail = (step) => {
   const action = step?.action
   const inputText = step?.input?.query || step?.input?.keyword || step?.keyword || step?.text || ''
   if (action === 'navigate') return `切换到「${step.page || TG_AGENT_NAMES[step.agent] || step.agent}」，准备由${step.agentName || TG_AGENT_NAMES[step.agent] || '天工'}处理。`
-  if (action === 'search') return `在智能检索中带入「${inputText || '当前故障目标'}」，让观微召回资料。`
-  if (action === 'filter') return `进入检修任务，按「${inputText || step.target || '相关工单'}」筛选任务。`
+  if (action === 'search') return `在 Context Engine 中带入「${inputText || '当前任务目标'}」，让观微召回证据。`
+  if (action === 'filter') return `进入任务执行中心，按「${inputText || step.target || '相关任务'}」筛选。`
   if (action === 'openPanel') return `打开「${step.page || step.target || '业务板块'}」，查看详情、表单或审核内容。`
-  if (action === 'openKnowledgeGraph') return `打开知识图谱，定位「${inputText || '设备、故障、资料关系'}」。`
+  if (action === 'openKnowledgeGraph') return `打开知识网络，定位「${inputText || '项目、任务、Memory 与 Skill 关系'}」。`
   if (action === 'openChat') return `打开联系人交流，准备向${step.agentName || '协作智能体'}同步任务信息。`
   if (action === 'summarize') return '把本轮检索、任务、协作和知识沉淀写入会话记忆。'
   if (action === 'approve') return '该步骤涉及关键业务动作，需要人工确认后继续。'
-  if (action === 'report') return '汇总检索依据、作业步骤、协作记录、复检结果和知识沉淀状态。'
+  if (action === 'report') return '汇总引用依据、执行步骤、协作记录、Review / Eval 结果和 Memory 沉淀状态。'
   if (action === 'finish') return step.expected || '天工已完成本次跨页面闭环任务。'
   if (action === 'knowledge_search') return `在知识库中带入关键词「${inputText}」。`
   if (action === 'type') return step.text || '填写智能体指令。'
   if (action === 'click_send') return '把当前指令发送给页面智能体。'
   if (action === 'agent_type') return `天工移动到智能体输入框，逐字输入「${step.text || inputText || '协作问题'}」。`
   if (action === 'agent_send') return '天工点击发送按钮，把消息提交给当前智能体。'
-  if (action === 'transfer_attachment') return `天工将 ${step.input?.files?.length || 1} 个现场附件放入智能检索，由观微进行图文联合判断。`
+  if (action === 'transfer_attachment') return `天工将 ${step.input?.files?.length || 1} 个任务附件放入 Context Engine，由观微联合解析。`
   if (action === 'contact_type') return `天工进入联系人交流区，逐字输入「${step.text || inputText || '协作消息'}」。`
   if (action === 'contact_send') return '天工点击联系人会话发送按钮，写入真实聊天记录。'
   if (action === 'wait') return `等待智能体处理，约 ${step.seconds || 2} 秒。`
@@ -8867,7 +9948,7 @@ const tgActionDetail = (step) => {
 const tgPageKey = (step = {}) => {
   const text = `${step.page || ''} ${step.target || ''}`
   if (text.includes('智能检索') || text.includes('上下文')) return 'search'
-  if (text.includes('知识库') || text.includes('知识图谱') || text.includes('沉淀') || text.includes('团队能力')) return 'knowledge'
+  if (text.includes('能力中心') || text.includes('Skill 工厂') || text.includes('Agent 中心') || text.includes('MCP 配置') || text.includes('知识库') || text.includes('知识图谱') || text.includes('沉淀') || text.includes('团队能力')) return 'knowledge'
   if (text.includes('检修任务') || text.includes('联系人') || text.includes('复检') || text.includes('任务执行')) return 'tasks'
   if (text.includes('个人中心') || text.includes('个人空间')) return 'profile'
   if (text.includes('首页') || text.includes('工作台') || text.includes('报告预览')) return 'home'
@@ -8896,7 +9977,7 @@ const tgStepOutputText = (step = {}) => {
     const confidence = searchResult.value?.confidence
     return refs ? `已生成研判，召回 ${refs} 份依据${confidence ? `，置信度 ${confidence}%` : ''}。` : '已提交检索请求，等待观微返回研判。'
   }
-  if (action === 'filter' || page === 'tasks') return `任务筛选已应用，当前匹配 ${filteredTasks.value.length} 项工单。`
+  if (action === 'filter' || page === 'tasks') return `任务筛选已应用，当前匹配 ${filteredTasks.value.length} 项任务。`
   if (action === 'openKnowledgeGraph' || action === 'knowledge_search' || page === 'knowledge') {
     if (knowledgePanel.value === 'network') return `知识图谱已定位，当前可见 ${graphNodes.value.length} 个实体节点。`
     if (knowledgePanel.value === 'files') return `Agent 中心已打开，本机已接入 ${acStatusCounts.value.connected} 个 Agent，${acStatusCounts.value.notDetected} 个未检测到。`
@@ -8909,7 +9990,7 @@ const tgStepOutputText = (step = {}) => {
   if (action === 'report') return '已生成闭环报告结构，等待最终确认。'
   if (action === 'type' || action === 'agent_type') return '指令已逐字写入智能体输入框。'
   if (action === 'click_send' || action === 'agent_send') return '指令已发送给当前智能体，等待回复。'
-  if (action === 'transfer_attachment') return `已把现场附件加入智能检索，当前检索区共有 ${searchFiles.value.length} 个附件。`
+  if (action === 'transfer_attachment') return `已把任务附件加入 Context Engine，当前组装台共有 ${searchFiles.value.length} 个附件。`
   if (action === 'contact_type') return '协作消息已逐字写入联系人输入框。'
   if (action === 'contact_send') return `消息已发送到「${activeConversation.value?.name || '当前会话'}」。`
   if (action === 'wait') return '等待完成，已继续监听后续结果。'
@@ -8935,7 +10016,7 @@ const tgObservePage = () => {
 const tgDecisionFor = (step = {}) => {
   const agentName = step.agentName || TG_AGENT_NAMES[step.agent] || '天工'
   const action = tgActionLabel(step)
-  if (step.action === 'transfer_attachment') return `选择观微处理图片线索，先把附件放入多模态检索区。`
+  if (step.action === 'transfer_attachment') return '选择观微解析任务材料，先把附件放入 Context Engine。'
   if (step.action === 'agent_send') return `把当前问题交给${agentName}，等待它返回角色结论。`
   if (step.action === 'contact_send') return '这是人员沟通动作，写入联系人会话而不是智能体。'
   if (step.action === 'navigate') return `需要切换页面，所以先进入「${step.page || agentName}」。`
@@ -8944,7 +10025,7 @@ const tgDecisionFor = (step = {}) => {
 
 const tgCheckResultFor = (step = {}) => {
   const page = tgPageKey(step)
-  if (step.action === 'transfer_attachment') return searchFiles.value.length ? `校验通过：智能检索区已有 ${searchFiles.value.length} 个附件。` : '校验提醒：未检测到检索附件。'
+  if (step.action === 'transfer_attachment') return searchFiles.value.length ? `校验通过：Context Engine 已有 ${searchFiles.value.length} 个附件。` : '校验提醒：未检测到任务附件。'
   if (step.action === 'agent_send') return `校验通过：已向${TG_AGENT_NAMES[step.agent] || step.agentName || '智能体'}发起接口协作。`
   if (page === 'search') return searchResult.value ? `校验通过：观微已生成检索结果，置信度 ${searchResult.value.confidence || '--'}。` : '校验完成：已停留在智能检索区。'
   if (page === 'tasks') return `校验通过：当前任务板块为 ${taskPanel.value}，匹配 ${filteredTasks.value.length} 项。`
@@ -8957,9 +10038,9 @@ const tgVisibleMessageFor = (step = {}) => {
   const action = step.action
   if (action === 'openChat') return `和鸣，请汇总今天未读协作消息，并同步 ${keyword} 相关联系人。`
   if (action === 'openKnowledgeGraph' || action === 'knowledge_search') return `博闻，请解释「${keyword}」在知识图谱中的关联资料和上下游关系。`
-  if (action === 'search') return `观微，请基于「${keyword}」输出故障线索、引用资料和下一步建议。`
-  if (action === 'filter') return `执矩，请结合当前筛选结果说明高风险工单的执行优先级。`
-  if (action === 'openPanel' && String(step.page || '').includes('复检')) return `明鉴，请说明当前待复检任务的质量核查重点。`
+  if (action === 'search') return `观微，请基于「${keyword}」输出上下文结论、引用依据、信息缺口和下一步建议。`
+  if (action === 'filter') return `执矩，请结合当前筛选结果说明高风险任务的执行优先级。`
+  if (action === 'openPanel' && /Review|Eval|评测|审核/.test(String(step.page || ''))) return '明鉴，请说明当前待 Review / Eval 任务的质量门禁重点。'
   return `天工，请记录当前步骤结果：${tgActionLabel(step)}。`
 }
 
@@ -8996,7 +10077,7 @@ const expandTgVisiblePlan = (steps = []) => {
   const hasBowenInteraction = expanded.some((step) => step.agent === 'bowen' && ['agent_type', 'agent_send'].includes(step.action))
   const hasKnowledgeStep = expanded.some((step) => step.agent === 'bowen' || ['openKnowledgeGraph', 'knowledge_search'].includes(step.action))
   if (hasKnowledgeStep && !hasBowenInteraction) {
-    const keyword = steps.map((step) => step.input?.query || step.input?.keyword || step.text || '').find(Boolean) || searchForm.query || '当前检修线索'
+    const keyword = steps.map((step) => step.input?.query || step.input?.keyword || step.text || '').find(Boolean) || searchForm.query || '当前项目任务'
     const text = `博闻，请基于「${keyword}」检索知识库资料、知识图谱节点和可沉淀经验；不知道的车型、型号、受损程度请留空，只根据已知图片和检索结果回答。`
     expanded.push({
       action: 'openKnowledgeGraph',
@@ -9037,17 +10118,19 @@ const tgApplyStepState = async (step = {}) => {
   const action = step.action
   const input = step.input || {}
   const rawKeyword = input.query || input.keyword || step.keyword || step.text || ''
-  const scene = inferSearchScene(rawKeyword, [...assistantFiles.value, ...searchFiles.value])
-  const keyword = rawKeyword || scene?.query || ''
+  const keyword = rawKeyword
   const agent = step.agent || ''
 
   selectedAgentId.value = agent || selectedAgentId.value
   activePage.value = page
 
   if (page === 'search') {
-    searchPanel.value = action === 'summarize' ? 'history' : 'multimodal'
-    if (!scene && !hasAffirmativeWaterScene(rawKeyword) && WATER_RESULT_RE.test(`${searchForm.deviceName}${searchForm.category}${searchForm.faultType}`)) resetSearchIdentityFields()
-    if (scene) applySearchScene(scene)
+    const pageLabel = String(step.page || step.target || '')
+    if (pageLabel.includes('知识网络') || action === 'openKnowledgeGraph') searchPanel.value = 'network'
+    else if (pageLabel.includes('记忆库') || pageLabel.includes('沉淀')) searchPanel.value = 'update'
+    else if (pageLabel.includes('资料库')) searchPanel.value = 'library'
+    else if (pageLabel.includes('导入')) searchPanel.value = 'import'
+    else searchPanel.value = action === 'summarize' ? 'history' : 'multimodal'
     if (keyword) {
       searchForm.query = String(keyword)
       if (input.model !== undefined) searchForm.deviceModel = input.model || ''
@@ -9066,6 +10149,8 @@ const tgApplyStepState = async (step = {}) => {
   if (page === 'knowledge') {
     // 图谱 / 资料库 / Memory 沉淀都搬到上下文中心了，这里要顺手把页面切过去
     if (String(step.page || step.target || '').includes('沉淀')) { activePage.value = 'search'; searchPanel.value = 'update' }
+    else if (String(step.page || step.target || '').includes('Skill 工厂')) knowledgePanel.value = 'recheck'
+    else if (String(step.page || step.target || '').includes('MCP 配置')) knowledgePanel.value = 'mcp'
     else if (action === 'openKnowledgeGraph' || String(step.page || step.target || '').includes('图谱')) { activePage.value = 'search'; searchPanel.value = 'network'; window.setTimeout(settleGraphChart, 120) }
     else if (String(step.page || step.target || '').includes('资料库')) { activePage.value = 'search'; searchPanel.value = 'library' }
     else knowledgePanel.value = 'files'
@@ -9325,15 +10410,11 @@ const tgTransferAttachmentsToSearch = async (attachments = [], step = {}) => {
   searchResult.value = null
   selectedAiosReport.value = null
   const keyword = step.input?.keyword || step.text || operatorInput.value || ''
-  const scene = inferSearchScene(keyword, attachments)
-  if (scene) {
-    resetSearchIdentityFields()
-    applySearchScene(scene)
-    searchForm.query = `${scene.query} 已知用户指令：${keyword || '仅上传了现场图片'}`
-  } else {
-    resetSearchIdentityFields()
-    searchForm.query = keyword ? `${keyword}；请结合上传图片判断现场设备、故障部位和风险。未知设备型号请留空，不要套用示例设备。` : '请结合上传图片判断现场设备、故障部位和风险；未知设备型号请留空，不要套用示例设备。'
-  }
+  searchForm.deviceName = searchForm.deviceName || currentProject.value.name
+  searchForm.deviceModel = searchForm.deviceModel || currentProject.value.repo
+  searchForm.query = keyword
+    ? `${keyword}；请结合本轮附件补齐项目背景、影响范围、关键决策、风险与验收依据。`
+    : '请结合本轮附件识别任务目标、代码或文档变更、关键决策、风险、待办与可复用 Skill 候选；无法确认的信息保持为空。'
   searchFiles.value.forEach(releaseFileUrl)
   searchFiles.value = attachments.map(cloneAssistantFileForSearch)
   await nextTick()
@@ -9537,7 +10618,10 @@ onMounted(async () => {
       refreshAiosTrace()
     }
   } else showSplash.value = false
+  void refreshPublicUpdates(true)
   resumeNewsCarousel()
+  publicUpdateTimer = window.setInterval(() => { void refreshPublicUpdates(true) }, 6 * 60 * 60 * 1000)
+  chatSyncTimer = window.setInterval(refreshCollaboration, 8000)
   nextTick(() => { tryInitGraphChart() })
 })
 onBeforeUnmount(() => {
@@ -9546,11 +10630,14 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', clampFloatingAgent)
   if (clockTimer) window.clearInterval(clockTimer)
   if (toastTimer) window.clearTimeout(toastTimer)
+  if (publicUpdateTimer) window.clearInterval(publicUpdateTimer)
+  if (modelRouteTimer) window.clearTimeout(modelRouteTimer)
   pauseNewsCarousel()
   if (speechRecognition) speechRecognition.stop()
   if (assistantSpeechRecognition) assistantSpeechRecognition.stop()
   if (stopOperatorResize) stopOperatorResize()
   if (chatRecordTimer) window.clearInterval(chatRecordTimer)
+  if (chatSyncTimer) window.clearInterval(chatSyncTimer)
   if (chatRecorder?.state === 'recording') chatRecorder.stop()
   chatRecordStream?.getTracks().forEach((track) => track.stop())
   chatObjectUrls.forEach((url) => URL.revokeObjectURL(url))
@@ -9564,7 +10651,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 :global(*) { box-sizing: border-box; }
-:global(body) { margin: 0; min-width: 1180px; background: #EEECEA; color: #111110; font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; }
+:global(body) { margin: 0; min-width: 320px; background: #EEECEA; color: #111110; font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 .external-import-list { margin-top: 18px; }
@@ -11231,7 +12318,7 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 
 /* 检修任务页：统一页头、数据看板、筛选工具栏和复检卡片。 */
 .task-nav-panel { position: relative; overflow: hidden; padding: 20px 22px; border-top: 4px solid var(--blue) !important; background: linear-gradient(120deg, #fff, #f5f9fc) !important; }
-.task-nav-panel::after { content: "MAINTENANCE WORKFLOW"; position: absolute; right: 22px; bottom: 7px; color: rgba(58,111,158,.045); font-size: 27px; font-weight: 900; letter-spacing: .08em; pointer-events: none; }
+.task-nav-panel::after { content: "PROJECT WORKFLOW"; position: absolute; right: 22px; bottom: 7px; color: rgba(58,111,158,.045); font-size: 27px; font-weight: 900; letter-spacing: .08em; pointer-events: none; }
 .task-nav-panel h3 { margin-top: 5px; color: var(--ink); font-size: 20px; }
 .task-nav-panel small { display: block; margin-top: 6px; color: var(--muted); font-size: 11px; }
 .task-nav-panel .tabs { position: relative; z-index: 1; padding: 5px; border: 1px solid #d8e3e8; border-radius: 11px; background: rgba(255,255,255,.84); }
@@ -11268,6 +12355,10 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .trend-summary em { padding: 4px 7px; border-radius: 7px; background: #e7f4ee; color: #3e7d61; font-size: 9px; font-style: normal; font-weight: 800; }
 .trend-summary em.down { background: #faece9; color: #ad554b; }
 .task-analytics .analysis-cards .task-trend-chart { height: 166px; overflow: visible; border: 0; background: linear-gradient(180deg, rgba(235,246,245,.55), rgba(255,255,255,0)); }
+.task-insight-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.task-insight-strip span { display: grid; gap: 5px; padding: 12px 14px; border: 1px solid #dce8e5; border-radius: 8px; background: #fff; }
+.task-insight-strip small { color: #71817f; font-size: 10px; }
+.task-insight-strip b { color: #274c47; font-size: 18px; }
 .task-trend-grid { stroke: #dce8e8; stroke-width: 1; stroke-dasharray: 4 5; }
 .task-trend-dot { fill: #fff; stroke: #2f7f8f; stroke-width: 4; }
 .task-trend-value { fill: #235f69; font-size: 10px; font-weight: 800; }
@@ -11326,6 +12417,7 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .task-modal-card .safety-reminders > div small { color: #9a7440; font-size: 9px; }
 .task-modal-card .safety-reminders > span { padding: 7px 9px; border-radius: 8px; background: rgba(255,255,255,.75); text-align: center; }
 .task-modal-actions { margin: 6px -24px -22px; padding: 14px 24px; border-top: 1px solid #dbe5e4; border-radius: 0 0 18px 18px; background: #fffdf9; box-shadow: none; }
+.task-action-gate { margin: 12px 0 0; padding: 9px 11px; border-left: 3px solid #4f8f88; background: #f2f8f7; color: #5e7479; font-size: 10px; line-height: 1.55; }
 .task-modal-actions button { min-width: 150px; min-height: 42px; font-weight: 800; }
 .task-modal-actions .primary { background: #1f5658; color: #fff; }
 .task-modal-card .task-flow-recommendation { border-color: #e5ded2; background: #fffdf8; }
@@ -15711,6 +16803,8 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
   border-color: #d9e4ef;
   background: linear-gradient(145deg, #fff, #f5f9fc);
 }
+.history-command-strip button.active { border-color: #4f8f87; box-shadow: 0 0 0 2px rgba(79,143,135,.13); }
+.history-feedback { margin: -2px 0 12px; padding: 9px 11px; border-left: 3px solid #4f8f87; background: #f3f8f6; color: #4f6864; font-size: 11px; line-height: 1.6; }
 .history-command-strip b {
   font-size: 14px;
 }
@@ -17513,6 +18607,522 @@ select,
   .profile-focus-shell .profile-quick-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .profile-hero-card,
   .profile-focus-shell .profile-hero-card { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 统一项目上下文：参考成熟项目工具的“单一工作上下文”，跨页面保持项目、周期和能力链路一致。 */
+.project-context-bar {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(250px, .8fr) minmax(420px, 1.4fr);
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #dce8e8;
+  border-radius: 13px;
+  background: rgba(255,255,255,.94);
+  box-shadow: 0 8px 24px rgba(26,64,72,.055);
+}
+.project-context-main { min-width: 0; display: flex; align-items: center; gap: 9px; }
+.project-context-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 5px rgba(22,118,111,.1); }
+.project-context-main label { min-width: 0; display: grid; gap: 2px; }
+.project-context-main label small, .project-context-meta small { color: #8a9a9f; font-size: 9px; font-weight: 800; }
+.project-context-main select { max-width: 230px; padding: 0 20px 0 0; border: 0; background: transparent; color: #263f46; font: inherit; font-size: 12px; font-weight: 900; cursor: pointer; }
+.project-context-meta { min-width: 0; display: grid; gap: 2px; padding-left: 9px; border-left: 1px solid #e3ebed; }
+.project-context-meta b { color: #476169; font-size: 10px; }
+.project-context-meta small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-context-flow { min-width: 0; display: grid; grid-template-columns: repeat(7, minmax(52px, 1fr)); align-items: stretch; gap: 0; overflow: hidden; border: 1px solid #dde6e7; border-radius: 9px; background: #f6f8f8; }
+.project-context-flow button { position: relative; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px; padding: 7px 8px; border: 0; border-right: 1px solid #dde6e7; background: transparent; color: #73858b; text-align: left; font: inherit; transition: background .16s ease, color .16s ease; }
+.project-context-flow button:last-child { border-right: 0; }
+.project-context-flow button:hover, .project-context-flow button:focus-visible { z-index: 1; outline: 2px solid rgba(20,105,98,.18); outline-offset: -2px; background: #fff; color: #234d4b; }
+.project-context-flow button small { color: #9daaad; font-size: 7px; font-weight: 900; letter-spacing: .04em; }
+.project-context-flow button b { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.project-context-flow button.done { background: #edf5f3; color: #356c67; }
+.project-context-flow button.done small { color: #4e8b84; }
+.project-context-flow button.current { box-shadow: inset 0 -3px #146d67; background: #fff; color: #154f4b; }
+.project-context-flow button.current small { color: #146d67; }
+
+.capability-loop-panel { padding: 16px 18px; }
+.capability-loop-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.capability-loop-grid button { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 11px; border: 1px solid #e1e9eb; border-radius: 11px; background: #fff; color: #314b52; text-align: left; font: inherit; cursor: pointer; }
+.capability-loop-grid button:hover, .capability-loop-grid button.current { transform: translateY(-1px); border-color: #a9d2cd; box-shadow: 0 8px 18px rgba(29,77,85,.08); }
+.capability-loop-grid button > small { color: #a8b7bc; font-size: 10px; font-weight: 900; }
+.capability-loop-grid button span { min-width: 0; display: grid; gap: 2px; }
+.capability-loop-grid button span b { font-size: 11px; }
+.capability-loop-grid button span em { overflow: hidden; color: #84969c; font-size: 9px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.capability-loop-grid button > strong { color: var(--teal-dark); font-size: 11px; white-space: nowrap; }
+
+.context-pack-meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin: 12px 0; }
+.context-pack-meta span { display: grid; gap: 3px; padding: 9px 10px; border: 1px solid #e0e9eb; border-radius: 9px; background: #f9fbfb; }
+.context-pack-meta span.warning { border-color: #ead8ae; background: #fffaf0; }
+.context-pack-meta small { color: #88999f; font-size: 9px; font-weight: 800; }
+.context-pack-meta b { color: #29474f; font-size: 11px; }
+.context-pack-gaps { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; padding: 9px 10px; border-left: 3px solid #d59b32; background: #fffaf1; }
+.context-pack-gaps b { margin-right: 4px; color: #9a681f; font-size: 10px; }
+.context-pack-gaps span { padding: 3px 7px; border-radius: 999px; background: #fff; color: #755c36; font-size: 9px; font-weight: 700; }
+.context-pack-actions { flex-wrap: wrap; }
+
+.task-collaboration-trace { display: grid; gap: 10px; margin: 14px 0; padding: 14px; border: 1px solid #dce8ea; border-radius: 12px; background: #f9fbfb; }
+.task-trace-actors { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+.task-trace-actors > span { min-width: 0; display: grid; gap: 3px; padding: 8px 9px; border-radius: 9px; background: #fff; }
+.task-trace-actors small { color: #8b9ca1; font-size: 9px; }
+.task-trace-actors b { overflow: hidden; color: #38545b; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.task-execution-timeline { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+.task-execution-timeline > span { min-width: 0; display: grid; justify-items: center; gap: 3px; padding: 8px 4px; border-top: 2px solid #dfe7e9; color: #89999e; text-align: center; }
+.task-execution-timeline > span.done { border-color: var(--teal); color: var(--teal-dark); }
+.task-execution-timeline > span.current { border-color: #d89b35; background: #fffaf0; color: #8a5b16; }
+.task-execution-timeline i { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: #edf2f3; font-size: 9px; font-style: normal; font-weight: 900; }
+.task-execution-timeline .done i { background: #dff1ee; }
+.task-execution-timeline b { font-size: 9.5px; }
+.task-execution-timeline small { font-size: 8px; line-height: 1.35; }
+
+.task-handoff-banner { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; margin: 12px 0; padding: 12px 14px; border: 1px solid #ddc99b; border-left: 4px solid #a87927; border-radius: 9px; background: #fffaf0; }
+.task-handoff-banner > div { min-width: 0; display: grid; gap: 3px; }
+.task-handoff-banner small { color: #8e6d31; font-size: 9px; font-weight: 900; letter-spacing: .06em; }
+.task-handoff-banner b { color: #4e4636; font-size: 12px; }
+.task-handoff-banner p { margin: 0; overflow: hidden; color: #736a58; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.task-handoff-banner > span { display: flex; gap: 7px; }
+.task-handoff-banner button { padding: 7px 10px; border: 1px solid #d9c79f; border-radius: 7px; background: #fff; color: #5f533d; font-size: 10px; font-weight: 800; }
+.task-handoff-banner button.primary { border-color: #2f756e; background: #2f756e; color: #fff; }
+.task-handoff-banner > em { color: #8d7447; font-size: 10px; font-style: normal; font-weight: 800; }
+.task-handoff-modal { width: min(620px, calc(100vw - 36px)); }
+.task-handoff-modal .handoff-intro { margin: 4px 0 16px; color: #68777a; font-size: 12px; line-height: 1.65; }
+.task-handoff-modal > label { display: grid; gap: 6px; margin: 12px 0; color: #46585c; font-size: 11px; font-weight: 800; }
+.task-handoff-modal select, .task-handoff-modal textarea { width: 100%; padding: 10px 11px; border: 1px solid #d8e1e2; border-radius: 8px; background: #fff; color: #26383c; resize: vertical; }
+.task-handoff-modal textarea { min-height: 82px; font-weight: 500; line-height: 1.6; }
+.handoff-empty { margin: -4px 0 12px; padding: 9px 11px; border: 1px solid #ead7b7; border-radius: 7px; background: #fffaf0; color: #816129; font-size: 10px; line-height: 1.5; }
+.handoff-rules { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0; }
+.handoff-rules span { padding: 6px 8px; border-radius: 6px; background: #f0f5f3; color: #45675f; font-size: 9px; font-weight: 800; }
+.message-delivery { display: flex !important; align-items: center; justify-content: flex-end; gap: 3px; }
+.message-delivery em { color: #9b6c28; font-style: normal; }
+.message-delivery button { padding: 0; border: 0; background: transparent; color: #9b4d3f; font-size: inherit; font-weight: 900; text-decoration: underline; }
+.chat-title nav button:disabled { cursor: default; opacity: 1; }
+
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid rgba(20, 105, 98, .35); outline-offset: 2px; }
+button:disabled { cursor: not-allowed; opacity: .48; }
+
+.router-decision-card { display: grid; gap: 8px; padding: 11px; border: 1px solid color-mix(in srgb, var(--op-accent) 16%, #dce7e8); border-radius: 12px; background: rgba(255,255,255,.82); }
+.router-decision-card > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.router-decision-card > div span { display: grid; gap: 2px; }
+.router-decision-card > div small { color: #8b9aa0; font-size: 8px; font-weight: 900; letter-spacing: .05em; }
+.router-decision-card > div b { color: #2f4b53; font-size: 11px; }
+.router-decision-card > div em { padding: 3px 7px; border-radius: 999px; background: var(--op-soft); color: var(--op-accent-dark); font-size: 8px; font-style: normal; font-weight: 900; white-space: nowrap; }
+.router-decision-card > p { margin: 0; color: #6f8389; font-size: 9px; line-height: 1.5; }
+.router-decision-card > section { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.router-decision-card > section span { min-width: 0; display: grid; gap: 2px; padding: 6px 7px; border-radius: 7px; background: #f7f9fa; }
+.router-decision-card > section small { color: #9aa8ac; font-size: 8px; }
+.router-decision-card > section b { overflow: hidden; color: #425c63; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.router-decision-card > button { justify-self: start; padding: 6px 9px; border: 0; border-radius: 7px; background: var(--op-accent-dark); color: #fff; font: inherit; font-size: 9px; font-weight: 900; cursor: pointer; }
+.router-model-summary { display: flex; flex-wrap: wrap; gap: 5px; }
+.router-model-summary span { padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--op-accent) 8%, #e0e8e8); border-radius: 6px; background: rgba(255,255,255,.72); color: #6e8186; font-size: 8px; font-weight: 800; }
+.router-card-actions { display: flex; gap: 7px; }
+.router-card-actions button { min-height: 30px; padding: 6px 9px; border: 1px solid transparent; border-radius: 7px; background: var(--op-accent-dark); color: #fff; font: inherit; font-size: 9px; font-weight: 900; cursor: pointer; }
+.router-card-actions button.secondary { border-color: color-mix(in srgb, var(--op-accent) 16%, #d5e0e1); background: #fff; color: var(--op-accent-dark); }
+.router-card-actions button:hover { transform: translateY(-1px); box-shadow: 0 5px 12px color-mix(in srgb, var(--op-accent) 12%, transparent); }
+
+/* 公开动态保留原文入口；刷新状态是信息而不是抢眼的主操作。 */
+.news-refresh-button { min-height: 25px; display: inline-flex; align-items: center; gap: 4px; margin-left: auto; padding: 3px 7px; border: 1px solid #dbe6e7; border-radius: 7px; background: #f8faf9; color: #6d8186; font: inherit; font-size: 8px; font-weight: 800; cursor: pointer; }
+.news-refresh-button:hover { border-color: #b8d5d1; background: #f0f7f5; color: var(--teal-dark); }
+.news-refresh-button:disabled { cursor: wait; opacity: .65; }
+.news-refresh-button .ui-icon { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* 成本感知模型策略：明确档位、预算、升级和确认边界。 */
+.model-policy-modal { z-index: 80; }
+.model-policy-card { width: min(720px, calc(100vw - 28px)); display: grid; gap: 15px; padding: 24px; }
+.model-policy-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-right: 30px; }
+.model-policy-card > header h2 { margin: 3px 0 0; color: #263f46; font-size: 22px; }
+.model-policy-card > header > span { padding: 7px 10px; border-radius: 8px; background: #eef6f4; color: #236861; font-size: 10px; font-weight: 900; }
+.model-policy-intro { margin: 0; color: #687d82; font-size: 12px; line-height: 1.65; }
+.model-policy-modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.model-policy-modes label { position: relative; min-width: 0; padding: 13px; border: 1px solid #dfe8e8; border-radius: 11px; background: #fbfcfb; cursor: pointer; }
+.model-policy-modes label.active { border-color: #72aaa4; background: #f1f8f6; box-shadow: inset 0 0 0 1px rgba(23,109,103,.08); }
+.model-policy-modes input { position: absolute; opacity: 0; pointer-events: none; }
+.model-policy-modes span { display: grid; gap: 5px; }
+.model-policy-modes b { color: #345159; font-size: 12px; }
+.model-policy-modes small { color: #809196; font-size: 9px; line-height: 1.5; }
+.model-policy-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.model-policy-fields label { display: grid; gap: 5px; color: #687e84; font-size: 10px; font-weight: 800; }
+.model-policy-fields input { min-height: 38px; padding: 8px 10px; border: 1px solid #dce6e7; border-radius: 8px; background: #fff; color: #29464c; font: inherit; }
+.model-policy-switches { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.model-policy-switches label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: start; padding: 11px; border-radius: 9px; background: #f7f9f8; cursor: pointer; }
+.model-policy-switches input { margin-top: 3px; accent-color: var(--teal); }
+.model-policy-switches span { display: grid; gap: 3px; }
+.model-policy-switches b { color: #38545b; font-size: 10px; }
+.model-policy-switches small { color: #86969a; font-size: 8px; line-height: 1.45; }
+.model-route-preview { display: grid; grid-template-columns: 1.5fr repeat(3, minmax(90px, .7fr)); overflow: hidden; border: 1px solid #dce7e7; border-radius: 10px; background: #fff; }
+.model-route-preview > span { min-width: 0; display: grid; gap: 4px; padding: 11px; border-right: 1px solid #e5ecec; }
+.model-route-preview > span:last-of-type { border-right: 0; }
+.model-route-preview small { color: #8b9b9f; font-size: 8px; }
+.model-route-preview b { overflow: hidden; color: #35545b; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.model-route-preview p { grid-column: 1 / -1; margin: 0; padding: 9px 11px; border-top: 1px solid #e5ecec; background: #f5f9f8; color: #60777c; font-size: 9px; line-height: 1.55; }
+
+/* 右侧助手使用与主工作区相同的中性表面，降低割裂和蓝色“外挂面板”感。 */
+.content-shell { background: linear-gradient(90deg, transparent calc(100% - var(--operator-width, 360px) - 10px), rgba(232,241,239,.45) 100%); }
+.panel-resizer { background: linear-gradient(90deg, transparent 0%, rgba(206,222,220,.55) 48%, transparent 100%); }
+.panel-resizer span { left: 4px; width: 2px; height: 46px; background: #abc0bd; }
+.operator-panel,
+.operator-panel.op-theme-tiangong,
+.operator-panel.op-theme-guanwei,
+.operator-panel.op-theme-zhiju,
+.operator-panel.op-theme-bowen,
+.operator-panel.op-theme-heming,
+.operator-panel.op-theme-mingjian { background: linear-gradient(180deg, #fbfcfb 0%, #f7faf9 58%, #f1f6f4 100%); }
+.operator-panel { border-left-color: #dce8e5; box-shadow: inset 10px 0 22px -24px rgba(30,70,67,.26); }
+.operator-panel .bubble.assistant,
+.operator-panel .quick-card,
+.operator-panel .router-decision-card { box-shadow: 0 5px 16px rgba(42,70,68,.035); }
+
+/* 项目态势：工作台先回答“项目走到哪一步、下一步做什么”。 */
+.project-command-panel { position: relative; overflow: hidden; padding: 19px 20px 17px; border-color: #d8e5e5 !important; background: #fff !important; box-shadow: 0 12px 30px rgba(24,60,68,.055) !important; }
+.project-command-panel::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: linear-gradient(180deg, #16766f, #5ba49c); }
+.project-command-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, .36fr); align-items: end; gap: 24px; }
+.project-command-head > div:first-child { min-width: 0; }
+.project-command-head h2 { margin: 2px 0 5px; color: #213940; font-size: 21px; letter-spacing: -.02em; }
+.project-command-head p:last-child { max-width: 760px; margin: 0; color: #708287; font-size: 11px; line-height: 1.65; }
+.project-command-progress { display: grid; grid-template-columns: auto minmax(100px, 1fr); align-items: center; gap: 5px 12px; }
+.project-command-progress > span { display: grid; grid-row: span 2; gap: 1px; }
+.project-command-progress > span b { color: #145f5a; font-size: 22px; }
+.project-command-progress > span small, .project-command-progress em { color: #84969a; font-size: 9px; font-style: normal; font-weight: 700; }
+.project-command-progress > div { height: 7px; overflow: hidden; border-radius: 999px; background: #e8efef; }
+.project-command-progress > div i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #16766f, #66aaa3); }
+.project-pulse-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; margin-top: 17px; border: 1px solid #e0e8e9; border-radius: 12px; background: #fbfcfc; }
+.project-pulse-grid button { min-width: 0; display: grid; align-content: start; gap: 6px; padding: 12px 13px; border: 0; border-right: 1px solid #e4eaeb; background: transparent; color: #314c53; text-align: left; font: inherit; cursor: pointer; transition: background .16s ease, transform .16s ease; }
+.project-pulse-grid button:last-child { border-right: 0; }
+.project-pulse-grid button:hover { z-index: 1; background: #fff; transform: translateY(-1px); }
+.project-pulse-grid button > span { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.project-pulse-grid small { color: #829399; font-size: 9px; font-weight: 800; }
+.project-pulse-grid b { color: #29464d; font-size: 13px; }
+.project-pulse-grid em { overflow: hidden; color: #74878d; font-size: 9px; font-style: normal; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+.project-pulse-grid .tone-red b { color: #a44b43; }
+.project-pulse-grid .tone-amber b { color: #976a26; }
+.project-pulse-grid .tone-teal b, .project-pulse-grid .tone-green b { color: #146b64; }
+.project-command-foot { display: flex; align-items: stretch; gap: 8px; margin-top: 11px; }
+.dynamic-action-label { min-width: 156px; display: grid; align-content: center; gap: 2px; padding-right: 12px; }
+.dynamic-action-label b { color: #355159; font-size: 11px; }
+.dynamic-action-label small { color: #93a0a4; font-size: 8.5px; }
+.project-command-foot > button { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; flex: 1 1 0; gap: 1px 8px; padding: 8px 10px; border: 1px solid #dce6e7; border-radius: 9px; background: #f9fbfb; color: #36545b; text-align: left; font: inherit; cursor: pointer; }
+.project-command-foot > button span { overflow: hidden; font-size: 10px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
+.project-command-foot > button small { overflow: hidden; color: #89999d; font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
+.project-command-foot > button i { grid-area: 1 / 2 / 3 / 3; align-self: center; color: #6f868b; font-style: normal; }
+.project-command-foot > button.primary { border-color: #1b746d; background: #176d67; color: #fff; }
+.project-command-foot > button.primary small, .project-command-foot > button.primary i { color: rgba(255,255,255,.72); }
+
+/* Skill 推荐同时交代“为什么推荐”和“准备怎么用”。 */
+.home-task-row.skill-row .task-device-block em { display: flex; align-items: baseline; gap: 5px; }
+.home-task-row.skill-row .task-device-block em strong { flex: 0 0 auto; color: #517078; font-size: 8px; font-style: normal; }
+
+/* 团队分析的筛选与八项口径。 */
+.team-analytics-filters { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)) auto; align-items: end; gap: 8px; margin: 12px 0 10px; padding: 10px; border: 1px solid #e1e9ea; border-radius: 11px; background: #f8fafa; }
+.team-analytics-filters label { display: grid; gap: 4px; color: #7d8f94; font-size: 8.5px; font-weight: 800; }
+.team-analytics-filters select { min-width: 0; padding: 7px 9px; border: 1px solid #dce5e7; border-radius: 7px; background: #fff; color: #345057; font: inherit; font-size: 10px; }
+.team-analytics-filters > button { min-height: 31px; padding: 0 11px; border: 1px solid #cfdcdd; border-radius: 7px; background: #fff; color: #456269; font: inherit; font-size: 9px; font-weight: 800; cursor: pointer; }
+.team-intelligence-metrics { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); border: 1px solid #e1e9ea; border-radius: 11px; overflow: hidden; }
+.team-intelligence-metrics button { min-width: 0; display: grid; gap: 3px; padding: 10px; border: 0; border-right: 1px solid #e6ecee; background: #fff; color: #304c53; text-align: left; font: inherit; cursor: pointer; }
+.team-intelligence-metrics button:last-child { border-right: 0; }
+.team-intelligence-metrics button:hover { background: #f5faf9; }
+.team-intelligence-metrics small { color: #829499; font-size: 8.5px; font-weight: 800; }
+.team-intelligence-metrics b { font-size: 14px; }
+.team-intelligence-metrics em { color: #17766f; font-size: 8px; font-style: normal; font-weight: 900; }
+.team-intelligence-metrics em.down { color: #3e7e9d; }
+.team-intelligence-metrics span { overflow: hidden; color: #95a2a6; font-size: 7.5px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Context Pack 证据链、来源定位和版本对比。 */
+.context-evidence-board, .context-version-board { display: grid; gap: 10px; margin: 12px 0; padding: 12px; border: 1px solid #dfe9ea; border-radius: 11px; background: #fbfcfc; }
+.context-evidence-board > header, .context-version-board > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.context-evidence-board > header > div, .context-version-board > header > div { display: grid; gap: 2px; }
+.context-evidence-board > header b, .context-version-board > header b { color: #2d4a51; font-size: 11px; }
+.context-evidence-board > header small, .context-version-board > header small { color: #87979c; font-size: 8.5px; }
+.context-evidence-board > header strong { color: #166c65; font-size: 17px; }
+.context-version-board > header em { color: #5f7a80; font-size: 9px; font-style: normal; font-weight: 800; }
+.context-evidence-checks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+.context-evidence-checks button { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 7px; padding: 8px; border: 1px solid #ead9b7; border-radius: 8px; background: #fffaf2; color: #6f5d3d; text-align: left; font: inherit; cursor: pointer; }
+.context-evidence-checks button.ok { border-color: #d2e6e2; background: #f4faf8; color: #355e58; }
+.context-evidence-checks button > i { width: 18px; height: 18px; display: grid; grid-row: span 2; place-items: center; border-radius: 50%; background: #f1dfb8; font-size: 9px; font-style: normal; font-weight: 900; }
+.context-evidence-checks button.ok > i { background: #dcefeb; }
+.context-evidence-checks button span { min-width: 0; display: grid; gap: 2px; }
+.context-evidence-checks button b { font-size: 9.5px; }
+.context-evidence-checks button small { overflow: hidden; color: #8a806e; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.context-evidence-checks button em { grid-column: 2; color: inherit; font-size: 7.5px; font-style: normal; font-weight: 900; }
+.context-source-locator { display: grid; grid-template-columns: auto repeat(5, minmax(0, 1fr)); gap: 6px; align-items: stretch; }
+.context-source-locator > b { align-self: center; color: #597178; font-size: 9px; }
+.context-source-locator button { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 5px; padding: 7px; border: 1px solid #e0e8ea; border-radius: 7px; background: #fff; color: #48636a; text-align: left; font: inherit; cursor: pointer; }
+.context-source-locator button > span { width: 17px; height: 17px; display: grid; grid-row: span 3; place-items: center; border-radius: 5px; background: #eaf4f2; color: #176b64; font-size: 8px; font-weight: 900; }
+.context-source-locator button em { overflow: hidden; font-size: 8.5px; font-style: normal; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.context-source-locator button small, .context-source-locator button i { color: #91a0a4; font-size: 7px; font-style: normal; }
+.context-version-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: end; gap: 8px; }
+.context-version-controls label { display: grid; gap: 3px; color: #7d8f94; font-size: 8px; font-weight: 800; }
+.context-version-controls select { min-width: 0; padding: 7px 8px; border: 1px solid #dce5e7; border-radius: 7px; background: #fff; color: #38545b; font: inherit; font-size: 9px; }
+.context-version-controls > span { padding-bottom: 8px; color: #92a0a4; font-size: 8px; }
+.context-version-diff { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.context-version-diff > span { display: grid; gap: 2px; padding: 7px 8px; border-left: 2px solid #77aaa4; background: #fff; }
+.context-version-diff small { color: #8b9a9f; font-size: 8px; }
+.context-version-diff b { color: #35585f; font-size: 9px; }
+
+/* 项目执行账本：阶段摘要之下给出可审计的输入输出明细。 */
+.task-trace-ledger { min-width: 880px; overflow: hidden; border: 1px solid #e1e9ea; border-radius: 9px; background: #fff; }
+.task-collaboration-trace { overflow-x: auto; }
+.task-trace-ledger-head, .task-trace-ledger-row { display: grid; grid-template-columns: 1.05fr 1.2fr 1.05fr 1.4fr 1.4fr .72fr; }
+.task-trace-ledger-head { background: #f2f6f6; color: #7a8c91; font-size: 8px; font-weight: 900; }
+.task-trace-ledger-head span, .task-trace-ledger-row > span { min-width: 0; padding: 7px 8px; border-right: 1px solid #e7eded; }
+.task-trace-ledger-head span:last-child, .task-trace-ledger-row > span:last-child { border-right: 0; }
+.task-trace-ledger-row { border-top: 1px solid #e8eeee; color: #52686e; }
+.task-trace-ledger-row > span { display: grid; align-content: center; gap: 2px; }
+.task-trace-ledger-row b { overflow: hidden; color: #3b565d; font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
+.task-trace-ledger-row small, .task-trace-ledger-row time { color: #7f9095; font-size: 7.5px; line-height: 1.35; }
+.task-trace-ledger-row > span:first-child { position: relative; grid-template-columns: auto minmax(0, 1fr); }
+.task-trace-ledger-row > span:first-child i { width: 7px; height: 7px; grid-row: span 2; align-self: center; border-radius: 50%; background: #cbd6d8; }
+.task-trace-ledger-row.done > span:first-child i { background: #278078; }
+.task-trace-ledger-row.current > span:first-child i { background: #d39132; box-shadow: 0 0 0 3px rgba(211,145,50,.15); }
+
+/* 阶段栏统一尺寸、底色和数字容器，状态只通过小范围强调表达。 */
+.project-context-flow { background: #fff; }
+.project-context-flow button { grid-template-columns: 24px minmax(0, 1fr); min-height: 42px; padding: 7px 9px; background: #fff !important; color: #61767b; }
+.project-context-flow button small { box-sizing: border-box; width: 24px; min-width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; background: #eef2f2; color: #7d8f94; font-size: 7px; line-height: 1; transform: none; }
+.project-context-flow button b { font-size: 9.5px; }
+.project-context-flow button.done { color: #3d6661; }
+.project-context-flow button.done small { background: #e5f1ef; color: #28766e; }
+.project-context-flow button.current { box-shadow: inset 0 -2px #146d67; color: #154f4b; }
+.project-context-flow button.current small { background: #176d67; color: #fff; }
+
+@media (max-width: 1400px) {
+  .project-context-bar { grid-template-columns: minmax(0, 1fr) auto; }
+  .project-context-flow { grid-column: 1 / -1; order: 3; grid-template-columns: repeat(7, minmax(82px, 1fr)); }
+  .contact-focus-shell .chat-workbench { width: 100%; max-width: 100%; grid-template-columns: minmax(176px, 26%) minmax(0, 1fr) minmax(205px, 30%); }
+  .contact-focus-shell .chat-workbench.right-collapsed { grid-template-columns: minmax(196px, 31%) minmax(0, 1fr) 52px; }
+  .contact-focus-shell .chat-workbench.left-collapsed { grid-template-columns: 62px minmax(0, 1fr) minmax(210px, 31%); }
+  .contact-focus-shell .chat-workbench.left-collapsed.right-collapsed { grid-template-columns: 62px minmax(0, 1fr) 52px; }
+  .chat-title { padding-inline: 16px; }
+  .chat-title-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .capability-loop-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .project-pulse-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .project-pulse-grid button:nth-child(3n) { border-right: 0; }
+  .project-pulse-grid button:nth-child(-n+3) { border-bottom: 1px solid #e4eaeb; }
+  .team-intelligence-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .team-intelligence-metrics button:nth-child(4n) { border-right: 0; }
+  .team-intelligence-metrics button:nth-child(-n+4) { border-bottom: 1px solid #e6ecee; }
+  .context-source-locator { grid-template-columns: auto repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 980px) {
+  .project-context-bar { grid-template-columns: minmax(0, 1fr) auto; }
+  .project-context-flow { grid-column: 1 / -1; order: 3; }
+  .task-trace-actors { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .task-execution-timeline { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .project-command-head { grid-template-columns: minmax(0, 1fr); }
+  .project-command-foot { flex-wrap: wrap; }
+  .dynamic-action-label { width: 100%; }
+  .team-analytics-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .team-analytics-filters > button { align-self: stretch; }
+  .context-evidence-checks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 680px) {
+  .project-context-meta { display: none; }
+  .project-context-flow { overflow-x: auto; justify-content: flex-start; }
+  .project-context-flow button { min-width: 60px; }
+  .capability-loop-grid, .context-pack-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .project-pulse-grid, .team-intelligence-metrics, .context-evidence-checks, .context-version-diff { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .project-command-foot > button { flex-basis: 100%; }
+  .context-source-locator { grid-template-columns: minmax(0, 1fr); }
+  .context-source-locator > b { padding: 2px 0; }
+  .context-version-controls { grid-template-columns: minmax(0, 1fr); }
+  .context-version-controls > span { display: none; }
+  .model-policy-card { max-height: calc(100vh - 24px); overflow-y: auto; padding: 18px; }
+  .model-policy-card > header { display: grid; gap: 9px; }
+  .model-policy-modes, .model-policy-fields, .model-policy-switches { grid-template-columns: minmax(0, 1fr); }
+  .model-route-preview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .model-route-preview > span { border-bottom: 1px solid #e5ecec; }
+  .model-route-preview > span:nth-child(2n) { border-right: 0; }
+}
+
+/* 1024—1180 桌面窄窗：后置覆盖紧凑模式里的固定双列，避免操作按钮被裁切。 */
+@media (max-width: 1180px) {
+  .search-focus-shell .search-fusion-head {
+    align-items: stretch !important;
+    flex-direction: column;
+  }
+  .search-focus-shell .search-fusion-head .inline-actions {
+    width: 100%;
+    justify-content: flex-start !important;
+  }
+  .search-focus-shell .search-fusion-body {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .search-focus-shell .search-fusion-input,
+  .search-focus-shell .search-fusion-ai {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* 公网移动端：使用单列工作区与横向能力链路，避免桌面侧栏/顶栏把页面撑宽。 */
+@media (max-width: 760px) {
+  .app-shell,
+  .app-shell.collapsed {
+    display: block !important;
+    min-width: 0;
+  }
+  .side-nav,
+  .app-shell.collapsed .side-nav {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    align-items: center;
+    gap: 7px !important;
+    width: 100%;
+    padding: 7px 8px !important;
+    overflow: hidden;
+    border-right: 0 !important;
+    border-bottom: 1px solid rgba(158,204,232,.58) !important;
+  }
+  .side-nav .brand,
+  .app-shell.collapsed .side-nav .brand {
+    width: 48px !important;
+    height: 38px !important;
+    margin: 0 !important;
+    padding: 2px !important;
+  }
+  .side-nav nav {
+    min-width: 0;
+    display: flex !important;
+    gap: 5px !important;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+  .side-nav nav::-webkit-scrollbar { display: none; }
+  .side-nav nav button {
+    width: 42px !important;
+    min-width: 42px;
+    min-height: 38px !important;
+    flex: 0 0 42px;
+    justify-content: center;
+    padding: 0 8px !important;
+    border-radius: 11px !important;
+  }
+  .side-nav nav button b { display: none !important; }
+  .side-nav .nav-icon { width: 25px !important; height: 25px !important; }
+  .collapse-btn { display: none !important; }
+  .workspace { width: 100%; min-width: 0; }
+  .topbar,
+  .topbar.search-focus {
+    height: auto !important;
+    min-height: 62px;
+    grid-template-columns: minmax(0, 1fr) 38px 38px !important;
+    grid-template-areas: "title notification logout" "search search search";
+    gap: 7px !important;
+    padding: 8px 10px !important;
+  }
+  .topbar .page-title-block,
+  .topbar .task-chamber-wrap { grid-area: title; min-width: 0; }
+  .topbar .global-search { grid-area: search; width: 100%; min-width: 0; }
+  .topbar .notification-button { grid-area: notification; }
+  .topbar .topbar-logout {
+    grid-area: logout;
+    width: 38px !important;
+    min-width: 38px !important;
+    height: 38px;
+    padding: 0 !important;
+  }
+  .topbar .work-strip,
+  .topbar .user-chip { display: none !important; }
+  .topbar .page-title-block { min-height: 44px !important; padding: 6px 10px !important; }
+  .topbar h1 { overflow: hidden; font-size: 15px !important; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar .breadcrumb { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .content-shell,
+  .content-shell.search-focus-shell,
+  .content-shell.contact-focus-shell,
+  .content-shell.profile-focus-shell,
+  .content-shell.knowledge-focus-shell {
+    width: 100%;
+    height: auto;
+    min-width: 0;
+    display: block;
+  }
+  .page-scroll { width: 100%; min-width: 0; padding: 10px; overflow-x: hidden; }
+  .page-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .page-grid > *,
+  .panel,
+  .welcome-card,
+  .form-grid > *,
+  .tabs { min-width: 0; max-width: 100%; }
+  .panel,
+  .welcome-card,
+  .agent-card,
+  .profile-card { padding: 13px; }
+  .project-context-bar {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 8px;
+    padding: 9px;
+  }
+  .project-context-main { width: 100%; min-width: 0; }
+  .project-context-main label { width: 100%; }
+  .project-context-main select { width: 100%; max-width: 100%; }
+  .project-demo-button { align-self: stretch; padding-inline: 9px; white-space: nowrap; }
+  .project-context-flow {
+    grid-column: 1 / -1;
+    width: 100%;
+    max-width: 100%;
+    grid-template-columns: repeat(7, 76px) !important;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+  }
+  .project-context-flow button { min-width: 76px !important; }
+  .search-agent-hero,
+  .search-focus-shell .search-agent-hero {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px;
+    padding: 14px !important;
+  }
+  .search-agent-intro,
+  .search-focus-shell .search-agent-intro {
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 10px;
+  }
+  .search-agent-intro img,
+  .search-focus-shell .search-agent-intro img { width: 52px; height: 52px; }
+  .search-agent-intro h2,
+  .search-focus-shell .search-agent-intro h2 { font-size: 18px; }
+  .tabs { width: 100%; flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-inline: contain; }
+  .tabs button { flex: 0 0 auto; }
+  .form-grid,
+  .quick-grid,
+  .result-grid,
+  .contact-grid,
+  .recheck-grid,
+  .file-cards,
+  .external-artifact-grid,
+  .team-analytics-filters,
+  .context-evidence-checks,
+  .context-version-diff,
+  .task-trace-actors,
+  .task-execution-timeline { grid-template-columns: minmax(0, 1fr) !important; }
+  .form-grid .wide { grid-column: auto; }
+  .inline-actions,
+  .actions,
+  .card-actions,
+  .filters { flex-wrap: wrap; }
+  .task-trace-ledger,
+  .table { width: 100%; max-width: 100%; overflow-x: auto; }
+  .task-trace-ledger-head,
+  .task-trace-ledger-row { min-width: 760px; }
+  .contact-focus-shell .chat-workbench,
+  .contact-focus-shell .chat-workbench.right-collapsed,
+  .contact-focus-shell .chat-workbench.left-collapsed,
+  .contact-focus-shell .chat-workbench.left-collapsed.right-collapsed {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .chat-title,
+  .chat-title-actions { min-width: 0; flex-wrap: wrap; }
+  .operator-panel { min-height: 360px; }
+  .modal { padding: 8px; }
+  .modal-card,
+  .task-report-card,
+  .knowledge-detail-card { width: min(100%, calc(100vw - 16px)) !important; max-width: 100%; }
 }
 </style>
 

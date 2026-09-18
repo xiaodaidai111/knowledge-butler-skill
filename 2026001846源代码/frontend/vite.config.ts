@@ -74,5 +74,15 @@ export default defineConfig({
       // 所以显式忽略它们。
       ignored: ['**/.*.tmpdir/**', '**/*.tmpdir/**', '**/*.tmp']
     }
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('/node_modules/zrender/')) return 'zrender'
+          if (id.includes('/node_modules/echarts/')) return 'echarts'
+        }
+      }
+    }
   }
 })

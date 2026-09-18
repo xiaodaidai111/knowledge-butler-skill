@@ -21,6 +21,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from aios_arch.sqlite_utils import connect
+
 logger = logging.getLogger("aios_arch.a2a_registry")
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -33,28 +35,28 @@ DEFAULT_AGENTS = [
                 {"name": "aios_execute", "description": "AIOS 计划执行"},
                 {"name": "system_overview", "description": "系统概览"}],
      "url": "a2a://tiangong", "version": "0.1.0"},
-    {"id": "guanwei", "name": "观微", "description": "智能检索器灵，召回历史案例与 RAG 故障判断",
+    {"id": "guanwei", "name": "观微", "description": "Context Engine，召回需求、代码、Memory、Skill 与 Eval 依据",
      "skills": [{"name": "knowledge_search", "description": "知识检索"},
                 {"name": "rag_query", "description": "RAG 向量检索"},
                 {"name": "file_parse", "description": "文件解析切片"},
                 {"name": "vision_analyze", "description": "视觉分析"}],
      "url": "a2a://guanwei", "version": "0.1.0"},
-    {"id": "zhiju", "name": "执矩", "description": "检修作业器灵，编排 SOP 并推进工单流转",
-     "skills": [{"name": "sop_generate", "description": "标准作业步骤生成"},
-                {"name": "task_update", "description": "工单状态推进"}],
+    {"id": "zhiju", "name": "执矩", "description": "Task Execution，编排项目步骤并推进任务流转",
+     "skills": [{"name": "sop_generate", "description": "Skill 执行步骤生成"},
+                {"name": "task_update", "description": "任务状态推进"}],
      "url": "a2a://zhiju", "version": "0.1.0"},
-    {"id": "bowen", "name": "博闻", "description": "知识管理器灵，沉淀待审核知识候选",
+    {"id": "bowen", "name": "博闻", "description": "Team Memory，沉淀带来源与适用边界的 Memory 候选",
      "skills": [{"name": "knowledge_candidate_create", "description": "知识候选生成"},
                 {"name": "file_parse", "description": "知识文件切片入库"},
                 {"name": "rag_query", "description": "知识召回验证"}],
      "url": "a2a://bowen", "version": "0.1.0"},
-    {"id": "heming", "name": "和鸣", "description": "协作调度器灵，协调人员并发起专家支援",
+    {"id": "heming", "name": "和鸣", "description": "Memory Evolution，协调成员并提炼可复用经验",
      "skills": [{"name": "contacts_read", "description": "联系人推荐"},
                 {"name": "conversation_message_draft", "description": "协作消息草稿"},
                 {"name": "support_request_draft", "description": "专家支援请求"}],
      "url": "a2a://heming", "version": "0.1.0"},
-    {"id": "mingjian", "name": "明鉴", "description": "复检核查器灵，质量评分与验收清单",
-     "skills": [{"name": "recheck", "description": "复检清单"},
+    {"id": "mingjian", "name": "明鉴", "description": "Eval Lab，负责质量门禁、版本回归与验收清单",
+     "skills": [{"name": "recheck", "description": "Eval 验证清单"},
                 {"name": "quality_score", "description": "质量评分"},
                 {"name": "report_verify", "description": "报告核验"}],
      "url": "a2a://mingjian", "version": "0.1.0"},
@@ -102,7 +104,7 @@ def _now() -> str:
 
 def _db() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(A2A_DB_PATH)
+    conn = connect(A2A_DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
     return conn

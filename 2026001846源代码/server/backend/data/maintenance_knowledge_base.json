@@ -1,78 +1,80 @@
 [
   {
-    "id": "kb_motorcycle_engine_manual",
-    "title": "摩托车发动机维修手册",
-    "keywords": ["摩托车", "发动机", "维修手册", "PDF", "专业检修对象"],
-    "content": [
-      "摩托车发动机维修手册已作为平台第一个专业检修对象纳入一修知识库。",
-      "资料可用于多模态检索、智能问修、标准作业指引和知识图谱扩展。",
-      "前端静态资源路径：/static/manuals/摩托车发动机维修手册.pdf。"
-    ],
-    "tips": "检索时建议同时输入设备型号、故障现象和使用工况。"
+    "id": "kb_context_pack_spec",
+    "title": "Context Pack 字段与引用规范",
+    "type": "需求",
+    "category": "上下文规范",
+    "equipment": "研发协作平台",
+    "model": "Context Engine",
+    "summary": "统一目标、范围、代码、Memory、Skill、Eval、风险和信息缺口的组包口径。",
+    "content": "Context Pack 必须记录项目与版本、任务目标、非目标、仓库与分支、关键模块、引用依据、信息缺口、风险和生成时间。关键结论需要指向可追溯来源，未确认信息不得补写。",
+    "keywords": ["Context Pack", "需求", "代码", "引用", "信息缺口"],
+    "tags": ["Context Pack", "可追溯", "上下文完整度"],
+    "source": "平台规范", "status": "approved", "citations": 18, "updated_at": "2026-09-17 09:10"
   },
   {
-    "id": "kb_motorcycle_engine_object",
-    "title": "专业检修对象：摩托车发动机",
-    "keywords": ["检修对象", "发动机", "点火", "燃油", "润滑", "异响"],
-    "content": [
-      "摩托车发动机节点关联维修手册、点火系统检查、燃油供给检查、发动机异响和机油润滑保养。",
-      "该对象可作为设备型号、故障图片、文本现象共同检索的基础入口。"
-    ],
-    "tips": "适合作为 A1 赛题演示中的主设备对象。"
+    "id": "kb_payment_memory",
+    "title": "支付回调重复处理问题 Memory",
+    "type": "Memory",
+    "category": "历史任务",
+    "equipment": "电商中台",
+    "model": "payment-service",
+    "summary": "记录重复通知与并发回调下的触发条件、根因、修复方案和适用边界。",
+    "content": "一次线上问题显示，仅依赖短时缓存锁无法覆盖锁失效和进程重启场景。有效方案是统一业务幂等键，以数据库唯一约束兜底，并用补偿任务处理不确定状态。该结论适用于至少一次投递的异步回调链路。",
+    "keywords": ["支付回调", "幂等", "并发", "唯一约束", "补偿"],
+    "tags": ["Memory", "问题复盘", "适用边界"],
+    "source": "TASK-20260917-001", "status": "approved", "citations": 16, "updated_at": "2026-09-17 09:25"
   },
   {
-    "id": "kb_motorcycle_ignition",
-    "title": "点火系统检查",
-    "keywords": ["点火系统", "火花塞", "点火线圈", "点火时序", "启动困难"],
-    "content": [
-      "点火系统检查关注火花塞状态、点火线圈输出、线路连接和点火时序。",
-      "当发动机启动困难、怠速不稳或加速无力时，可优先关联该检查流程。",
-      "推荐步骤：外观检查、间隙测量、绝缘状态确认、点火输出测试、复测记录。"
-    ],
-    "tips": "拆检点火系统前应确认发动机停机并避免高压触电风险。"
+    "id": "kb_api_review_skill",
+    "title": "API 变更风险审查 Skill",
+    "type": "Skill",
+    "category": "研发流程",
+    "equipment": "研发协作平台",
+    "model": "Skill Runner",
+    "summary": "面向 API 变更自动核对兼容性、调用方、权限、数据影响与回滚方案。",
+    "content": "输入需求、接口契约、代码 Diff 和调用方清单；依次识别破坏性变更、核对兼容策略、生成回归用例、评估灰度与回滚风险；输出证据化审查报告并保留人工确认点。",
+    "keywords": ["API", "代码审查", "兼容性", "Skill", "回滚"],
+    "tags": ["Skill", "Review", "高风险变更"],
+    "source": "Skill 工厂 v2.4", "status": "approved", "citations": 22, "updated_at": "2026-09-17 09:40"
   },
   {
-    "id": "kb_motorcycle_fuel",
-    "title": "燃油供给检查",
-    "keywords": ["燃油", "油路", "喷油", "化油器", "滤清器", "加速无力"],
-    "content": [
-      "燃油供给检查关注油路堵塞、燃油滤清器状态、喷油或化油器供给和泄漏风险。",
-      "当发动机熄火、供油不足或加速迟滞时，可与该流程建立关联。",
-      "检修记录应包含油路状态、滤清器状态、泄漏点照片和复测结论。"
-    ],
-    "tips": "燃油相关检修应远离明火并准备吸附材料。"
+    "id": "kb_payment_eval",
+    "title": "支付幂等 Eval 基准与失败样例",
+    "type": "Eval",
+    "category": "Eval 数据",
+    "equipment": "电商中台",
+    "model": "payment-service",
+    "summary": "覆盖重复通知、并发请求、超时重试、缓存失效和数据库冲突场景。",
+    "content": "核心样例检查业务结果只发生一次、订单状态一致、失败可恢复且日志可追踪。核心样例必须全部通过，长尾样例通过率不低于 95%；失败样例进入 Memory Evolution。",
+    "keywords": ["Eval", "回归", "幂等", "数据一致性", "质量门禁"],
+    "tags": ["Eval", "发布门禁", "失败样例"],
+    "source": "Eval Lab", "status": "approved", "citations": 14, "updated_at": "2026-09-17 10:00"
   },
   {
-    "id": "kb_motorcycle_noise",
-    "title": "发动机异响排查",
-    "keywords": ["异响", "气门间隙", "链条", "轴承", "磨损", "润滑不足"],
-    "content": [
-      "发动机异响可能来自气门间隙异常、链条磨损、轴承磨损或润滑不足。",
-      "排查时应记录异响出现工况，例如冷机、热机、怠速、加速或负载状态。",
-      "推荐优先级：润滑状态、气门间隙、正时链条、轴承间隙、紧固件状态。"
-    ],
-    "tips": "异响类问题需要结合声音、转速、温度和最近保养记录综合判断。"
+    "id": "kb_agent_trace_spec",
+    "title": "Agent 协作 Trace 与成本记录规范",
+    "type": "规范",
+    "category": "Agent 治理",
+    "equipment": "研发协作平台",
+    "model": "Agent Runtime",
+    "summary": "定义人机协作中每次模型、工具、Skill 和人工确认的可观测记录。",
+    "content": "一次执行需要记录输入输出、调用 Agent、所用 Skill、引用 Memory、工具结果、耗时、成本、风险等级和人工确认。Trace 关联项目和任务，支持按步骤定位失败并回放关键决策。",
+    "keywords": ["Agent", "Trace", "成本", "可观测", "人工确认"],
+    "tags": ["Agent", "Observability", "治理"],
+    "source": "平台规范", "status": "approved", "citations": 11, "updated_at": "2026-09-17 10:18"
   },
   {
-    "id": "kb_motorcycle_lubrication",
-    "title": "机油与润滑保养",
-    "keywords": ["机油", "润滑", "保养", "油位", "温升异常"],
-    "content": [
-      "机油与润滑保养关注油位、油品状态、换油周期、泄漏和润滑不足风险。",
-      "润滑不足可能引发异常磨损、温升异常和发动机异响。",
-      "复检时应记录油位、油色、金属屑情况和渗漏点。"
-    ],
-    "tips": "复测前应确认油量和油品符合手册要求。"
-  },
-  {
-    "id": "kb_a1_audit_rule",
-    "title": "一修核查规则",
-    "keywords": ["核查", "安全", "报告", "复测", "引用"],
-    "content": [
-      "一修核查智能体需要检查五类内容：知识库引用、安全确认、检测数据、复测结论和报告证据。",
-      "未完成断电验电、照片证据或复测记录时，不建议直接归档为标准案例。",
-      "通过核查的案例可进入知识沉淀队列，并关联设备、故障、部件和处置方案节点。"
-    ],
-    "tips": "核查结果用于答辩展示时，可体现大模型输出的可控性和可追溯性。"
+    "id": "kb_external_ai_import",
+    "title": "外部 AI 会话导入与资产化规则",
+    "type": "需求",
+    "category": "外部 AI 导入",
+    "equipment": "研发协作平台",
+    "model": "AI Import Gateway",
+    "summary": "把 ChatGPT、Claude、Gemini 等外部会话解析为需求、决策、Memory 与 Skill 候选。",
+    "content": "导入时保留来源、项目、时间和原始内容，只抽取可追溯的结论。系统生成候选摘要、决策、行动项、Memory 和 Skill，全部进入人工审核，不直接写入正式资产。",
+    "keywords": ["外部 AI", "导入", "会话", "Memory", "审核"],
+    "tags": ["AI Import", "人工审核", "资产化"],
+    "source": "AI Import Gateway", "status": "approved", "citations": 9, "updated_at": "2026-09-17 10:30"
   }
 ]

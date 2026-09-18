@@ -17,6 +17,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from aios_arch.sqlite_utils import connect
+
 logger = logging.getLogger("aios_arch.trace")
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -67,7 +69,7 @@ def _now() -> str:
 
 def _db() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(TRACE_DB_PATH)
+    conn = connect(TRACE_DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
     return conn
