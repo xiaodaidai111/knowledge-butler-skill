@@ -493,6 +493,10 @@ export const yixiuApi = {
   mcpManifest() {
     return requestJson('/integrations/mcp/manifest')
   },
+  // MCP 连通性探测：走 JSON-RPC tools/list，能返回工具清单即视为已接入
+  mcpPing() {
+    return requestJson('/mcp', { method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'tools/list' } })
+  },
   integrationSources() {
     return requestJson('/integrations/sources')
   },
@@ -529,5 +533,37 @@ export const yixiuApi = {
   },
   deleteSkill(id) {
     return requestJson(`/skills/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  },
+
+  // ---- 服务台：需求体检 & 托管运行 ----
+  serviceDiagnose(payload = {}) {
+    return requestJson('/service/diagnose', { method: 'POST', body: payload })
+  },
+  serviceIntakeOptions() {
+    return requestJson('/service/intake/options')
+  },
+  serviceIntake(payload = {}) {
+    return requestJson('/service/intake', { method: 'POST', body: payload })
+  },
+  saveServiceDiagnosis(payload = {}) {
+    return requestJson('/service/diagnose/save', { method: 'POST', body: payload })
+  },
+  createRequisition(payload = {}) {
+    return requestJson('/service/requisition', { method: 'POST', body: payload })
+  },
+  requisitions(account = '') {
+    return requestJson(`/service/requisitions?account=${encodeURIComponent(account)}`)
+  },
+  hostings(account = '') {
+    return requestJson(`/service/hosting?account=${encodeURIComponent(account)}`)
+  },
+  createHosting(payload = {}) {
+    return requestJson('/service/hosting', { method: 'POST', body: payload })
+  },
+  runHosting(id) {
+    return requestJson(`/service/hosting/${encodeURIComponent(id)}/run`, { method: 'POST', body: {} })
+  },
+  setHostingStatus(id, status) {
+    return requestJson(`/service/hosting/${encodeURIComponent(id)}/status`, { method: 'POST', body: { status } })
   }
 }

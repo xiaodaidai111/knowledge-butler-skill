@@ -9,7 +9,7 @@
         </div>
         <div class="auth-intro">
           <p>面向研发团队的人机协作工作台</p>
-          <h1>让每一次任务<br />都有上下文、有执行、有沉淀</h1>
+          <h1>一次运行<br />万事皆休</h1>
           <div class="auth-capabilities">
             <span><b>01</b>任务上下文包</span>
             <span><b>02</b>人机协作执行</span>
@@ -30,8 +30,8 @@
             <button type="button" :class="{ active: authMode === 'register' }" @click="setAuthMode('register')">注册账号</button>
           </div>
           <div class="auth-fields">
-            <label v-if="authMode === 'register'">姓名<input v-model.trim="authForm.name" autocomplete="name" placeholder="请输入真实姓名" /></label>
-            <label>账号<input v-model.trim="authForm.account" autocomplete="username" placeholder="请输入账号" /></label>
+            <label v-if="authMode === 'register'">手机号<input v-model.trim="authForm.account" autocomplete="tel" inputmode="numeric" maxlength="11" placeholder="请输入手机号" /></label>
+            <label v-else>账号<input v-model.trim="authForm.account" autocomplete="username" placeholder="请输入账号" /></label>
             <label>密码<input v-model="authForm.password" type="password" autocomplete="current-password" placeholder="请输入密码" /></label>
             <label v-if="authMode === 'register'">确认密码<input v-model="authForm.confirmPassword" type="password" autocomplete="new-password" placeholder="请再次输入密码" /></label>
           </div>
@@ -46,11 +46,20 @@
     <template v-else>
     <div v-if="showSplash" ref="bootScreenRef" class="boot-screen" aria-label="一休系统开屏动画">
       <div class="boot-grid" aria-hidden="true"></div>
+      <div class="boot-halo" aria-hidden="true"></div>
+      <div class="boot-ring" aria-hidden="true"></div>
       <div class="boot-flow flow-a" aria-hidden="true"></div>
       <div class="boot-flow flow-b" aria-hidden="true"></div>
-      <section ref="bootMarkRef" class="boot-mark">
-        <img ref="bootLogoRef" :src="'/static/yixiu-logo-full.png'" alt="一休" />
-      </section>
+      <div class="boot-flow flow-c" aria-hidden="true"></div>
+      <div class="boot-stage">
+        <section ref="bootMarkRef" class="boot-mark">
+          <img ref="bootLogoRef" :src="'/static/yixiu-logo-full.png'" alt="一休" />
+        </section>
+        <div ref="bootCaptionRef" class="boot-caption">
+          <p class="boot-slogan">一次运行<span></span>万事皆休</p>
+          <div class="boot-progress"><i></i></div>
+        </div>
+      </div>
     </div>
     <aside class="side-nav">
       <img
@@ -144,38 +153,20 @@
         </button>
       </header>
 
-      <div class="content-shell" :class="{ 'search-focus-shell': activePage === 'search', 'contact-focus-shell': activePage === 'tasks' && taskPanel === 'contacts', 'profile-focus-shell': activePage === 'profile', 'knowledge-focus-shell': activePage === 'knowledge' }" :style="{ '--operator-width': `${operatorWidth}px` }">
+      <div class="content-shell" :class="{ 'search-focus-shell': activePage === 'search', 'contact-focus-shell': activePage === 'tasks' && taskPanel === 'contacts', 'profile-focus-shell': activePage === 'profile', 'knowledge-focus-shell': activePage === 'knowledge', 'service-focus-shell': activePage === 'service' }" :style="{ '--operator-width': `${operatorWidth}px` }">
       <section class="page-scroll" :class="[`page-theme-${activePage}`, { 'panel-network': activePage === 'search' && searchPanel === 'network' }]">
-        <div class="project-context-bar">
-          <div class="project-context-main">
-            <span class="project-context-dot"></span>
-            <label>
-              <small>当前项目上下文</small>
-              <select v-model="activeProjectId" @change="syncActiveProject">
-                <option v-for="project in projectOptions" :key="project.id" :value="project.id">{{ project.name }}</option>
-              </select>
-            </label>
-            <span class="project-context-meta"><b>{{ currentProject.sprint }}</b><small>{{ currentProject.repo }}</small></span>
-          </div>
-          <div class="project-context-flow" aria-label="任务能力演化链路">
-            <button
-              v-for="(step, index) in projectFlowSteps"
-              :key="step.key"
-              type="button"
-              :class="{ done: index < currentProject.flowStep, current: index === currentProject.flowStep }"
-              :title="step.desc"
-              :aria-current="index === currentProject.flowStep ? 'step' : undefined"
-              @click="openProjectFlowStep(step)"
-            ><small>{{ String(index + 1).padStart(2, '0') }}</small><b>{{ step.label }}</b></button>
-          </div>
-        </div>
         <section v-if="activePage === 'home'" class="page-grid">
           <div class="panel span-all project-command-panel">
             <header class="project-command-head">
               <div>
-                <p class="eyebrow">Project Pulse</p>
+                <p class="eyebrow">项目脉搏</p>
                 <h2>{{ currentProject.name }}</h2>
                 <p>{{ currentProject.goal }}</p>
+                <div class="project-switch">
+                  <select v-model="activeProjectId" aria-label="切换项目">
+                    <option v-for="p in projectOptions" :key="p.id" :value="p.id">{{ p.name }}</option>
+                  </select>
+                </div>
               </div>
               <div class="project-command-progress">
                 <span><b>{{ currentProjectProgress }}%</b><small>项目整体进度</small></span>
@@ -183,10 +174,10 @@
                 <em>{{ currentProject.sprint }}</em>
               </div>
             </header>
+
             <div class="project-pulse-grid">
-              <button v-for="item in projectPulseCards" :key="item.key" type="button" :class="`tone-${item.tone}`" @click="item.action()">
+              <button v-for="item in projectPulseCards" :key="item.key" type="button" :class="`tone-${item.tone}`" :title="item.desc" @click="item.action()">
                 <span><small>{{ item.label }}</small><b>{{ item.value }}</b></span>
-                <em>{{ item.desc }}</em>
               </button>
             </div>
             <div class="project-command-foot">
@@ -363,17 +354,15 @@
                   <em><strong>预计用途</strong>{{ skill.purpose }}</em>
                 </span>
                 <span class="task-fault-block">
-                  <span><b>{{ skill.trigger }}</b><i :class="['badge', skill.status === 'verified' ? 'low' : skill.status === 'testing' ? 'medium' : 'high']">{{ skill.status === 'verified' ? '已验证' : skill.status === 'testing' ? '测试中' : '候选' }}</i></span>
+                  <span><b>{{ skill.trigger }}</b></span>
                   <small>{{ skill.version }}</small>
                 </span>
                 <span class="task-owner-block">
                   <i>★</i>
-                  <span><small>GitHub Stars</small><b>{{ skill.stars.toLocaleString() }}</b></span>
+                  <span><small>Stars</small><b>{{ skill.stars.toLocaleString() }}</b></span>
                 </span>
-                <span class="task-progress-block">
-                  <span><b>匹配度 {{ skill.successRate }}%</b></span>
-                  <i><u :style="{ width: `${skill.successRate}%` }"></u></i>
-                  <small>与一休系统契合度</small>
+                <span class="task-state-block">
+                  <i :class="['badge', skill.status === 'verified' ? 'low' : skill.status === 'testing' ? 'medium' : 'high']">{{ skill.status === 'verified' ? '已验证' : skill.status === 'testing' ? '测试中' : '候选' }}</i>
                 </span>
                 <span class="row-arrow">↗</span>
               </a>
@@ -472,154 +461,154 @@
                 v-for="tab in searchTabs"
                 :key="tab.key"
                 type="button"
-                :class="{ active: searchPanel === tab.key || (tab.key === 'multimodal' && ['results', 'history'].includes(searchPanel)) }"
+                :class="{ active: searchPanel === tab.key || (tab.key === 'external' && ['results', 'history'].includes(searchPanel)) }"
                 @click="searchPanel = tab.key"
               >{{ tab.label }}</button>
             </div>
           </div>
 
 
-          <template v-if="searchPanel === 'multimodal'">
-            <div class="panel span-all search-input-panel search-fusion-panel" :class="{ 'is-collapsed': !searchMultimodalExpanded, 'is-expanded': searchMultimodalExpanded }">
-              <div class="search-fusion-head">
-                <div class="search-panel-heading">
-                  <span class="search-step">01</span>
-                  <div><p class="eyebrow">Context Engine</p><h3>输入任务，观微同步组包</h3><small>需求、代码、文档、Issue、PR、聊天和历史经验会合并成一次任务上下文。</small></div>
+          <template v-if="searchPanel === 'external'">
+            <div class="panel span-all import-hero">
+              <div class="import-hero-main">
+                <p class="eyebrow">上下文接力</p>
+                <h3>把外部 AI 的任务过程导入一休</h3>
+                <p>复制提示词 → 粘贴到 Codex / Claude Code / Cursor 发送 → 一休通过 MCP 接收这段过程，生成 Memory、Skill 与 Eval 候选，人工审核后入库。</p>
+              </div>
+              <div class="import-hero-cta">
+                <button class="primary" type="button" @click="copyImportPrompt">复制导入提示词</button>
+                <button type="button" @click="showManualImport = !showManualImport">{{ showManualImport ? '收起手动录入' : '手动粘贴内容' }}</button>
+              </div>
+
+              <div class="import-hero-status" :class="{ ok: mcpReady, bad: mcpConnectionStatus.tone === 'bad' }">
+                <span class="import-hero-dot"></span>
+                <b>{{ mcpStatusText }}</b>
+                <span class="import-hero-meta"><small>地址</small><code>{{ mcpManifest.endpoint || '待后端返回' }}</code></span>
+                <span v-if="mcpConnectionStatus.latency" class="import-hero-meta"><small>延迟</small><b>{{ mcpConnectionStatus.latency }} ms</b></span>
+                <button class="import-hero-link" type="button" :disabled="mcpTesting" @click="testMcpConnection">{{ mcpTesting ? '检测中…' : '测试连接' }}</button>
+                <button class="import-hero-link" type="button" @click="mcpDetailOpen = !mcpDetailOpen">{{ mcpDetailOpen ? '收起详情' : '接入详情' }}</button>
+              </div>
+
+              <div v-if="mcpDetailOpen" class="import-hero-detail">
+                <div>
+                  <b>可用工具</b>
+                  <ul>
+                    <li v-for="tool in (mcpManifest.tools || [])" :key="tool.name">
+                      <code>{{ tool.name }}</code><small>{{ tool.purpose }}</small>
+                    </li>
+                    <li v-if="!(mcpManifest.tools || []).length" class="empty">后端未返回工具清单，请先启动后端</li>
+                  </ul>
                 </div>
-                <div class="inline-actions">
-                  <button type="button" class="ghost-toggle" @click="searchMultimodalExpanded = !searchMultimodalExpanded">
-                    {{ searchMultimodalExpanded ? '收起' : '展开' }}
-                    <svg class="ui-icon" :class="{ up: searchMultimodalExpanded }" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
-                  </button>
-                  <button type="button" @click="searchPanel = 'history'">历史</button>
-                  <button type="button" @click="searchPanel = 'update'">演化</button>
-                  <button type="button" @click="clearOperatorMessages">清空</button>
-                  <button class="primary" type="button" :disabled="loading.search" @click="runSearch">{{ loading.search ? '组包中' : '生成 Context Pack' }}</button>
+                <div>
+                  <b>上传字段示例</b>
+                  <code>{{ JSON.stringify(mcpManifest.payload_example || {}, null, 2) }}</code>
                 </div>
               </div>
 
-              <div v-show="!searchMultimodalExpanded" class="search-collapse-summary">
-                <span><b>项目</b>{{ searchForm.deviceName || '未填写' }}</span>
-                <span><b>技术栈</b>{{ searchForm.deviceModel || '未填写' }}</span>
-                <span><b>任务</b>{{ searchForm.faultType }} / {{ searchForm.faultCode || '无 Issue' }}</span>
-                <span><b>证据</b>{{ searchFiles.length ? `${searchFiles.length} 个附件` : '未上传' }}</span>
-                <button type="button" @click="runSearch">{{ loading.search ? '组包中' : '生成 Context Pack' }}</button>
+              <div class="import-hero-stats">
+                <button v-for="stat in externalImportStats" :key="stat.title" type="button"
+                        :class="`tone-${stat.tone}`" :title="stat.desc" @click="jumpToRecords">
+                  <b>{{ stat.value }}</b><small>{{ stat.title }}</small>
+                </button>
+                <button class="import-hero-jump" type="button" @click="jumpToRecords">查看导入记录 ↓</button>
               </div>
 
-              <div v-show="searchMultimodalExpanded" class="search-fusion-body">
-                <div class="search-fusion-input">
-                  <div class="form-grid">
-                    <label>项目 / 仓库<input v-model="searchForm.deviceName" placeholder="如：支付服务 / repo/payment-service" /></label>
-                    <label>技术栈 / 模块<input v-model="searchForm.deviceModel" placeholder="如：Node.js + MySQL" /></label>
-                    <label>Issue / PR ID<input v-model="searchForm.faultCode" placeholder="如：BUG-421 / PR-118" /></label>
-                    <label>任务领域<select v-model="searchForm.category"><option>后端服务</option><option>前端体验</option><option>数据模型</option><option>Agent 工作流</option></select></label>
-                    <label>任务类型<select v-model="searchForm.faultType"><option>线上 Bug</option><option>功能改造</option><option>重复问题</option><option>Skill 回归</option></select></label>
-                    <label>协作等级<select v-model="searchForm.maintenanceLevel"><option>轻量协作</option><option>标准协作</option><option>高风险协作</option></select></label>
-                    <label class="wide">任务描述<textarea v-model="searchForm.query" placeholder="描述需求背景、现象、影响范围、相关代码、历史尝试或验收标准"></textarea></label>
-                  </div>
+              <div class="import-hero-targets">
+                <small>发送到</small>
+                <button v-for="t in relayTargets" :key="t.key" type="button" @click="copyImportPromptFor(t.key, t.name)">
+                  <img :src="t.logo" :alt="t.name" loading="lazy" /><b>{{ t.name }}</b>
+                </button>
+                <small class="import-hero-hint">点击复制该客户端可用的提示词</small>
+              </div>
 
-                  <div class="search-evidence-box">
-                    <div class="upload-zone search-upload-zone" @dragover.prevent @drop.prevent="addDroppedFiles">
-                      <input ref="searchFileInput" type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.md,.mp4,.webm" @change="addFiles($event, 'search')" />
-                      <span class="upload-mark"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7.5 8.5 12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"></path></svg></span>
-                      <span class="upload-copy"><b>添加任务材料与历史证据</b><small>支持截图、日志、PDF、PR、需求文档、会议记录</small></span>
-                      <button type="button" @click="$refs.searchFileInput.click()">选择</button>
-                    </div>
-                    <div class="file-pills">
-                      <span v-for="file in searchFiles" :key="file.localId">
-                        <img v-if="file.type === '图片'" :src="file.url" :alt="file.name" />
-                        {{ file.name }} · {{ file.sizeText }} · {{ file.status }}<template v-if="file.progress"> {{ file.progress }}%</template>
-                        <button type="button" @click="removeSearchFile(file.localId)">删除</button>
-                      </span>
-                    </div>
-                  </div>
+              <ul class="import-hero-steps">
+                <li><em>1</em><span>复制导入提示词</span></li>
+                <li><em>2</em><span>粘贴到客户端发送</span></li>
+                <li><em>3</em><span>MCP 自动接收上传</span></li>
+                <li><em>4</em><span>审核候选资产入库</span></li>
+              </ul>
 
-                  <div class="search-context-board">
-                    <article>
-                      <b>任务上下文</b>
-                      <span>{{ searchForm.deviceName || '未填写项目' }} / {{ searchForm.deviceModel || '未填写技术栈' }}</span>
-                      <small>{{ searchForm.faultType }} · {{ searchForm.maintenanceLevel }} · {{ searchForm.faultCode || '无 Issue' }}</small>
-                    </article>
-                    <article>
-                      <b>证据准备</b>
-                      <span>{{ searchFiles.length ? `${searchFiles.length} 个附件已加入` : '等待任务资料' }}</span>
-                      <small>{{ searchForm.query ? '任务描述已填写' : '建议补充需求、影响范围、历史尝试或验收标准' }}</small>
-                    </article>
-                    <article>
-                      <b>下一步建议</b>
-                      <span>{{ searchResult ? '查看引用依据并转任务' : '先生成 Context Pack' }}</span>
-                      <small>{{ searchResult ? `${searchResult.confidence}% 置信度，可继续追溯` : '可上传文档、截图、日志或语音补充上下文' }}</small>
-                    </article>
-                  </div>
-
+              <div v-if="showManualImport" class="external-import-layout">
+                <div class="import-form">
+                  <label>来源平台<select v-model="externalImportForm.provider"><option>codex</option><option>claude</option><option>chatgpt</option><option>cursor</option></select></label>
+                  <label>关联项目<input v-model="externalImportForm.project_name" placeholder="如：支付服务 / 一休 Web 端" /></label>
+                  <label>内容类型<select v-model="externalImportForm.content_type"><option>summary</option><option>chat</option><option>diff</option><option>pr</option></select></label>
+                  <label>导入标题<input v-model="externalImportForm.title" placeholder="如：Codex 支付回调修复总结" /></label>
+                  <label class="wide">外部 AI 内容<textarea v-model="externalImportForm.raw_content" placeholder="粘贴一休固定格式 JSON，或 Codex / Claude 的任务总结、对话摘要、代码 diff、PR 说明"></textarea></label>
                 </div>
+                <div class="import-submit-row">
+                  <small>解析后产出 Memory / Skill / Eval 候选，人工确认后才会入库</small>
+                  <button class="primary" type="button" :disabled="externalImportLoading" @click="submitExternalImport">{{ externalImportLoading ? '导入解析中' : '导入并解析' }}</button>
+                </div>
+              </div>
+            </div>
 
-                <div class="search-fusion-ai">
-                  <div class="search-ai-status">
-                    <img :src="operatorProfile.avatar" :alt="operatorProfile.name" @error="handleAvatarError" />
-                    <div><b>{{ loading.search ? '观微正在组包' : '观微正在协助' }}</b><small>{{ loading.search ? '正在融合需求、代码、文档和历史经验' : (searchResult ? `已匹配 ${searchResult.references.length} 条 Memory / Skill` : '等待任务线索') }}</small></div>
-                  </div>
-                  <div v-if="loading.search" class="search-process-card" aria-live="polite">
-                    <div class="search-scan-visual">
-                      <span class="scan-core">观微</span>
-                      <i></i><i></i><i></i>
-                    </div>
-                    <div class="search-process-copy">
-                      <b>Context Pack 生成中</b>
-                      <p>正在召回需求、代码、历史任务、Memory Unit 与相关 Skill，生成可追溯任务上下文。</p>
-                    </div>
-                    <div class="search-process-track">
-                      <span v-for="step in searchRunningSteps" :key="step.title">
-                        <b>{{ step.title }}</b>
-                        <small>{{ step.desc }}</small>
-                      </span>
-                    </div>
-                  </div>
-                  <div class="search-prompt-templates">
-                    <button v-for="item in searchTemplatePrompts" :key="item.title" type="button" @click="operatorInput = item.prompt">
-                      <span>
-                        <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path v-for="path in iconParts(item.icon)" :key="path" :d="path"></path></svg>
-                      </span>
+            <div class="panel span-all import-faq">
+              <header>
+                <p class="eyebrow">常见问题</p>
+                <h3>接力不顺利时先看这里</h3>
+              </header>
+              <div class="import-faq-list">
+                <article v-for="q in relayFaq" :key="q.q">
+                  <b>{{ q.q }}</b>
+                  <p>{{ q.a }}</p>
+                </article>
+              </div>
+            </div>
+
+            <div class="panel span-all import-record-panel">
+              <div class="import-record-head">
+                <b>导入记录</b>
+                <small>{{ externalImports.length }} 条 · 点任意一条展开审核</small>
+                <button type="button" @click="loadExternalImports">刷新</button>
+              </div>
+              <div class="knowledge-review-list external-import-list">
+                <article v-for="item in visibleImports" :key="item.id"
+                         class="import-row" :class="{ open: expandedImport === item.id }">
+                  <header @click="expandedImport = expandedImport === item.id ? '' : item.id">
+                    <div class="import-row-main">
                       <b>{{ item.title }}</b>
-                    </button>
-                  </div>
-                  <div class="search-dialog-summary">
-                    <article>
-                      <span><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l3 3v15H6Z"></path><path d="M14 3v4h4"></path><path d="M9 12h6M9 16h4"></path></svg></span>
-                      <div><b>上下文摘要</b><p>{{ searchResult ? searchResult.phenomenonSummary : '填写任务背景后，观微会整理匹配摘要。' }}</p></div>
-                    </article>
-                    <article>
-                      <span><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"></path><path d="M12 7v5l3 2"></path></svg></span>
-                      <div><b>初步判断</b><p>{{ searchResult ? searchResult.causes.slice(0, 2).join('；') : '暂无判断，建议先上传需求、日志、代码片段或历史文档。' }}</p></div>
-                    </article>
-                  </div>
-                  <div class="search-dialog-thread">
-                    <div class="bubble assistant">我是观微。你可以上传需求、日志、PR 或历史记录，或直接问“这次任务需要哪些上下文”。</div>
-                    <div v-for="message in currentOperatorMessages" :key="message.id" :class="['bubble', message.role, { loading: message.loading }]">
-                      <span v-if="message.loading" class="loading-dots"><i></i><i></i><i></i></span>
-                      {{ message.text }}
+                      <small>{{ item.provider }} · {{ item.project_name || '未关联项目' }}</small>
+                    </div>
+                    <em v-if="pendingArtifactCount(item)" class="import-badge pending">待审 {{ pendingArtifactCount(item) }}</em>
+                    <em v-else class="import-badge done">已处理</em>
+                    <span class="import-row-toggle">{{ expandedImport === item.id ? '收起' : '审核' }}</span>
+                  </header>
+
+                  <div v-if="expandedImport === item.id" class="import-row-body">
+                    <p v-if="item.summary">{{ item.summary }}</p>
+                    <ul class="import-artifacts">
+                      <li v-for="artifact in item.artifacts" :key="artifact.id">
+                        <span class="ia-type">{{ externalArtifactTypeText(artifact.artifact_type) }}</span>
+                        <span class="ia-title">{{ artifact.title }}</span>
+                        <span class="ia-conf">{{ artifact.confidence }}%</span>
+                        <span class="ia-state" :class="artifact.review_status">{{ reviewStateText(artifact.review_status) }}</span>
+                        <span class="ia-actions">
+                          <button v-if="artifact.review_status !== 'approved'" type="button"
+                                  @click.stop="reviewExternalArtifact(artifact, 'approved')">通过</button>
+                          <button v-if="artifact.review_status !== 'rejected'" type="button"
+                                  @click.stop="reviewExternalArtifact(artifact, 'rejected')">退回</button>
+                        </span>
+                      </li>
+                      <li v-if="!(item.artifacts || []).length" class="empty">本批未产出候选资产</li>
+                    </ul>
+                    <div class="import-row-actions">
+                      <button type="button" @click.stop="parseExternalImport(item)">重新解析</button>
+                      <button type="button" @click.stop="fillExternalImportExample(item.provider)">填入示例</button>
                     </div>
                   </div>
-                </div>
+                </article>
+                <p v-if="!externalImports.length" class="import-empty">还没有导入记录。把上面那段话发给 Codex，导入结果会出现在这里。</p>
               </div>
-
-              <form v-show="searchMultimodalExpanded" class="search-dialog-input search-fusion-bar" @submit.prevent="sendOperatorPrompt(operatorInput)">
-                <input ref="searchAssistantFileInput" class="visually-hidden" type="file" multiple accept="image/*,.pdf,.doc,.docx,.txt,.md" @change="addFiles($event, 'assistant')" />
-                <button type="button" title="上传附件" aria-label="上传附件" @click="searchAssistantFileInput?.click()">
-                  <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h4l2-2h4l2 2h4v12H4Z"></path><circle cx="12" cy="13" r="3"></circle></svg>
-                </button>
-                <button type="button" :class="{ active: assistantVoiceListening }" title="语音输入" aria-label="语音输入" @click="toggleAssistantVoice">
-                  <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"></path><path d="M19 10a7 7 0 0 1-14 0"></path><path d="M12 17v4"></path></svg>
-                </button>
-                <input v-model="operatorInput" placeholder="请输入任务问题、需求背景或补充上下文..." />
-                <button class="primary" type="submit" aria-label="发送">
-                  <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 8-16 8 3-8-3-8Z"></path><path d="M7 12h13"></path></svg>
-                </button>
-              </form>
+              <button v-if="externalImports.length > importLimit" class="import-more" type="button" @click="importLimit = externalImports.length">
+                展开全部 {{ externalImports.length }} 条 ⌄
+              </button>
+              <button v-else-if="importLimit > 6" class="import-more" type="button" @click="importLimit = 6">收起 ⌃</button>
             </div>
           </template>
 
-          <template v-else-if="searchPanel === 'results'">
+
+          <template v-if="searchPanel === 'results'">
             <div class="panel search-analysis-panel" :class="{ ready: searchResult }">
               <div class="search-panel-heading compact-heading">
                 <span class="search-step">02</span>
@@ -683,7 +672,7 @@
                   <button type="button" @click="routeContextPack">交给 Agent</button>
                   <button type="button" @click="prepareKnowledgeFromSearch">提炼为 Memory</button>
                   <button type="button" @click="shareContextPack">发送协作成员</button>
-                  <button type="button" @click="searchPanel = 'multimodal'">重新组包</button>
+                  <button type="button" @click="searchPanel = 'external'">重新组包</button>
                 </div>
               </template>
               <div v-else-if="loading.search" class="search-running-state">
@@ -748,129 +737,9 @@
             </div>
           </template>
 
-          <template v-else-if="searchPanel === 'update'">
-            <div class="panel span-all search-update-panel">
-              <div class="panel-head">
-                <div><p class="eyebrow">Memory Evolution</p><h3>把本次任务过程提炼为 Memory</h3><small>用于沉淀有效根因、解决路径、Eval 结论、适用条件和引用依据。</small></div>
-                <button type="button" @click="prepareKnowledgeFromSearch">从当前 Context Pack 生成</button>
-              </div>
-              <div class="update-progress-strip">
-                <article v-for="item in updateProgressCards" :key="item.title" :class="`tone-${item.tone}`">
-                  <span>
-                    <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path v-for="path in iconParts(item.icon)" :key="path" :d="path"></path></svg>
-                  </span>
-                  <div><small>{{ item.title }}</small><b>{{ item.value }}</b><em>{{ item.desc }}</em></div>
-                </article>
-              </div>
-              <div class="search-update-layout">
-                <div class="form-grid">
-                  <label>Memory 标题<input v-model="knowledgeForm.title" placeholder="如：支付回调幂等处理经验" /></label>
-                  <label>资产类型<select v-model="knowledgeForm.type"><option>Memory Unit</option><option>Skill</option><option>Eval Case</option><option>Issue to Skill</option></select></label>
-                  <label>适用项目<input v-model="knowledgeForm.equipment" /></label>
-                  <label>技术栈 / 模块<input v-model="knowledgeForm.model" /></label>
-                  <label>来源依据<input v-model="knowledgeForm.source" placeholder="任务号、Issue、PR、会议或聊天记录" /></label>
-                  <label>人工标签<input v-model="knowledgeForm.tagText" placeholder="使用逗号分隔，如：支付,幂等,回归" /></label>
-                  <label class="wide">沉淀摘要<textarea v-model="knowledgeForm.summary" placeholder="描述问题、尝试、根因、方案、适用条件、Eval 结论和引用依据"></textarea></label>
-                </div>
-                <aside class="knowledge-update-aside">
-                  <div class="update-quality-card">
-                    <b>Memory 入库质量检查</b>
-                    <span><small>引用依据</small><em>{{ searchResult?.references?.length || 0 }} 份</em></span>
-                    <span><small>人工标签</small><em>{{ knowledgeForm.tagText ? knowledgeForm.tagText.split(/[，,]/).filter(Boolean).length : 0 }} 个</em></span>
-                    <span><small>待审核</small><em>{{ pendingKnowledge.length }} 条</em></span>
-                  </div>
-                  <div class="update-step-list">
-                    <article v-for="item in knowledgeUpdateSteps" :key="item.title">
-                      <i></i><span><b>{{ item.title }}</b><small>{{ item.desc }}</small></span>
-                    </article>
-                  </div>
-                  <div class="update-rule-list">
-                    <b>入库规则</b>
-                    <span v-for="item in updateQualityRules" :key="item.title">
-                      <small>{{ item.title }}</small><em>{{ item.desc }}</em>
-                    </span>
-                  </div>
-                </aside>
-              </div>
-              <button class="primary" type="button" @click="saveKnowledge">提交 Memory 审核</button>
-              <div class="knowledge-review-list">
-                <article v-for="item in pendingKnowledge" :key="item.id" class="result-card">
-                  <div><b>{{ item.title }}</b><small>{{ item.equipment }} / {{ item.model }} · {{ knowledgeStatusText(item.status) }}</small><p>{{ item.summary }}</p></div>
-                  <label>人工修正<textarea v-model="knowledgeCorrections[item.id]" placeholder="核对并修正模型整理结果；无误可直接通过"></textarea></label>
-                  <div class="tag-line"><span v-for="tag in item.tags || []" :key="tag">{{ tag }}</span></div>
-                  <div class="card-actions"><button class="primary" type="button" @click="reviewKnowledge(item, 'approved')">审核入库</button><button type="button" @click="reviewKnowledge(item, 'rejected')">退回修改</button></div>
-                </article>
-              </div>
-            </div>
-          </template>
-
-          <template v-else-if="searchPanel === 'external'">
-            <div class="panel span-all search-update-panel">
-              <div class="panel-head">
-                <div>
-                  <p class="eyebrow">AI Import Gateway</p>
-                  <h3>外部 AI 工作台导入</h3>
-                  <small>把 Codex、Claude、ChatGPT、Cursor 的对话总结、代码变更和风险结论导入一休，解析成项目资产。</small>
-                </div>
-                <button type="button" @click="loadExternalImports">刷新记录</button>
-              </div>
-              <div class="update-progress-strip">
-                <article v-for="item in externalImportStats" :key="item.title" :class="`tone-${item.tone}`">
-                  <span><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path v-for="path in iconParts(item.icon)" :key="path" :d="path"></path></svg></span>
-                  <div><small>{{ item.title }}</small><b>{{ item.value }}</b><em>{{ item.desc }}</em></div>
-                </article>
-              </div>
-              <div class="search-update-layout">
-                <div class="form-grid">
-                  <label>来源平台<select v-model="externalImportForm.provider"><option>codex</option><option>claude</option><option>chatgpt</option><option>cursor</option><option>github</option></select></label>
-                  <label>关联项目<input v-model="externalImportForm.project_name" placeholder="如：支付服务 / 一休 Web 端" /></label>
-                  <label>内容类型<select v-model="externalImportForm.content_type"><option>summary</option><option>chat</option><option>diff</option><option>pr</option><option>file</option></select></label>
-                  <label>导入标题<input v-model="externalImportForm.title" placeholder="如：Codex 支付回调修复总结" /></label>
-                  <label class="wide">外部 AI 内容<textarea v-model="externalImportForm.raw_content" placeholder="建议粘贴一休固定格式 JSON；也支持 Codex / Claude 的任务总结、对话摘要、代码 diff、PR 说明、风险和待办"></textarea></label>
-                </div>
-                <aside class="knowledge-update-aside">
-                  <div class="update-quality-card">
-                    <b>自动解析目标</b>
-                    <span><small>项目进展</small><em>Project Update</em></span>
-                    <span><small>候选资产</small><em>Memory / Skill / Eval</em></span>
-                    <span><small>审核策略</small><em>人工确认后入库</em></span>
-                  </div>
-                  <div class="update-step-list">
-                    <article v-for="item in externalImportSteps" :key="item.title">
-                      <i></i><span><b>{{ item.title }}</b><small>{{ item.desc }}</small></span>
-                    </article>
-                  </div>
-                  <button class="primary" type="button" :disabled="externalImportLoading" @click="submitExternalImport">{{ externalImportLoading ? '导入解析中' : '导入并解析' }}</button>
-                </aside>
-              </div>
-              <div class="knowledge-review-list external-import-list">
-                <article v-for="item in externalImports" :key="item.id" class="result-card">
-                  <div>
-                    <b>{{ item.title }}</b>
-                    <small>{{ item.provider }} · {{ item.project_name || '未关联项目' }} · {{ item.parse_status }}</small>
-                    <p>{{ item.summary || '等待解析摘要' }}</p>
-                  </div>
-                  <div class="tag-line">
-                    <span v-for="artifact in item.artifacts.slice(0, 5)" :key="artifact.id">{{ externalArtifactTypeText(artifact.artifact_type) }} · {{ artifact.review_status }}</span>
-                  </div>
-                  <div class="external-artifact-grid">
-                    <span v-for="artifact in item.artifacts" :key="artifact.id">
-                      <b>{{ externalArtifactTypeText(artifact.artifact_type) }}</b>
-                      <small>{{ artifact.title }}</small>
-                      <em>{{ artifact.confidence }}%</em>
-                      <button v-if="artifact.review_status !== 'approved'" type="button" @click="reviewExternalArtifact(artifact, 'approved')">通过</button>
-                      <button v-if="artifact.review_status !== 'rejected'" type="button" @click="reviewExternalArtifact(artifact, 'rejected')">退回</button>
-                    </span>
-                  </div>
-                  <div class="card-actions"><button type="button" @click="parseExternalImport(item)">重新解析</button><button type="button" @click="fillExternalImportExample(item.provider)">填入示例</button></div>
-                </article>
-              </div>
-            </div>
-          </template>
-
           <template v-if="searchPanel === 'history'">
             <div class="panel search-history-panel">
-              <div class="panel-head"><div><p class="eyebrow">历史经验</p><h3>最近 Context Pack 记录</h3><small>点击记录可回填任务条件，继续追溯同类问题。</small></div><button type="button" @click="searchPanel = 'multimodal'">新建组包</button></div>
+              <div class="panel-head"><div><p class="eyebrow">历史经验</p><h3>最近 Context Pack 记录</h3><small>点击记录可回填任务条件，继续追溯同类问题。</small></div><button type="button" @click="searchPanel = 'external'">新建组包</button></div>
               <div class="history-command-strip">
                 <button type="button" :class="{ active: historyViewMode === 'confidence' }" @click="setHistoryView('confidence')"><b>高置信复用</b><small>优先使用 85% 以上记录</small></button>
                 <button type="button" :class="{ active: historyViewMode === 'grouped' }" @click="setHistoryView('grouped')"><b>相似问题合并</b><small>同模块、同任务自动归组</small></button>
@@ -891,7 +760,7 @@
               <div class="history-action-row">
                 <button type="button" @click="setHistoryView('grouped')">按任务归类</button>
                 <button type="button" @click="setHistoryView('confidence')">标记高匹配</button>
-                <button type="button" @click="activePage = 'search'; searchPanel = 'update'">沉淀为 Memory</button>
+                <button type="button" @click="activePage = 'knowledge'; knowledgePanel = 'update'">沉淀为 Memory</button>
               </div>
             </div>
             <div class="panel history-learning-panel">
@@ -1280,28 +1149,6 @@
                 <span><small>Skill 覆盖</small><b>{{ Math.round(tasks.filter(item => item.sop?.length).length / Math.max(tasks.length, 1) * 100) }}%</b></span>
               </div>
             </div>
-            <div class="panel span-all priority-panel">
-              <p class="eyebrow">重点项目</p>
-              <div class="priority-list">
-                <article v-for="task in priorityTasks" :key="task.id">
-                  <header class="priority-task-top">
-                    <div><small>{{ task.workOrderNo }}</small><b>{{ task.equipment_name }}</b></div>
-                    <span><i :class="['badge', task.severity]">{{ severityText(task.severity) }}</i><em>{{ statusText(task.status) }}</em></span>
-                  </header>
-                  <p class="priority-task-desc">{{ task.description }}</p>
-                  <div class="priority-task-meta">
-                    <span><small>项目阶段</small><b>{{ task.project_phase || task.current_step }}</b></span>
-                    <span><small>项目周期</small><b>{{ task.project_period || task.due_at }}</b></span>
-                    <span><small>协作人员</small><b>{{ task.collaborators?.join('、') || '待分配' }}</b></span>
-                  </div>
-                  <div class="priority-task-progress">
-                    <div><span :style="{ width: `${task.progress}%` }"></span></div>
-                    <b>{{ task.progress }}%</b>
-                  </div>
-                  <footer><span><small>最新进展</small><b>{{ task.latest_update || task.current_step }}</b><em>剩余 {{ remainingTime(task) }}</em></span><button type="button" @click="openTask(task)">查看详情 <i>→</i></button></footer>
-                </article>
-              </div>
-            </div>
             <div class="panel span-all task-event-panel">
               <div class="task-event-heading"><div><p class="eyebrow">项目动态</p><h3>进展、里程碑与决策记录</h3></div><span>{{ taskEvents.length }} 条记录</span></div>
               <div class="timeline task-events"><article v-for="event in taskEvents" :key="event.id"><i></i><time>{{ event.time }}</time><p>{{ event.text }}</p></article></div>
@@ -1415,7 +1262,21 @@
                   <span><b>{{ activeConversation?.currentTask || '待关联任务' }}</b><small>当前任务</small></span>
                   <span><b>{{ activeConversation?.workload || 0 }}%</b><small>负载</small></span>
                 </div>
-                <div class="chat-messages">
+                <div class="chat-messages" :class="{ 'is-empty': !activeMessages.length }">
+                  <div v-if="!activeMessages.length" class="chat-empty">
+                    <span class="chat-empty-art" aria-hidden="true">
+                      <svg class="ui-icon" viewBox="0 0 24 24">
+                        <path v-for="p in iconParts('network')" :key="p" :d="p"></path>
+                      </svg>
+                    </span>
+                    <b>还没有对话记录</b>
+                    <p>和 {{ activeConversation?.name || '对方' }} 的协作还没开始。发一条消息，或者直接派一张任务卡片，把上下文带过去。</p>
+                    <div class="chat-empty-actions">
+                      <button class="primary" type="button" @click="sendTaskCard()">派发任务卡片</button>
+                      <button type="button" @click="startInstantMeeting">发起会议</button>
+                      <button type="button" @click="summarizeConversation">生成对话摘要</button>
+                    </div>
+                  </div>
                   <article v-for="message in activeMessages" :key="message.id" :class="['message', message.mine ? 'mine' : 'peer']">
                     <img v-if="!message.mine" :src="avatarFor(activeConversation?.avatar, activeConversation?.name)" :alt="activeConversation?.name" @error="handleContactAvatarError($event, activeConversation?.name)" />
                     <div>
@@ -1600,10 +1461,21 @@
                   <label><span>Skill 名称</span><input v-model.trim="skillDraftForm.name" placeholder="如：任务上下文包组装" /></label>
                   <label><span>所属类别</span><select v-model="skillDraftForm.category"><option v-for="item in SKILL_CATEGORIES" :key="item">{{ item }}</option></select></label>
                   <label class="wide"><span>功能说明</span><textarea v-model.trim="skillDraftForm.summary" placeholder="一句话说清这个 Skill 解决什么问题"></textarea></label>
+                  <label class="wide"><span>执行步骤（每行一步）</span><textarea v-model.trim="skillDraftForm.steps" placeholder="解析任务目标&#10;召回证据&#10;执行并记录轨迹"></textarea></label>
+                </div>
+
+                <!-- 其余 8 项已按执行轨迹自动填好，默认收起；需要微调时再展开 -->
+                <div class="skf-form-more">
+                  <button type="button" class="skf-more-toggle" :class="{ open: skillAdvanced }" @click="skillAdvanced = !skillAdvanced">
+                    {{ skillAdvanced ? '收起高级设置' : '高级设置（8 项，已按轨迹自动填好）' }}
+                    <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+                  </button>
+                </div>
+
+                <div v-if="skillAdvanced" class="skf-form skf-form-advanced">
                   <label class="wide"><span>适用场景</span><input v-model.trim="skillDraftForm.useCase" placeholder="什么时候应该调用它" /></label>
                   <label><span>输入参数</span><input v-model.trim="skillDraftForm.inputs" placeholder="task_goal, context_pack, files" /></label>
                   <label><span>输出结构</span><input v-model.trim="skillDraftForm.outputs" placeholder="artifact, memory_candidate" /></label>
-                  <label class="wide"><span>执行步骤（每行一步）</span><textarea v-model.trim="skillDraftForm.steps" placeholder="解析任务目标&#10;召回证据&#10;执行并记录轨迹"></textarea></label>
                   <label><span>依赖 Agent</span>
                     <select v-model="skillDraftForm.agents" multiple>
                       <option v-for="agent in agentRegistry" :key="agent.id" :value="agent.id">{{ agent.name }} · {{ agent.code }}</option>
@@ -1659,6 +1531,11 @@
                     @click="selectedSkillId = skill.id; skillDetailTab = 'overview'"
                   >
                     <div class="skf-card-head">
+                      <span class="skf-icon" :class="`tone-${skillIconTone(skill)}`">
+                        <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <path v-for="p in iconParts(skillIconName(skill))" :key="p" :d="p"></path>
+                        </svg>
+                      </span>
                       <div>
                         <b>{{ skill.name }}</b>
                         <small>{{ skill.category }} · {{ skill.id }}</small>
@@ -1808,6 +1685,85 @@
             </div>
           </template>
 
+          <template v-else-if="knowledgePanel === 'update'">
+            <div class="panel span-all mcp-library">
+              <!-- 1. 一休自有 MCP 工具 -->
+              <section class="mcp-block">
+                <header class="mcp-block-head">
+                  <div>
+                    <p class="eyebrow">一休 MCP</p>
+                    <h3>一休自带的 MCP 工具</h3>
+                    <small>外部 AI 通过这几个工具把过程写回一休；接入地址与工具清单由后端实时返回。</small>
+                  </div>
+                  <span class="mcp-state" :class="{ ok: mcpReady }">
+                    <i></i>{{ mcpStatusText }}
+                  </span>
+                </header>
+                <div class="mcp-grid">
+                  <article v-for="tool in ownMcpTools" :key="tool.name" class="mcp-card own">
+                    <span class="mcp-logo" :class="`tone-${tool.tone}`">
+                      <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path v-for="p in iconParts(tool.icon)" :key="p" :d="p"></path>
+                      </svg>
+                    </span>
+                    <div class="mcp-body">
+                      <b>{{ tool.label }}</b>
+                      <code>{{ tool.name }}</code>
+                      <p>{{ tool.purpose }}</p>
+                    </div>
+                    <button type="button" @click="copyMcpSnippet(tool)">复制调用</button>
+                  </article>
+                </div>
+                <div class="mcp-endpoint">
+                  <small>接入地址</small>
+                  <code>{{ mcpManifest.endpoint || '后端未返回，请确认服务已启动' }}</code>
+                </div>
+              </section>
+
+              <!-- 2. 推荐接入的 MCP -->
+              <section class="mcp-block">
+                <header class="mcp-block-head">
+                  <div>
+                    <p class="eyebrow">推荐</p>
+                    <h3>值得接入的其他 MCP</h3>
+                    <small>社区里成熟度高、和一休协作链路互补的 MCP 服务，装好后在 Codex / Claude Code 里直接调用。</small>
+                  </div>
+                </header>
+                <div class="mcp-grid">
+                  <article v-for="m in recommendedMcp" :key="m.name" class="mcp-card">
+                    <span class="mcp-logo">
+                      <img :src="m.logo" :alt="m.label" loading="lazy" @error="handleContentImageError($event, '/static/yixiu-logo-icon.png')" />
+                    </span>
+                    <div class="mcp-body">
+                      <b>{{ m.label }}</b>
+                      <code>{{ m.name }}</code>
+                      <p>{{ m.purpose }}</p>
+                      <span class="mcp-tags"><em v-for="tag in m.tags" :key="tag">{{ tag }}</em></span>
+                    </div>
+                    <button type="button" @click="copyMcpInstall(m)">复制安装</button>
+                  </article>
+                </div>
+              </section>
+
+              <!-- 3. 已支持接入的客户端 -->
+              <section class="mcp-block">
+                <header class="mcp-block-head">
+                  <div>
+                    <p class="eyebrow">客户端</p>
+                    <h3>已支持接入的 MCP 客户端</h3>
+                    <small>把一休 MCP 地址填进任意一个客户端，就能让它把过程写回来。</small>
+                  </div>
+                </header>
+                <div class="mcp-clients">
+                  <span v-for="c in mcpClients" :key="c.name">
+                    <img :src="c.logo" :alt="c.name" loading="lazy" @error="handleContentImageError($event, '/static/yixiu-logo-icon.png')" />
+                    <b>{{ c.name }}</b>
+                  </span>
+                </div>
+              </section>
+            </div>
+          </template>
+
           <div v-if="knowledgePanel === 'files'" class="panel span-all areg-panel">
             <!-- ══════════════ 视图一：Agent 中心总览 ══════════════ -->
             <template v-if="agentCenterView === 'hub'">
@@ -1898,44 +1854,6 @@
                       :class="{ primary: agent.status === 'connected' }"
                       @click="agent.status === 'connected' ? acOpenManage(agent) : (agent.status === 'notDetected' ? acOpenSite(agent) : toast(`${agent.name} 需要先在本机完成授权，一休只做只读扫描`))"
                     >{{ AC_STATUS[agent.status].button }}</button>
-                  </article>
-                </div>
-              </section>
-
-              <!-- 3. 一休内置 Agent -->
-              <section class="areg-block">
-                <div class="section-title-row">
-                  <div>
-                    <p class="eyebrow">一休内置 Agent</p>
-                    <h3>支撑 TeamMemory OS 运行的团队智能体</h3>
-                  </div>
-                  <span class="quiet-label">它们的 Skill 依赖关系在 Skill Factory 中维护</span>
-                </div>
-                <div class="areg-builtin">
-                  <article v-for="agent in agentRegistry" :key="agent.id">
-                    <img v-if="agent.avatar" :src="agent.avatar" alt="" @error="handleContentImageError($event, '/static/yixiu-logo.png')" />
-                    <span v-else class="areg-monogram">{{ agent.name.slice(0, 1) }}</span>
-                    <div><b>{{ agent.name }}</b><small>{{ agent.code }} · {{ agent.role }}</small></div>
-                    <em class="badge" :class="`tone-${AGENT_STATE_TONE[agent.status]}`">{{ AGENT_STATE_LABEL[agent.status] }}</em>
-                    <span class="areg-builtin-meta">{{ agentSkills(agent).length }} Skill · 成功率 {{ agent.successRate }}%</span>
-                  </article>
-                </div>
-              </section>
-
-              <!-- 4. 与 TeamMemory OS 联动 -->
-              <section class="areg-block">
-                <div class="section-title-row">
-                  <div>
-                    <p class="eyebrow">联动</p>
-                    <h3>接入之后，数据去哪了</h3>
-                  </div>
-                  <span class="quiet-label">解析 → 标准化 → 沉淀，Agent 之间共享的是记忆而不是文件</span>
-                </div>
-                <div class="areg-linkage">
-                  <article v-for="item in acLinkage" :key="item.key" @click="acGotoLinkage(item)">
-                    <b>{{ item.title }}</b>
-                    <p>{{ item.desc }}</p>
-                    <em>{{ item.value }}</em>
                   </article>
                 </div>
               </section>
@@ -2168,43 +2086,12 @@
             </template>
           </div>
 
-          <template v-else-if="knowledgePanel === 'mcp'">
-            <div class="panel span-all search-update-panel">
-              <div class="panel-head">
-                <div><p class="eyebrow">MCP / API Integration</p><h3>给 Codex / Claude 的接入配置</h3><small>外部 AI 通过 MCP 工具或 API 把当前任务总结主动写入一休。</small></div>
-                <div class="card-actions">
-                  <button type="button" @click="copyMcpConfig">复制配置</button>
-                  <button type="button" @click="testMcpConnection">{{ mcpTesting ? '测试中…' : '测试连接' }}</button>
-                  <button type="button" @click="openMcpConfig">重新加载</button>
-                </div>
-              </div>
-              <div class="search-update-layout">
-                <div class="form-grid">
-                  <label class="wide">接入地址<input :value="mcpManifest.endpoint || '加载中...'" readonly /></label>
-                  <label class="wide">鉴权方式<input :value="mcpManifest.auth?.header || 'Authorization: Bearer <YIXIU_IMPORT_TOKEN>'" readonly /></label>
-                  <label class="wide">推荐给 Codex / Claude 的提示词<textarea :value="mcpUsagePrompt" readonly></textarea></label>
-                  <label class="wide">Codex 固定上传格式<textarea :value="codexFixedUploadTemplate" readonly></textarea></label>
-                </div>
-                <aside class="knowledge-update-aside">
-                  <div class="update-quality-card">
-                    <b>{{ mcpManifest.name || '一休 AI Import Gateway' }}</b>
-                    <span><small>工具数量</small><em>{{ mcpManifest.tools?.length || 0 }}</em></span>
-                    <span><small>同步方向</small><em>外部 AI → 一休</em></span>
-                    <span><small>入库策略</small><em>候选资产人工审核</em></span>
-                    <span><small>连接状态</small><em :class="mcpConnectionStatus.tone">{{ mcpConnectionStatus.text }}</em></span>
-                    <span v-if="mcpConnectionStatus.latency"><small>响应耗时</small><em>{{ mcpConnectionStatus.latency }} ms</em></span>
-                  </div>
-                  <div class="update-rule-list">
-                    <b>开放工具</b>
-                    <span v-for="tool in mcpManifest.tools || []" :key="tool.name">
-                      <small>{{ tool.name }}</small><em>{{ tool.purpose }}</em>
-                    </span>
-                  </div>
-                </aside>
-              </div>
-            </div>
-          </template>
 </section>
+
+        <section v-else-if="activePage === 'service'" class="service-desk-page">
+          <ServiceDesk :account="currentAccount" :import-prompt="mcpUsagePrompt" :skills="skillRankList"
+                       @open-skills="activePage = 'knowledge'; knowledgePanel = 'recheck'" />
+        </section>
 
         <section v-else class="profile-dashboard">
           <div class="profile-hero-card">
@@ -2348,11 +2235,11 @@
         </section>
       </section>
 
-      <button class="panel-resizer" type="button" aria-label="拖动调整智能体面板宽度" title="拖动调整智能体面板宽度" @pointerdown="startOperatorResize">
+      <button v-if="activePage !== 'service'" class="panel-resizer" type="button" aria-label="拖动调整智能体面板宽度" title="拖动调整智能体面板宽度" @pointerdown="startOperatorResize">
         <span></span>
       </button>
 
-      <aside class="operator-panel" :class="'op-theme-' + (operatorProfile.id || 'tiangong')" aria-label="项目工作助手">
+      <aside v-if="activePage !== 'service'" class="operator-panel" :class="'op-theme-' + (operatorProfile.id || 'tiangong')" aria-label="项目工作助手">
         <div class="operator-head">
           <img class="operator-avatar" :src="avatarFor(operatorProfile.avatar, operatorProfile.name)" :alt="operatorProfile.name" @error="handleAvatarError" />
           <div>
@@ -2368,25 +2255,6 @@
         <p class="operator-duty">{{ operatorProfile.duty }}</p>
         <p class="operator-slogan">{{ operatorProfile.slogan }}</p>
 
-        <div v-if="activePage !== 'profile'" class="router-decision-card">
-          <div><span><small>Skill First Router</small><b>{{ routerRecommendation.title }}</b></span><em>{{ routerRecommendation.risk }}</em></div>
-          <p>{{ routerRecommendation.reason }}</p>
-          <section>
-            <span><small>上下文</small><b>{{ routerRecommendation.context }}</b></span>
-            <span><small>推荐 Skill</small><b>{{ routerRecommendation.skill }}</b></span>
-            <span><small>执行角色</small><b>{{ routerRecommendation.agent }}</b></span>
-            <span><small>建议模型</small><b>{{ routerRecommendation.model }}</b></span>
-          </section>
-          <div class="router-model-summary">
-            <span>预算 {{ routerRecommendation.cost }}</span>
-            <span>预计节省 {{ routerRecommendation.saving }}%</span>
-            <span>{{ modelPolicyModeLabel }}</span>
-          </div>
-          <div class="router-card-actions">
-            <button type="button" @click="applyRouterRecommendation">应用本次路由</button>
-            <button class="secondary" type="button" @click="showModelPolicy = true">模型策略</button>
-          </div>
-        </div>
 
         <section v-if="false" class="aios-recorder" :class="{ active: aiosLive.status !== 'idle' }" aria-label="天工操作过程">
           <header class="aios-recorder-head">
@@ -3226,12 +3094,14 @@ import { yixiuApi } from './src/api/yixiuWeb.js'
 import { createOverviewFromMock, mockAgents, mockUser, mockSkills } from './src/data/yixiuMock.js'
 
 const EChart = defineAsyncComponent(() => import('./src/components/EChart.vue'))
+const ServiceDesk = defineAsyncComponent(() => import('./src/views/ServiceDesk.vue'))
 
 const navItems = [
   { key: 'home', label: '工作台', title: '项目智能工作台', icon: 'dashboard' },
-  { key: 'search', label: '上下文中心', title: '任务上下文包生成', icon: 'search' },
-  { key: 'tasks', label: '任务执行', title: '项目进展与人机协作', icon: 'wrench' },
   { key: 'knowledge', label: '能力中心', title: 'Agent、Skill 与团队资产', icon: 'network' },
+  { key: 'tasks', label: '任务执行', title: '项目进展与人机协作', icon: 'wrench' },
+  { key: 'search', label: '上下文中心', title: '任务上下文包生成', icon: 'search' },
+  { key: 'service', label: '服务台', title: '需求体检与托管运行', icon: 'shield' },
   { key: 'profile', label: '个人空间', title: '个人能力、成本与核查', icon: 'user' }
 ]
 
@@ -3353,6 +3223,17 @@ const SKILL_STAGES = ['Draft', 'Testing', 'Verified', 'Production', 'Deprecated'
 const SKILL_STAGE_LABEL = { Draft: '草稿', Testing: '测试中', Verified: '已验证', Production: '生产中', Deprecated: '已下线' }
 const SKILL_STAGE_TONE = { Draft: 'slate', Testing: 'amber', Verified: 'blue', Production: 'teal', Deprecated: 'red' }
 const SKILL_CATEGORIES = ['开发', '科研', '文档', '数据分析', '项目管理', '内容生成', '设计', '其他']
+const SKILL_CATEGORY_ICON = {
+  '开发': 'tool', '科研': 'search', '文档': 'file', '数据分析': 'chart',
+  '项目管理': 'network', '内容生成': 'zap', '设计': 'settings', '其他': 'cpu'
+}
+const SKILL_CATEGORY_TONE = {
+  '开发': 'teal', '科研': 'blue', '文档': 'amber', '数据分析': 'violet',
+  '项目管理': 'green', '内容生成': 'coral', '设计': 'blue', '其他': 'slate'
+}
+const skillIconName = (skill) => skill.icon || SKILL_CATEGORY_ICON[skill.category] || 'cpu'
+const skillIconTone = (skill) => skill.tone || SKILL_CATEGORY_TONE[skill.category] || 'slate'
+
 const SKILL_PACKAGE = ['SKILL.md', 'workflow.yaml', 'tools.json', 'examples/', 'tests/', 'evals/']
 
 const skillPipeline = [
@@ -3445,7 +3326,14 @@ const skillLibrary = reactive([
     ],
     evals: [
       { at: '2026-09-10', kind: '历史任务回放', sample: 52, pass: 94, consistency: 91, completeness: 93, human: 4.5, note: '复发检测拦截了 2 个假修复' }
-    ]
+    ],
+    permissions: ['代码只读', '补丁需人工确认', '不可直接上线'],
+    examples: ['支付回调重复扣款 trace-8093：3 步定位到幂等键缺失', '登录态失效 trace-8011：复现脚本一次命中'],
+    exceptions: ['复现不稳定时先补日志再定位，不做猜测式修复', '涉及数据迁移的修复必须人工复核'],
+    evalCriteria: ['根因可复现', '补丁通过回归用例', '上线后 24h 无复发'],
+    evals: [{ at: '2026-09-14 16:40', kind: '历史任务回放', sample: 24, pass: 94, consistency: 89, human: 11 }, { at: '2026-09-09 10:12', kind: '历史任务回放', sample: 18, pass: 89, consistency: 84, human: 17 }],
+    versions: [{ version: 'v1.4', at: '2026-09-14 16:40', note: '补充最小复现生成与 Eval 收编' }, { version: 'v1.2', at: '2026-09-05 09:20', note: '加入日志聚类定位' }],
+    packageFiles: ['输入输出示例.md', '失败样本集']
   },
   {
     id: 'code-review-gate', name: '代码评审门禁', category: '开发',
@@ -3492,7 +3380,14 @@ const skillLibrary = reactive([
     ],
     evals: [
       { at: '2026-09-11', kind: '人工评分', sample: 12, pass: 88, consistency: 76, completeness: 82, human: 3.8, note: '口径仍在收敛' }
-    ]
+    ],
+    permissions: ['Issue 只读', 'Memory 可写', '入库需人工审核'],
+    examples: ['登录失败类 Issue 三个月 5 次，聚类后生成 issue-to-skill 候选'],
+    exceptions: ['聚类口径不明确时降级为人工标签，不自动合并'],
+    evalCriteria: ['聚类可解释', '边界条件明确', '产出候选命中率 ≥ 85%'],
+    evals: [{ at: '2026-09-13 11:20', kind: '聚类一致性', sample: 20, pass: 88, consistency: 84, human: 19 }],
+    versions: [{ version: 'v0.9', at: '2026-09-13 11:20', note: '加入适用边界标注' }, { version: 'v0.7', at: '2026-09-04 15:00', note: '首版聚类口径' }],
+    packageFiles: ['聚类报告样例', '边界标注模板']
   },
   {
     id: 'repo-analysis', name: '仓库结构与依赖分析', category: '开发',
@@ -3530,7 +3425,14 @@ const skillLibrary = reactive([
     evalCriteria: ['要点与原文一致率 ≥ 90%', '引用可定位率 100%'],
     examples: ['信创适配资料精读'],
     versions: [{ version: 'v0.6', at: '2026-09-09', note: '章节切分改为版面优先', successRate: 85, qualityScore: 76 }],
-    evals: [{ at: '2026-09-09', kind: '人工评分', sample: 10, pass: 85, consistency: 74, completeness: 80, human: 3.9, note: '扫描件仍是短板' }]
+    evals: [{ at: '2026-09-09', kind: '人工评分', sample: 10, pass: 85, consistency: 74, completeness: 80, human: 3.9, note: '扫描件仍是短板' }],
+    permissions: ['文档只读', '结论需人工确认'],
+    examples: ['LoongArch 适配指南 12 篇 PDF → 对比表 + 要点清单'],
+    exceptions: ['PDF 为扫描件且无 OCR 时直接标记为不可解析'],
+    evalCriteria: ['章节切分完整', '要点可回溯原文', '对比表字段齐备'],
+    evals: [{ at: '2026-09-11 09:15', kind: '文档回放', sample: 12, pass: 85, consistency: 78, human: 24 }],
+    versions: [{ version: 'v0.6', at: '2026-09-11 09:15', note: '加入对比表生成' }, { version: 'v0.4', at: '2026-09-02 14:30', note: '首版要点抽取' }],
+    packageFiles: ['解析结果样例', '对比表模板']
   },
   {
     id: 'report-composer', name: '技术方案与报告生成', category: '文档',
@@ -3572,6 +3474,111 @@ const skillLibrary = reactive([
     examples: ['context-pack-builder v2.0 → v2.1 回归'],
     versions: [{ version: 'v1.0', at: '2026-09-13', note: '首次固化为正式 Skill', successRate: 97, qualityScore: 94 }],
     evals: [{ at: '2026-09-13', kind: '标准测试集', sample: 60, pass: 97, consistency: 95, completeness: 96, human: 4.8, note: '可作为发布门禁' }]
+  },
+  {
+    id: 'bug-fix-loop', name: '线上缺陷定位与修复闭环', category: '开发',
+    summary: '从日志与快照定位根因，生成最小复现、修复补丁与回归用例，直到 Eval 通过。',
+    useCase: '线上 Bug、偶发失败、回调重复触发一类需要根因定位的缺陷。',
+    status: 'Production', version: 'v1.4', updatedAt: '2026-09-14 16:40', origin: '任务轨迹自动提炼', author: '执矩｜Task Execution',
+    calls: 178, successRate: 94, qualityScore: 89, avgCost: 0.36, avgDuration: 31, lastEval: '2026-09-14 · 通过率 94%',
+    agents: ['zhiju', 'guanwei'], favorite: false, tests: 11,
+    inputs: ['trace', 'logs', 'pr_diff'], outputs: ['root_cause', 'patch', 'eval_case'],
+    steps: ['收集日志与快照', '构造最小复现', '定位根因', '提交修复补丁', '补回归用例并跑 Eval'],
+    tools: ['log_search', 'snapshot', 'pytest_runner'], memories: ['kb-011 幂等边界判定经验']
+  },
+  {
+    id: 'issue-to-skill', name: '重复问题聚类与资产化', category: '项目管理',
+    summary: '把反复出现的同类问题聚类，沉淀成 Skill 或 Memory 候选并标注适用边界。',
+    useCase: '同一类问题三个月内出现多次，需要统一口径并沉淀处理路径时。',
+    status: 'Verified', version: 'v0.9', updatedAt: '2026-09-13 11:20', origin: '任务轨迹自动提炼', author: '和鸣｜Memory Evolution',
+    calls: 96, successRate: 88, qualityScore: 84, avgCost: 0.28, avgDuration: 26, lastEval: '2026-09-13 · 通过率 88%',
+    agents: ['heming'], favorite: false, tests: 8,
+    inputs: ['issue_list', 'time_window'], outputs: ['cluster_report', 'skill_candidate'],
+    steps: ['拉取同类 Issue', '按症状与根因聚类', '确认适用边界', '生成候选资产'],
+    tools: ['issue_search', 'cluster'], memories: ['kb-007 登录失败聚类口径']
+  },
+  {
+    id: 'paper-analysis', name: '技术资料精读与要点抽取', category: '科研',
+    summary: '对 PDF/网页做章节切分、要点抽取与对比表生成，输出可直接引用的结论。',
+    useCase: '信创适配、开源选型、竞品文档精读这类需要成体系梳理资料的场景。',
+    status: 'Testing', version: 'v0.6', updatedAt: '2026-09-11 09:15', origin: '任务轨迹自动提炼', author: '观微｜Context Engine',
+    calls: 54, successRate: 85, qualityScore: 78, avgCost: 0.22, avgDuration: 44, lastEval: '2026-09-11 · 通过率 85%',
+    agents: ['guanwei'], favorite: false, tests: 6,
+    inputs: ['doc_set', 'focus_points'], outputs: ['outline', 'key_points', 'comparison_table'],
+    steps: ['文档解析与分章', '要点抽取', '交叉比对', '生成对比表与结论'],
+    tools: ['pdf_parse', 'web_fetch'], memories: ['kb-005 LoongArch 适配要点']
+  },
+  {
+    id: 'release-check', name: '发布前检查与回滚预案', category: '开发',
+    summary: '发布前跑一遍质量门禁：迁移脚本、配置差异、灰度策略与回滚步骤。',
+    useCase: '需要发版或灰度上线，且改动涉及数据库或配置的高风险变更。',
+    status: 'Verified', version: 'v1.1', updatedAt: '2026-09-15 18:05', origin: '人工编排后固化', author: '明鉴｜Eval Lab',
+    calls: 63, successRate: 92, qualityScore: 90, avgCost: 0.31, avgDuration: 35, lastEval: '2026-09-15 · 通过率 92%',
+    agents: ['mingjian', 'zhiju'], favorite: true, tests: 9,
+    inputs: ['release_plan', 'migration_sql'], outputs: ['checklist', 'rollback_plan'],
+    steps: ['核对迁移脚本', '比对配置差异', '确认灰度比例', '生成回滚预案', '留档发布证据'],
+    tools: ['schema_diff', 'config_diff'], memories: ['kb-014 灰度回滚决策记录'],
+    permissions: ['配置只读', '回滚需人工确认'],
+    examples: ['支付服务 Sprint 12 发布前检查 → 发现 1 处迁移脚本缺回滚'],
+    exceptions: ['存在未审迁移脚本时直接阻断发布'],
+    evalCriteria: ['迁移脚本有回滚', '配置差异已核对', '灰度比例明确'],
+    evals: [{ at: '2026-09-15 18:05', kind: '发布演练', sample: 10, pass: 92, consistency: 90, human: 8 }],
+    versions: [{ version: 'v1.1', at: '2026-09-15 18:05', note: '加入回滚预案生成' }, { version: 'v1.0', at: '2026-09-06 11:00', note: '首版门禁清单' }],
+    packageFiles: ['检查清单样例', '回滚预案模板']
+  },
+  {
+    id: 'doc-sync', name: '需求文档同步与回写', category: '文档',
+    summary: '把 Notion/飞书文档里的需求拉成任务上下文，任务结束后把结论回写归档。',
+    useCase: '需求散落在外部文档、需要和任务执行保持一致时。',
+    status: 'Testing', version: 'v0.4', updatedAt: '2026-09-10 14:30', origin: '人工编排后固化', author: '和鸣｜Memory Evolution',
+    calls: 38, successRate: 90, qualityScore: 80, avgCost: 0.19, avgDuration: 22, lastEval: '2026-09-10 · 通过率 90%',
+    agents: ['heming'], favorite: false, tests: 5,
+    inputs: ['doc_url', 'task_ref'], outputs: ['context_digest', 'writeback_result'],
+    steps: ['拉取文档最新版本', '抽取需求要点', '生成任务上下文', '结束后回写结论'],
+    tools: ['doc_fetch', 'doc_write'], memories: ['kb-009 需求回写模板'],
+    permissions: ['文档只读', '回写需人工确认'],
+    examples: ['Notion 需求页 → 任务上下文 8 条要点，任务结束后回写结论'],
+    exceptions: ['文档被并发修改时暂停回写并提示冲突'],
+    evalCriteria: ['要点与原文一致', '回写不覆盖他人编辑'],
+    evals: [{ at: '2026-09-10 14:30', kind: '同步回放', sample: 8, pass: 90, consistency: 80, human: 22 }],
+    versions: [{ version: 'v0.4', at: '2026-09-10 14:30', note: '加入冲突检测' }, { version: 'v0.2', at: '2026-09-01 10:40', note: '首版单向拉取' }],
+    packageFiles: ['同步样例', '回写模板']
+  },
+  {
+    id: 'metric-anomaly', name: '经营指标异常检测', category: '数据分析',
+    summary: '对多源指标做同环比与阈值检测，输出异常项、可能原因与待核查清单。',
+    useCase: '每日经营日报、渠道数据核对、指标突变需要快速定位原因时。',
+    status: 'Production', version: 'v1.2', updatedAt: '2026-09-16 08:50', origin: '任务轨迹自动提炼', author: '执矩｜Task Execution',
+    calls: 121, successRate: 93, qualityScore: 88, avgCost: 0.25, avgDuration: 28, lastEval: '2026-09-16 · 通过率 93%',
+    agents: ['zhiju'], favorite: false, tests: 10,
+    inputs: ['metric_sources', 'baseline_window'], outputs: ['anomaly_list', 'cause_hint'],
+    steps: ['汇总多源指标', '同环比与阈值检测', '标注缺失字段', '给出可能原因'],
+    tools: ['sheet_read', 'sql_query'], memories: ['kb-016 口径统一说明'],
+    permissions: ['数据只读', '异常结论需人工核查'],
+    examples: ['渠道 A 转化率环比 -32% → 定位到埋点缺失而非业务下滑'],
+    exceptions: ['数据源缺失超过 20% 时只输出缺口清单，不给结论'],
+    evalCriteria: ['异常可回溯到原始记录', '缺失字段已标注'],
+    evals: [{ at: '2026-09-16 08:50', kind: '历史指标回放', sample: 30, pass: 93, consistency: 88, human: 9 }],
+    versions: [{ version: 'v1.2', at: '2026-09-16 08:50', note: '加入缺失字段标注' }, { version: 'v1.0', at: '2026-09-03 09:10', note: '首版同环比检测' }],
+    packageFiles: ['异常清单样例', '口径说明']
+  },
+  {
+    id: 'content-pipeline', name: '选题到成稿内容流水线', category: '内容生成',
+    summary: '按行业与受众产出选题库、标题候选与初稿，每条附参考来源，人工确认后发布。',
+    useCase: '公众号、小红书、短视频脚本这类需要持续产出的内容任务。',
+    status: 'Verified', version: 'v1.0', updatedAt: '2026-09-12 17:10', origin: '任务轨迹自动提炼', author: '观微｜Context Engine',
+    calls: 87, successRate: 91, qualityScore: 85, avgCost: 0.24, avgDuration: 40, lastEval: '2026-09-12 · 通过率 91%',
+    agents: ['guanwei', 'heming'], favorite: false, tests: 7,
+    inputs: ['industry', 'audience', 'channel'], outputs: ['topic_list', 'draft', 'source_list'],
+    steps: ['收集行业动态', '生成选题与标题', '撰写初稿', '附来源并等待确认'],
+    tools: ['web_search', 'draft_writer'], memories: ['kb-018 选题来源规范'],
+    permissions: ['素材只读', '发布需人工确认'],
+    examples: ['某行业 30 天动态 → 12 条选题 + 5 个标题候选 + 初稿'],
+    exceptions: ['来源不可追溯的素材不进入选题库'],
+    evalCriteria: ['每条选题附来源', '标题候选 ≥ 5 条', '人工确认后才发布'],
+    evals: [{ at: '2026-09-12 17:10', kind: '内容回放', sample: 16, pass: 91, consistency: 85, human: 14 }],
+    versions: [{ version: 'v1.0', at: '2026-09-12 17:10', note: '加入来源链接校验' }, { version: 'v0.8', at: '2026-09-02 16:20', note: '首版选题生成' }],
+    packageFiles: ['选题库样例', '初稿模板']
   }
 ])
 
@@ -3582,6 +3589,9 @@ const skillDraftForm = reactive({
 })
 const skillFilter = reactive({ keyword: '', category: '全部', status: '全部', sort: 'quality', favoriteOnly: false })
 const skillStage = ref('')
+// Skill 生成表单里 9 项次要字段默认收起：它们的值本来就能按执行轨迹自动填好，
+// 全铺开会变成一张 13 字段的大表，看着比实际复杂。
+const skillAdvanced = ref(false)
 const selectedSkillId = ref('context-pack-builder')
 const skillDetailTab = ref('overview')
 const skillEvalRun = reactive({ running: false, sample: 24, kind: '历史任务回放', result: null })
@@ -3627,7 +3637,7 @@ const skillPipelineStats = computed(() => ({
   review: skillLibrary.filter((item) => ['Testing', 'Verified'].includes(item.status)).length,
   release: skillLibrary.filter((item) => ['Verified', 'Production'].includes(item.status)).length,
   invoke: skillLibrary.reduce((sum, item) => sum + item.calls, 0),
-  iterate: skillLibrary.reduce((sum, item) => sum + item.versions.length, 0)
+  iterate: skillLibrary.reduce((sum, item) => sum + (item.versions?.length || 0), 0)
 }))
 
 const skillPipelineCount = (key) => skillPipelineStats.value[key] ?? 0
@@ -4031,12 +4041,9 @@ const agentCenterCatalog = reactive([
     seed: { projects: 1, sessions: 4, memories: 3, prompts: 0, skills: 0, mcp: 0, config: 1 }
   },
   {
-    id: 'baidu-dazi', name: '百度搭子', vendor: '百度', logo: '/static/agent-logos/baidu.svg', tone: 'red', sub: '百度', site: 'https://chat.baidu.com',
-    status: 'needsAuth', appInstalled: true, dataNote: '检测到安装 · 需要授权',
-    home: '~/.baidu-dazi',
-    dirs: { config: '~/.baidu-dazi/config.json', memory: '~/.baidu-dazi/memory', session: '~/.baidu-dazi/sessions', skill: '~/.baidu-dazi/skills' },
-    lastUsed: '2026-07-15 13:50', scannedAt: '',
-    seed: { projects: 1, sessions: 2, memories: 2, prompts: 0, skills: 0, mcp: 0, config: 1 }
+    id: 'openclaw', name: 'OpenClaw', vendor: 'OpenClaw', logo: '/static/agent-logos/openclaw.png', tone: 'coral', sub: '开源个人 Agent', site: 'https://openclaw.ai',
+    status: 'notDetected', appInstalled: false, dataNote: '本机未检测到', home: '—',
+    dirs: { config: '—', memory: '—', session: '—', skill: '—' }, lastUsed: '—', scannedAt: '', seed: {}
   },
 
   // ── 本机没装 ──
@@ -4057,6 +4064,77 @@ const agentCenterCatalog = reactive([
   },
   {
     id: 'trae-work', name: 'Trae Work（新版）', vendor: 'ByteDance', logo: '/static/agent-logos/trae.png', tone: 'blue', sub: '本机未检测到', site: 'https://www.trae.ai',
+    status: 'notDetected', appInstalled: false, dataNote: '本机未检测到', home: '—',
+    dirs: { config: '—', memory: '—', session: '—', skill: '—' }, lastUsed: '—', scannedAt: '', seed: {}
+  },
+
+  // ── 国际 · 编码 Agent ──
+  {
+    id: 'github-copilot', name: 'GitHub Copilot', vendor: 'GitHub', logo: '/static/agent-logos/github-copilot.svg', tone: 'slate', sub: 'GitHub', site: 'https://github.com/features/copilot',
+    status: 'notDetected', appInstalled: false, dataNote: '本机未检测到', home: '—',
+    dirs: { config: '—', memory: '—', session: '—', skill: '—' }, lastUsed: '—', scannedAt: '', seed: {}
+  },
+  {
+    id: 'windsurf', name: 'Windsurf', vendor: 'Codeium', logo: '/static/agent-logos/windsurf.svg', tone: 'teal', sub: 'Codeium', site: 'https://windsurf.com',
+    status: 'notDetected', appInstalled: false, dataNote: '本机未检测到', home: '—',
+    dirs: { config: '—', memory: '—', session: '—', skill: '—' }, lastUsed: '—', scannedAt: '', seed: {}
+  },
+  {
+    id: 'cline', name: 'Cline', vendor: 'Cline', logo: '/static/agent-logos/cline.svg', tone: 'blue', sub: '开源编码 Agent', site: 'https://cline.bot',
+    status: 'notDetected', appInstalled: false, dataNote: '本机未检测到', home: '—',
+    dirs: { config: '—', memory: '—', session: '—', skill: '—' }, lastUsed: '—', scannedAt: '', seed: {}
+  },
+  {
+    id: 'zed', name: 'Zed', vendor: 'Zed Industries', logo: '/static/agent-logos/zed.svg', tone: 'violet', sub: 'Zed Industries', site: 'https://zed.dev',
+    status: 'notDetected', appInstalled: false, dataNote: '本机未检测到', home: '—',
+    dirs: { config: '—', memory: '—', session: '—', skill: '—' }, lastUsed: '—', scannedAt: '', seed: {}
+  },
+  {
+    id: 'warp', name: 'Warp', vendor: 'Warp', logo: '/static/agent-logos/warp.svg', tone: 'amber', sub: '终端 Agent', site: 'https://www.warp.dev',
+    status: 'notDetected', appInstalled: false, dataNote: '本机未检测到', home: '—',
+    dirs: { config: '—', memory: '—', session: '—', skill: '—' }, lastUsed: '—', scannedAt: '', seed: {}
+  },
+  {
+    id: 'replit', name: 'Replit Agent', vendor: 'Replit', logo: '/static/agent-logos/replit.svg', tone: 'amber', sub: '云端开发 Agent', site: 'https://replit.com',
+    status: 'notDetected', appInstalled: false, dataNote: '本机未检测到', home: '—',
+    dirs: { config: '—', memory: '—', session: '—', skill: '—' }, lastUsed: '—', scannedAt: '', seed: {}
+  },
+
+  // ── 国际 · Agent 平台与框架 ──
+  {
+    id: 'dify', name: 'Dify', vendor: 'LangGenius', logo: '/static/agent-logos/dify.svg', tone: 'blue', sub: 'Agent 应用平台', site: 'https://dify.ai',
+    status: 'notDetected', appInstalled: false, dataNote: '本机未检测到', home: '—',
+    dirs: { config: '—', memory: '—', session: '—', skill: '—' }, lastUsed: '—', scannedAt: '', seed: {}
+  },
+  {
+    id: 'n8n', name: 'n8n', vendor: 'n8n', logo: '/static/agent-logos/n8n.svg', tone: 'coral', sub: '工作流自动化', site: 'https://n8n.io',
+    status: 'notDetected', appInstalled: false, dataNote: '本机未检测到', home: '—',
+    dirs: { config: '—', memory: '—', session: '—', skill: '—' }, lastUsed: '—', scannedAt: '', seed: {}
+  },
+  {
+    id: 'langgraph', name: 'LangGraph', vendor: 'LangChain', logo: '/static/agent-logos/langgraph.svg', tone: 'teal', sub: '多智能体编排', site: 'https://www.langchain.com/langgraph',
+    status: 'notDetected', appInstalled: false, dataNote: '本机未检测到', home: '—',
+    dirs: { config: '—', memory: '—', session: '—', skill: '—' }, lastUsed: '—', scannedAt: '', seed: {}
+  },
+  {
+    id: 'crewai', name: 'CrewAI', vendor: 'CrewAI', logo: '/static/agent-logos/crewai.svg', tone: 'coral', sub: '多智能体框架', site: 'https://www.crewai.com',
+    status: 'notDetected', appInstalled: false, dataNote: '本机未检测到', home: '—',
+    dirs: { config: '—', memory: '—', session: '—', skill: '—' }, lastUsed: '—', scannedAt: '', seed: {}
+  },
+  {
+    id: 'huggingface', name: 'Hugging Face', vendor: 'Hugging Face', logo: '/static/agent-logos/huggingface.svg', tone: 'amber', sub: '模型与 Agent 生态', site: 'https://huggingface.co',
+    status: 'notDetected', appInstalled: false, dataNote: '本机未检测到', home: '—',
+    dirs: { config: '—', memory: '—', session: '—', skill: '—' }, lastUsed: '—', scannedAt: '', seed: {}
+  },
+  {
+    id: 'ollama', name: 'Ollama', vendor: 'Ollama', logo: '/static/agent-logos/ollama.svg', tone: 'slate', sub: '本地模型运行', site: 'https://ollama.com',
+    status: 'notDetected', appInstalled: false, dataNote: '本机未检测到', home: '—',
+    dirs: { config: '—', memory: '—', session: '—', skill: '—' }, lastUsed: '—', scannedAt: '', seed: {}
+  },
+
+  // ── 国内 ──
+  {
+    id: 'coze', name: '扣子 Coze', vendor: '字节跳动', logo: '/static/agent-logos/coze.svg', tone: 'violet', sub: 'Agent 开发平台', site: 'https://www.coze.cn',
     status: 'notDetected', appInstalled: false, dataNote: '本机未检测到', home: '—',
     dirs: { config: '—', memory: '—', session: '—', skill: '—' }, lastUsed: '—', scannedAt: '', seed: {}
   }
@@ -4377,7 +4455,7 @@ const acRunMigration = async () => {
 const acLinkage = computed(() => [
   { key: 'memory', title: '沉淀到 Team Memory', desc: 'Agent 历史记忆经标准化后进入团队记忆库，可人工审核', page: 'search', panel: 'library', value: `${acScannedTotal.value} 项可解析` },
   { key: 'skill', title: '进入 Skill Factory', desc: '优秀执行轨迹可提炼为 Skill 并挂载到内置 Agent', page: 'knowledge', panel: 'recheck', value: `${skillLibrary.length} 个 Skill` },
-  { key: 'context', title: '供 Context Engine 调用', desc: '不同 Agent 的历史经验可被组包时召回', page: 'search', panel: 'multimodal', value: '跨 Agent 召回' }
+  { key: 'context', title: '供 Context Engine 调用', desc: '不同 Agent 的历史经验可被组包时召回', page: 'search', panel: 'external', value: '跨 Agent 召回' }
 ])
 
 const acGotoLinkage = (item) => {
@@ -4437,9 +4515,9 @@ const profileDraft = reactive({ ...defaultProfile, specialtyText: defaultProfile
 
 const activePage = ref('home')
 const projectOptions = [
-  { id: 'payment', name: '支付服务稳定性升级', repo: 'repo/payment-service', sprint: 'Sprint 12 · 发布前', flowStep: 4, module: 'Node.js + MySQL', issue: 'BUG-421', taskType: '线上 Bug', taskIds: [1], goal: '修复回调重试造成的重复处理风险，并形成可复用幂等 Skill。', milestone: '9 月 18 日 · 修复 PR 与回归 Eval' },
-  { id: 'permission', name: '成员权限体系改造', repo: 'repo/team-console', sprint: 'Sprint 08 · 开发中', flowStep: 2, module: 'Vue 3 + Flask', issue: 'PR-118', taskType: '功能改造', taskIds: [2], goal: '统一项目、任务、Memory 与 Skill 的权限边界，建立可审计协作链路。', milestone: '9 月 20 日 · 前后端联调完成' },
-  { id: 'memory', name: 'TeamMemory OS 演进', repo: 'repo/yixiu', sprint: 'Milestone 1 · 评测中', flowStep: 5, module: 'Agent Workflow', issue: 'AIC-2026', taskType: 'Skill 回归', taskIds: [3, 4], goal: '完成任务到 Memory、Skill、Eval 的可信闭环，并形成可复核的项目能力资产。', milestone: '9 月 22 日 · 闭环能力验收' }
+  { id: 'payment', name: '支付服务稳定性升级', repo: 'repo/payment-service', sprint: '第 12 迭代 · 发布前', flowStep: 4, module: 'Node.js + MySQL', issue: 'BUG-421', taskType: '线上 Bug', taskIds: [1], goal: '修复回调重试造成的重复处理风险，并形成可复用幂等 Skill。', milestone: '9 月 18 日 · 修复 PR 与回归 Eval' },
+  { id: 'permission', name: '成员权限体系改造', repo: 'repo/team-console', sprint: '第 8 迭代 · 开发中', flowStep: 2, module: 'Vue 3 + Flask', issue: 'PR-118', taskType: '功能改造', taskIds: [2], goal: '统一项目、任务、Memory 与 Skill 的权限边界，建立可审计协作链路。', milestone: '9 月 20 日 · 前后端联调完成' },
+  { id: 'memory', name: 'TeamMemory OS 演进', repo: 'repo/yixiu', sprint: '里程碑 1 · 评测中', flowStep: 5, module: 'Agent Workflow', issue: 'AIC-2026', taskType: 'Skill 回归', taskIds: [3, 4], goal: '完成任务到 Memory、Skill、Eval 的可信闭环，并形成可复核的项目能力资产。', milestone: '9 月 22 日 · 闭环能力验收' }
 ]
 const activeProjectId = ref('payment')
 const currentProject = computed(() => projectOptions.find((item) => item.id === activeProjectId.value) || projectOptions[0])
@@ -4473,6 +4551,7 @@ const showSplash = ref(true)
 const bootScreenRef = ref(null)
 const bootMarkRef = ref(null)
 const bootLogoRef = ref(null)
+const bootCaptionRef = ref(null)
 const brandLogoRef = ref(null)
 const topbarRef = ref(null)
 const navCollapsed = ref(false)
@@ -4640,11 +4719,10 @@ const projectPulseCards = computed(() => {
   const runningAgents = aiosLive.status === 'running' ? Math.max(1, aiosLive.steps.filter((item) => item.state === 'running').length) : agents.value.filter((agent) => agent.status === 'online').length
   return [
     { key: 'focus', label: '重点任务', value: `${scoped.filter((task) => task.status !== 'completed').length} 项`, desc: scoped.find((task) => task.status !== 'completed')?.title || '当前项目已完成', tone: 'blue', action: () => { activePage.value = 'tasks'; taskPanel.value = 'manage' } },
-    { key: 'agent', label: 'Agent 执行状态', value: aiosLive.status === 'running' ? `${runningAgents} 个运行中` : `${runningAgents} 个可用`, desc: aiosLive.status === 'running' ? (aiosActiveStep.value?.title || '正在执行协作计划') : 'Router 可按 Skill 分派', tone: 'teal', action: () => { selectedAgentId.value = 'tiangong' } },
-    { key: 'memory', label: '待审核 Memory', value: `${pendingMemory} 条`, desc: pendingMemory ? '来源与适用边界需人工确认' : '当前项目暂无待审条目', tone: pendingMemory ? 'amber' : 'green', action: () => { activePage.value = 'search'; searchPanel.value = 'update' } },
-    { key: 'eval', label: '待 Eval Skill', value: `${reviewTasks.length + skillLibrary.filter((item) => item.status === 'Testing').length} 项`, desc: '完成质量门禁后才能发布', tone: 'violet', action: () => openEvalLab() },
-    { key: 'risk', label: '项目风险', value: `${risks} 项`, desc: hasHighRisk ? '高风险操作需人工确认' : risks ? '一般风险，按里程碑持续跟踪' : '当前无阻断风险', tone: hasHighRisk ? 'red' : risks ? 'amber' : 'green', action: () => { activePage.value = 'tasks'; taskPanel.value = 'manage'; taskFilters.severity = hasHighRisk ? 'high' : 'all' } },
-    { key: 'milestone', label: '下一里程碑', value: currentProject.value.milestone.split('·')[0].trim(), desc: currentProject.value.milestone.split('·')[1]?.trim() || currentProject.value.milestone, tone: 'green', action: () => { activePage.value = 'tasks'; taskPanel.value = 'overview' } }
+    { key: 'agent', label: '智能体执行', value: aiosLive.status === 'running' ? `${runningAgents} 个运行中` : `${runningAgents} 个可用`, desc: aiosLive.status === 'running' ? (aiosActiveStep.value?.title || '正在执行协作计划') : 'Router 可按 Skill 分派', tone: 'teal', action: () => { selectedAgentId.value = 'tiangong' } },
+    { key: 'memory', label: '待审记忆', value: `${pendingMemory} 条`, desc: pendingMemory ? '来源与适用边界需人工确认' : '当前项目暂无待审条目', tone: pendingMemory ? 'amber' : 'green', action: () => { activePage.value = 'knowledge'; knowledgePanel.value = 'update' } },
+    { key: 'eval', label: '待评测技能', value: `${reviewTasks.length + skillLibrary.filter((item) => item.status === 'Testing').length} 项`, desc: '完成质量门禁后才能发布', tone: 'violet', action: () => openEvalLab() },
+        { key: 'milestone', label: '下一里程碑', value: currentProject.value.milestone.split('·')[0].trim(), desc: currentProject.value.milestone.split('·')[1]?.trim() || currentProject.value.milestone, tone: 'green', action: () => { activePage.value = 'tasks'; taskPanel.value = 'overview' } }
   ]
 })
 const dynamicProjectActions = computed(() => {
@@ -4652,9 +4730,9 @@ const dynamicProjectActions = computed(() => {
   const riskTask = currentProjectTasks.value.find((task) => task.severity === 'high' && task.status !== 'completed')
   const hasContextGap = !searchResult.value || contextPackMeta.value.gaps.length > 0
   const actions = []
-  if (hasContextGap) actions.push({ key: 'context', label: searchResult.value ? '补齐 Context 证据' : '生成 Context Pack', desc: searchResult.value ? `${contextPackMeta.value.gaps.length} 项材料待补` : '先建立可信执行依据', primary: true, action: () => { activePage.value = 'search'; searchPanel.value = 'multimodal'; searchMultimodalExpanded.value = true } })
+  if (hasContextGap) actions.push({ key: 'context', label: searchResult.value ? '补齐上下文证据' : '生成上下文包', desc: searchResult.value ? `${contextPackMeta.value.gaps.length} 项材料待补` : '先建立可信执行依据', primary: true, action: () => { activePage.value = 'search'; searchPanel.value = 'external'; searchMultimodalExpanded.value = true } })
   if (riskTask) actions.push({ key: 'risk', label: '处理重点风险', desc: riskTask.title, primary: !actions.length, action: () => openTask(riskTask) })
-  if (reviewCount) actions.push({ key: 'eval', label: '运行 Eval 门禁', desc: `${reviewCount} 项等待验证`, primary: !actions.length, action: () => openEvalLab() })
+  if (reviewCount) actions.push({ key: 'eval', label: '运行评测门禁', desc: `${reviewCount} 项等待验证`, primary: !actions.length, action: () => openEvalLab() })
   actions.push({ key: 'collab', label: '同步协作成员', desc: '发送进度、任务或交接卡片', primary: !actions.length, action: () => { activePage.value = 'tasks'; taskPanel.value = 'contacts' } })
   return actions.slice(0, 4)
 })
@@ -4672,7 +4750,7 @@ const teamAnalyticsMetrics = computed(() => {
   const factor = analyticsScopeFactor.value
   const scaled = (value, minimum = 1) => Math.max(minimum, Math.round(value * factor))
   return [
-    { key: 'memory', label: 'Memory 新增', value: `${scaled(overview.stats.newMemories || 9)} 条`, change: '↑ 18%', note: '含待审核候选', action: () => { activePage.value = 'search'; searchPanel.value = 'update' } },
+    { key: 'memory', label: 'Memory 新增', value: `${scaled(overview.stats.newMemories || 9)} 条`, change: '↑ 18%', note: '含待审核候选', action: () => { activePage.value = 'knowledge'; knowledgePanel.value = 'update' } },
     { key: 'skill', label: 'Skill 复用', value: `${scaled(37)} 次`, change: '↑ 24%', note: '来自 Agent 调用记录', action: () => { activePage.value = 'knowledge'; knowledgePanel.value = 'recheck' } },
     { key: 'eval', label: 'Eval 通过率', value: `${Math.max(76, Math.round((overview.stats.evalPassed || 92) - (1 - Math.min(factor, 1)) * 4))}%`, change: '↑ 3.6%', note: '按运行记录统计', action: () => openEvalLab() },
     { key: 'repeat', label: '重复问题下降', value: `${overview.stats.repeatWorkDown || 24}%`, change: '↑ 7%', note: '对比同类任务基线', action: () => { activePage.value = 'tasks'; taskPanel.value = 'overview' } },
@@ -4770,11 +4848,11 @@ const openProjectFlowStep = (step) => {
   if (!step) return
   const routes = {
     task: () => { activePage.value = 'tasks'; taskPanel.value = 'manage'; taskFilters.status = 'all' },
-    context: () => { activePage.value = 'search'; searchPanel.value = 'multimodal'; searchMultimodalExpanded.value = true },
+    context: () => { activePage.value = 'search'; searchPanel.value = 'external'; searchMultimodalExpanded.value = true },
     execution: () => { activePage.value = 'tasks'; taskPanel.value = 'manage'; taskFilters.status = 'in_progress' },
     review: () => { activePage.value = 'tasks'; taskPanel.value = 'manage'; taskFilters.status = 'review' },
     eval: () => openEvalLab(),
-    memory: () => { activePage.value = 'search'; searchPanel.value = 'update'; knowledgeKeyword.value = currentProject.value.name },
+    memory: () => { activePage.value = 'knowledge'; knowledgePanel.value = 'update'; knowledgeKeyword.value = currentProject.value.name },
     skill: () => { activePage.value = 'knowledge'; knowledgePanel.value = 'recheck'; skillStage.value = '' }
   }
   routes[step.key]?.()
@@ -4784,14 +4862,61 @@ const searchFiles = ref([])
 const searchAssistantFileInput = ref(null)
 const assistantFiles = ref([])
 const searchResult = ref(null)
-const searchPanel = ref('multimodal')
+const searchPanel = ref('external')
 const searchMultimodalExpanded = ref(true)
+// 一键导入：复用已有的 mcpUsagePrompt（内含真实 endpoint、固定格式模板与安全提示），
+// 不再另写一份提示词，避免两处漂移。
+const mcpToolCount = computed(() => (mcpManifest.value.tools || []).length)
+const mcpReady = computed(() => Boolean(mcpManifest.value.endpoint))
+const mcpDetailOpen = ref(false)
+const showManualImport = ref(false)
+const mcpStatusText = computed(() => {
+  if (mcpTesting.value) return '检测中…'
+  if (mcpConnectionStatus.text !== '未测试') return mcpConnectionStatus.text
+  return mcpReady.value ? `MCP 已就绪 · ${mcpToolCount.value} 个工具可用` : '未获取到 MCP 配置'
+})
+
+const copyImportPrompt = async () => {
+  try {
+    await navigator.clipboard.writeText(mcpUsagePrompt.value)
+    toast('提示词已复制，去 Codex 粘贴发送即可')
+  } catch (error) {
+    toast('浏览器未授权剪贴板，请手动复制页面上的提示词')
+  }
+}
+
+// 真实连通性探测：走 MCP 的 tools/list，能拿到工具清单才算接入成功
+const testMcpConnection = async () => {
+  mcpTesting.value = true
+  const started = Date.now()
+  try {
+    const data = await yixiuApi.mcpPing()
+    const tools = (data && data.result && data.result.tools) || []
+    mcpConnectionStatus.text = tools.length ? `已连通 · ${tools.length} 个工具` : '已连通'
+    mcpConnectionStatus.tone = 'ok'
+    // manifest 拉取失败时用探测结果兜底，保证工具清单不为空
+    if (tools.length && !(mcpManifest.value.tools || []).length) {
+      mcpManifest.value = {
+        ...mcpManifest.value,
+        tools: tools.map((tool) => ({ name: tool.name, purpose: tool.description || tool.purpose || '' }))
+      }
+    }
+  } catch (error) {
+    mcpConnectionStatus.text = '连接失败，请确认后端已启动'
+    mcpConnectionStatus.tone = 'bad'
+  } finally {
+    mcpConnectionStatus.latency = Date.now() - started
+    mcpTesting.value = false
+  }
+}
+
+const openMcpConfig = () => { mcpDetailOpen.value = !mcpDetailOpen.value }
+
+// 一键导入提示词：在 Codex / Claude Code 里发这句话即可走 MCP 上传
 const searchTabs = [
-  { key: 'multimodal', label: '组装台' },
-  { key: 'update', label: '记忆库' },
+  { key: 'external', label: '上下文接力' },
   { key: 'network', label: '知识网络' },
-  { key: 'library', label: '资料库' },
-  { key: 'external', label: '导入' }
+  { key: 'library', label: '资料库' }
 ]
 const searchCapabilityCards = [
   { title: '任务材料融合', desc: '需求、代码、文档和 Issue 统一建模', icon: 'search', tone: 'teal', metric: 'Context' },
@@ -4800,7 +4925,7 @@ const searchCapabilityCards = [
 ]
 const searchProcessCards = [
   { title: '查看历史经验', desc: '复用相似任务的上下文包', icon: 'clock', tone: 'blue', action: () => { activePage.value = 'tasks'; taskPanel.value = 'history' } },
-  { title: '沉淀 Memory', desc: '把有效结论提交到 Team Memory 审核', icon: 'check', tone: 'amber', action: () => { searchPanel.value = 'update'; prepareKnowledgeFromSearch() } },
+  { title: '沉淀 Memory', desc: '把有效结论提交到 Team Memory 审核', icon: 'check', tone: 'amber', action: () => { activePage.value = 'knowledge'; knowledgePanel.value = 'update'; prepareKnowledgeFromSearch() } },
   { title: '创建协作任务', desc: '将当前建议转为可执行任务', icon: 'tool', tone: 'teal', action: () => { if (searchResult.value) createTaskFromSearch(recommendationResult.value); else toast('请先完成一次 Context Pack 生成') } },
   { title: '打开 Memory 图谱', desc: '查看任务、问题和 Skill 关系', icon: 'network', tone: 'green', action: () => { activePage.value = 'search'; searchPanel.value = 'network' } }
 ]
@@ -4908,7 +5033,7 @@ const contextVersionDiff = computed(() => {
   }
 })
 const focusEvidenceGap = (target = 'query') => {
-  searchPanel.value = 'multimodal'
+  searchPanel.value = 'external'
   searchMultimodalExpanded.value = true
   nextTick(() => {
     const selector = target === 'files' ? '.search-upload-zone' : '.search-fusion-input textarea'
@@ -5157,8 +5282,134 @@ const contactMeetings = ref([
   { id: 'eval-sync', title: 'Eval 结论同步会', time: '今日 15:00', status: '已预约', owner: '质量与评测组', taskNo: 'TASK-20260917-004', members: ['李志勇', '明鉴'], agenda: '复盘失败样例、质量门禁和 Memory 归档', progress: 65 }
 ])
 
-const knowledgePanel = ref('recheck')
-const knowledgeTabs = [{ key: 'recheck', label: 'Skill 工厂' }, { key: 'files', label: 'Agent 中心' }, { key: 'mcp', label: 'MCP 配置' }]
+const knowledgePanel = ref('files')
+const OWN_MCP_META = {
+  'yixiu.create_project_update': { label: '生成项目进展', icon: 'chart', tone: 'teal' },
+  'yixiu.save_context_pack': { label: '保存任务上下文包', icon: 'file', tone: 'amber' },
+  'yixiu.create_memory_candidate': { label: '生成 Memory 候选', icon: 'bot', tone: 'violet' },
+  'yixiu.create_skill_candidate': { label: '生成 Skill 候选', icon: 'zap', tone: 'green' },
+  'yixiu.link_to_project': { label: '关联到一休项目', icon: 'network', tone: 'blue' }
+}
+const OWN_MCP_FALLBACK = [
+  { name: 'yixiu.create_project_update', purpose: '保存外部 AI 对话总结并生成项目进展' },
+  { name: 'yixiu.save_context_pack', purpose: '保存任务上下文包' },
+  { name: 'yixiu.create_memory_candidate', purpose: '从导入内容生成 Memory 候选' },
+  { name: 'yixiu.create_skill_candidate', purpose: '从导入内容生成 Skill 候选' },
+  { name: 'yixiu.link_to_project', purpose: '将导入记录关联到一休项目' }
+]
+const ownMcpTools = computed(() => {
+  const list = (mcpManifest.value.tools || []).length ? mcpManifest.value.tools : OWN_MCP_FALLBACK
+  return list.map((t) => ({
+    ...t,
+    ...(OWN_MCP_META[t.name] || { label: t.name, icon: 'tool', tone: 'teal' })
+  }))
+})
+
+const recommendedMcp = [
+  { name: '@modelcontextprotocol/server-github', label: 'GitHub', logo: '/static/mcp-logos/github.svg',
+    purpose: '检索仓库、Issue、PR 与提交历史，改完代码顺手把上下文带回来。', tags: ['代码', '官方'],
+    install: 'npx -y @modelcontextprotocol/server-github' },
+  { name: '@playwright/mcp', label: 'Playwright', logo: '/static/mcp-logos/playwright.svg',
+    purpose: '浏览器自动化：点击、填表、截图、抓页面结构，适合验收与竞品巡检。', tags: ['浏览器', '验收'],
+    install: 'npx -y @playwright/mcp@latest' },
+  { name: '@modelcontextprotocol/server-postgres', label: 'PostgreSQL', logo: '/static/mcp-logos/postgres.svg',
+    purpose: '只读连接数据库做查询，让 AI 看真实表结构与数据，而不是靠猜。', tags: ['数据库'],
+    install: 'npx -y @modelcontextprotocol/server-postgres <dsn>' },
+  { name: '@modelcontextprotocol/server-sqlite', label: 'SQLite', logo: '/static/mcp-logos/sqlite.svg',
+    purpose: '本地轻量库读写，适合单机工具、原型验证与离线数据核对。', tags: ['数据库', '本地'],
+    install: 'npx -y @modelcontextprotocol/server-sqlite ./data.db' },
+  { name: 'redis-mcp-server', label: 'Redis', logo: '/static/mcp-logos/redis.svg',
+    purpose: '查看键空间、缓存命中与队列积压，排查线上性能问题很直接。', tags: ['缓存', '运维'],
+    install: 'npx -y @modelcontextprotocol/server-redis redis://localhost:6379' },
+  { name: '@supabase/mcp-server-supabase', label: 'Supabase', logo: '/static/mcp-logos/supabase.svg',
+    purpose: 'Postgres、认证与存储一体，建表和查数据都能交给 Agent。', tags: ['数据库', '后端'],
+    install: 'npx -y @supabase/mcp-server-supabase@latest' },
+  { name: 'mongodb-mcp-server', label: 'MongoDB', logo: '/static/mcp-logos/mongodb.svg',
+    purpose: '文档型数据库查询与聚合，适合日志、事件类数据排查。', tags: ['数据库'],
+    install: 'npx -y mongodb-mcp-server' },
+  { name: 'elasticsearch-mcp', label: 'Elasticsearch', logo: '/static/mcp-logos/elasticsearch.svg',
+    purpose: '全文检索与日志聚合，从海量日志里定位异常比人眼快得多。', tags: ['检索', '日志'],
+    install: 'npx -y @elastic/mcp-server-elasticsearch' },
+  { name: '@vercel/mcp-adapter', label: 'Vercel', logo: '/static/mcp-logos/vercel.svg',
+    purpose: '查看部署状态、构建日志与环境变量，发版问题当场定位。', tags: ['部署'],
+    install: 'npx -y @vercel/mcp-adapter' },
+  { name: '@sentry/mcp-server', label: 'Sentry', logo: '/static/mcp-logos/sentry.svg',
+    purpose: '拉取错误堆栈与影响面，把线上异常直接变成可修的任务。', tags: ['监控'],
+    install: 'npx -y @sentry/mcp-server' },
+  { name: '@grafana/mcp-grafana', label: 'Grafana', logo: '/static/mcp-logos/grafana.svg',
+    purpose: '查询监控看板与告警规则，指标波动能追溯到具体面板。', tags: ['监控', '运维'],
+    install: 'npx -y @grafana/mcp-grafana' },
+  { name: '@stripe/mcp', label: 'Stripe', logo: '/static/mcp-logos/stripe.svg',
+    purpose: '查询支付流水、订阅与退款记录，对账类任务少写一堆脚本。', tags: ['支付'],
+    install: 'npx -y @stripe/mcp --tools=all' },
+  { name: '@notionhq/notion-mcp-server', label: 'Notion', logo: '/static/mcp-logos/notion.svg',
+    purpose: '把需求文档、会议纪要同步成任务上下文，做完再回写归档。', tags: ['文档'],
+    install: 'npx -y @notionhq/notion-mcp-server' },
+  { name: '@modelcontextprotocol/server-slack', label: 'Slack', logo: '/static/mcp-logos/slack.png',
+    purpose: '读取频道讨论与线程，把决策过程并入团队记忆。', tags: ['协作'],
+    install: 'npx -y @modelcontextprotocol/server-slack' },
+  { name: 'mcp-atlassian', label: 'Jira', logo: '/static/mcp-logos/jira.svg',
+    purpose: '读写 Jira 工单、迭代与评论，需求到任务不用来回搬。', tags: ['协作', '项目管理'],
+    install: 'uvx mcp-atlassian' },
+  { name: 'mcp-linear', label: 'Linear', logo: '/static/mcp-logos/linear.svg',
+    purpose: '管理 Linear 的 issue 与项目进度，轻量团队迭代很好用。', tags: ['项目管理'],
+    install: 'npx -y mcp-linear' },
+  { name: '@modelcontextprotocol/server-gdrive', label: 'Google Drive', logo: '/static/mcp-logos/google.svg',
+    purpose: '检索云端文档与表格，把散落的资料拉进任务上下文。', tags: ['文档'],
+    install: 'npx -y @modelcontextprotocol/server-gdrive' },
+  { name: '@cloudflare/mcp-server-cloudflare', label: 'Cloudflare', logo: '/static/mcp-logos/cloudflare.svg',
+    purpose: '查询 Worker、KV、R2 与访问日志，线上问题定位少绕几圈。', tags: ['运维'],
+    install: 'npx -y @cloudflare/mcp-server-cloudflare' },
+  { name: 'docker-mcp', label: 'Docker', logo: '/static/mcp-logos/docker.svg',
+    purpose: '管理容器与镜像，环境起停、日志查看交给 Agent 执行。', tags: ['运维'],
+    install: 'uvx docker-mcp' },
+  { name: 'figma-mcp', label: 'Figma', logo: '/static/mcp-logos/figma.svg',
+    purpose: '读取设计稿图层与标注，前端实现时不必靠截图量像素。', tags: ['设计'],
+    install: 'npx -y figma-mcp' }
+]
+
+const mcpClients = [
+  { name: 'Codex', logo: '/static/agent-logos/codex.svg' },
+  { name: 'Claude Code', logo: '/static/agent-logos/claude-code.png' },
+  { name: 'Cursor', logo: '/static/agent-logos/cursor.png' },
+  { name: '通义千问', logo: '/static/agent-logos/qwen.png' },
+  { name: 'DeepSeek', logo: '/static/agent-logos/deepseek.svg' },
+  { name: 'Kimi', logo: '/static/agent-logos/kimi.png' },
+  { name: '豆包', logo: '/static/agent-logos/doubao.png' },
+  { name: '百度搭子', logo: '/static/agent-logos/baidu.svg' }
+]
+
+const ensureMcpManifest = async () => {
+  if (mcpManifest.value.endpoint) return
+  try {
+    mcpManifest.value = await yixiuApi.mcpManifest()
+  } catch (error) {
+    /* 后端未启动时静默降级 */
+  }
+}
+
+watch(knowledgePanel, (value) => { if (value === 'update') void ensureMcpManifest() })
+
+const copyMcpSnippet = async (tool) => {
+  const text = `调用一休 MCP 工具 ${tool.name}：${tool.purpose}。接入地址 ${mcpManifest.value.endpoint || 'http://127.0.0.1:5000/api/yixiu/mcp'}`
+  try {
+    await navigator.clipboard.writeText(text)
+    toast(`已复制 ${tool.name} 的调用说明`)
+  } catch (error) {
+    toast('浏览器未授权剪贴板，请手动复制')
+  }
+}
+
+const copyMcpInstall = async (item) => {
+  try {
+    await navigator.clipboard.writeText(item.install)
+    toast(`已复制 ${item.label} 的安装命令`)
+  } catch (error) {
+    toast('浏览器未授权剪贴板，请手动复制')
+  }
+}
+
+const knowledgeTabs = [{ key: 'files', label: 'Agent 中心' }, { key: 'recheck', label: 'Skill 工厂' }, { key: 'update', label: 'MCP 工具库' }]
 const knowledgeKeyword = ref('')
 const graphSearchExpanded = ref(false)
 const graphSearchInput = ref(null)
@@ -5212,8 +5463,12 @@ const tryInitGraphChart = async () => {
     console.error('[graph] init failed:', e)
   }
 }
-watch([knowledgePanel, isAuthenticated], () => {
-  if (knowledgePanel.value === 'network' && isAuthenticated.value) {
+watch([activePage, searchPanel, isAuthenticated], () => {
+  // 知识网络挂在「上下文中心」的 searchPanel === 'network' 上。
+  // 原来这里监听的是能力中心的 knowledgePanel，而它的取值只有 files/recheck/update，
+  // 永远不等于 'network' —— 条件恒假、从未触发。于是切走再切回知识网络时，
+  // v-if 会重建 canvas 的 DOM，但没人重新初始化，图就一直空白。
+  if (activePage.value === 'search' && searchPanel.value === 'network' && isAuthenticated.value) {
     nextTick(tryInitGraphChart)
   }
 }, { immediate: true })
@@ -6084,10 +6339,10 @@ const taskExecutionRecords = (task = {}) => {
 }
 const teamCapabilityLoop = computed(() => [
   { key: 'task', label: '项目任务', desc: '明确目标与边界', value: `${tasks.value.length} 项`, tone: 'blue', current: currentProject.value.flowStep === 0, action: () => { activePage.value = 'tasks'; taskPanel.value = 'manage' } },
-  { key: 'context', label: 'Context Pack', desc: '组装可信上下文', value: `${searchHistory.value.length} 份`, tone: 'teal', current: currentProject.value.flowStep === 1, action: () => { activePage.value = 'search'; searchPanel.value = 'multimodal' } },
+  { key: 'context', label: 'Context Pack', desc: '组装可信上下文', value: `${searchHistory.value.length} 份`, tone: 'teal', current: currentProject.value.flowStep === 1, action: () => { activePage.value = 'search'; searchPanel.value = 'external' } },
   { key: 'trace', label: '执行 Trace', desc: '记录人机协作过程', value: `${taskEvents.value.length} 条`, tone: 'violet', current: currentProject.value.flowStep === 2, action: () => { activePage.value = 'tasks'; taskPanel.value = 'overview' } },
   { key: 'eval', label: 'Eval 门禁', desc: '验证质量与风险', value: `${overview.stats.review} 待评`, tone: 'amber', current: currentProject.value.flowStep === 4, action: openEvalLab },
-  { key: 'memory', label: 'Team Memory', desc: '沉淀可复用经验', value: `${overview.stats.knowledgeTotal} 条`, tone: 'green', current: currentProject.value.flowStep === 5, action: () => { activePage.value = 'search'; searchPanel.value = 'update' } },
+  { key: 'memory', label: 'Team Memory', desc: '沉淀可复用经验', value: `${overview.stats.knowledgeTotal} 条`, tone: 'green', current: currentProject.value.flowStep === 5, action: () => { activePage.value = 'knowledge'; knowledgePanel.value = 'update' } },
   { key: 'skill', label: 'Skill 资产', desc: '发布并持续演化', value: `${skillMetrics.value.total} 个`, tone: 'blue', current: currentProject.value.flowStep >= 6, action: () => { activePage.value = 'knowledge'; knowledgePanel.value = 'recheck' } }
 ])
 const taskBoardColumns = computed(() => ['pending', 'in_progress', 'review', 'completed'].map((key) => ({ key, label: statusText(key), tasks: filteredTasks.value.filter((task) => task.status === key) })))
@@ -6121,7 +6376,7 @@ const profileToolItems = computed(() => [
   { title: '修改资料', desc: '编辑个人档案', icon: 'user', action: 'edit-profile' },
   { title: '我的任务', desc: '查看我参与的项目', icon: 'wrench', page: 'tasks', panel: 'manage' },
   { title: 'Agent 中心', desc: '管理本机 Agent 与记忆迁移', icon: 'cpu', page: 'knowledge', panel: 'files' },
-  { title: '上下文引擎', desc: '生成任务上下文包', icon: 'search', page: 'search', panel: 'multimodal' },
+  { title: '上下文引擎', desc: '生成任务上下文包', icon: 'search', page: 'search', panel: 'external' },
   { title: '我的 Memory', desc: '查看我沉淀的记忆', icon: 'network', page: 'search', panel: 'library' },
   { title: '我的 Skill', desc: '查看我贡献的 Skill', icon: 'check', page: 'knowledge', panel: 'recheck' }
 ])
@@ -6150,8 +6405,10 @@ const profileRecentItems = computed(() => {
     { title: '使用 Codex / Claude Code 协作', desc: 'Agent 协作 · 已生成可复用执行轨迹', icon: 'cpu', page: 'knowledge', panel: 'files', meta: '今天 09:41' },
     { title: 'Agent 数据备份完成', desc: 'Claude Code · 迁移前快照已生成', icon: 'shield', page: 'knowledge', panel: 'files', meta: '昨天 22:08' },
     { title: 'Skill 候选生成：任务上下文包组装', desc: '来自 7 次稳定执行轨迹，稳定度 91%', icon: 'check', page: 'knowledge', panel: 'recheck', meta: '昨天 18:30' },
-    { title: 'Context Pack 生成', desc: '权限改造任务 · 证据 14 条', icon: 'search', page: 'search', panel: 'multimodal', meta: '昨天 15:12' }
-  ].slice(0, 6)
+    { title: 'Context Pack 生成', desc: '权限改造任务 · 证据 14 条', icon: 'search', page: 'search', panel: 'external', meta: '昨天 15:12' }
+    // 只展示 5 条：6 条会把「最近动态」顶到 429px，整行其他两张卡跟着被拉高。
+    // 面板标题右侧本来就有「全部记录」，需要时点进去看。
+  ].slice(0, 5)
 })
 const profileGrowthScore = computed(() => 3200
   + myTasks.value.length * 70
@@ -6546,6 +6803,8 @@ const finishAuthentication = async (account, token = '', remember = true) => {
   else sessionStorage.setItem(AUTH_SESSION_KEY, session)
   if (token) localStorage.setItem('yixiu-token', token)
   currentAccount.value = account.account
+  void ensureMcpManifest()
+  loadKnowledgeDocs()
   reloadContactReadState()
   authError.value = ''
   isAuthenticated.value = true
@@ -6583,17 +6842,17 @@ const login = async () => {
   }
 }
 const register = async () => {
-  const name = authForm.name.trim()
   const accountName = authForm.account.trim()
-  if (!name || !accountName || !authForm.password || !authForm.confirmPassword) return (authError.value = '请完整填写注册信息')
-  if (!/^[A-Za-z0-9_]{4,20}$/.test(accountName)) return (authError.value = '账号需为 4—20 位字母、数字或下划线')
+  const name = `用户${accountName.slice(-4)}`
+  if (!accountName || !authForm.password || !authForm.confirmPassword) return (authError.value = '请完整填写注册信息')
+  if (!/^1[3-9]\d{9}$/.test(accountName)) return (authError.value = '请输入正确的 11 位手机号')
   if (authForm.password.length < 8) return (authError.value = '密码至少需要 8 位')
   if (authForm.password !== authForm.confirmPassword) return (authError.value = '两次输入的密码不一致')
   if (!authForm.agreed) return (authError.value = '请先同意平台使用规范')
-  const profile = { ...defaultProfile, name, employeeId: `YX-${String(Date.now()).slice(-6)}` }
+  const profile = { ...defaultProfile, name, phone: accountName, employeeId: `YX-${String(Date.now()).slice(-6)}` }
   authError.value = ''
   try {
-    const result = await yixiuApi.register({ account: accountName, password: authForm.password, name, profile })
+    const result = await yixiuApi.register({ account: accountName, password: authForm.password, name, phone: accountName, profile })
     const account = { account: result.user.account, name: result.user.name, profile: result.user.profile || profile }
     rememberAccountShell(account)
     await finishAuthentication(account, result.token, true)
@@ -7276,6 +7535,126 @@ const loadKnowledgeDocs = () => {
       collaborators: [collaboratorPool[0], collaboratorPool[2]],
       starred: false,
       updated_at: '2026-08-01 11:45',
+    },
+    {
+      id: 'kb-req-001',
+      title: '一休 TeamMemory OS 需求说明书',
+      type: '需求', category: '研发流程',
+      content: '# 一休 TeamMemory OS 需求说明书\n## 建设目标\n让团队的经验可沉淀、可追溯、可复用，减少重复沟通与重复踩坑。\n## 核心场景\n1. 新任务开工前自动组装上下文\n2. 任务结束后把有效做法沉淀为 Memory / Skill\n3. 经验经过 Eval 验证后才进入团队库\n## 验收口径\n每个 Skill 必须有适用边界、证据来源和回归样例。',
+      tags: ['需求', '产品', 'TeamMemory'],
+      collaborators: [collaboratorPool[0], collaboratorPool[1]],
+      starred: true,
+      updated_at: '2026-09-16 10:05',
+    },
+    {
+      id: 'kb-arch-001',
+      title: '上下文组装（CAP）算法设计说明',
+      type: '设计', category: '研发流程',
+      content: '# 上下文组装（CAP）算法设计说明\n## 问题定义\n给定任务描述、候选材料集合与预算上限，选出信息量最大的子集。\n## 建模思路\n把相关性、词法匹配、时效衰减、同项目加成与记忆可信度统一成单一可解释打分函数。\n## 近似最优\n效用函数满足次模性，贪心可达 (1-1/e) ≈ 0.632 的近似比。\n## 实验口径\n召回率@5、准备时长、单任务成本三项对比。',
+      tags: ['算法', 'CAP', '次模'],
+      collaborators: [collaboratorPool[0], collaboratorPool[3]],
+      starred: true,
+      updated_at: '2026-09-15 15:40',
+    },
+    {
+      id: 'kb-arch-002',
+      title: 'Memory 可信度评估（Beta 后验）说明',
+      type: '设计', category: '质量管理',
+      content: '# Memory 可信度评估（Beta 后验）说明\n## 动机\nAI 生成的经验可能出错，需要可证伪的可信度度量，而不是二元通过/拒绝。\n## 模型\n把每条记忆的可靠性建模为 Beta(α, β)，成功验证 α+1，失败 β+1。\n## 入库判据\n仅当置信下界 LCB ≥ τ（默认 0.7）才可作为强证据引用。\n## 效果\n随验证次数增加，方差单调收缩，避免“用一次就当真”。',
+      tags: ['算法', 'Beta', '可信度'],
+      collaborators: [collaboratorPool[0], collaboratorPool[2]],
+      starred: false,
+      updated_at: '2026-09-14 09:20',
+    },
+    {
+      id: 'kb-test-001',
+      title: '端到端测试用例集（发布前必跑）',
+      type: '测试', category: '质量管理',
+      content: '# 端到端测试用例集\n## 覆盖范围\n登录鉴权、上下文组包、任务派发、Eval 回归、Memory 入库、Skill 发布。\n## 门禁规则\n核心链路通过率 100%，边缘链路不低于 95%，否则阻断发布。\n## 执行方式\n发布前自动跑一遍，结果留档作为发布证据。',
+      tags: ['测试', 'E2E', '门禁'],
+      collaborators: [collaboratorPool[0], collaboratorPool[1], collaboratorPool[2]],
+      starred: false,
+      updated_at: '2026-09-13 17:55',
+    },
+    {
+      id: 'kb-case-001',
+      title: '案例：支付回调重复扣款闭环复盘',
+      type: '案例', category: '问题复盘',
+      content: '# 案例：支付回调重复扣款闭环复盘\n## 现象\n线上出现同一笔订单被回调触发两次的业务处理。\n## 根因\n幂等键缺失，重试链路下写入操作不具备唯一约束。\n## 处理\n统一业务幂等键，补充唯一约束与回归用例，灰度上线后观察 24 小时。\n## 沉淀\n产出一条 Memory 与一个 bug-fix-loop Skill，被后续 6 个任务复用。',
+      tags: ['案例', '支付', '复盘'],
+      collaborators: [collaboratorPool[0], collaboratorPool[2]],
+      starred: true,
+      updated_at: '2026-09-12 20:10',
+    },
+    {
+      id: 'kb-case-002',
+      title: '案例：权限模型重构的边界梳理',
+      type: '案例', category: '问题复盘',
+      content: '# 案例：权限模型重构的边界梳理\n## 背景\n项目、任务、Memory 与 Skill 四类资源的权限口径长期不一致。\n## 做法\n先统一资源模型，再定义角色-动作矩阵，最后逐接口对齐。\n## 教训\n权限改造必须同步补审计记录，否则问题难以回溯。',
+      tags: ['案例', '权限', '协作'],
+      collaborators: [collaboratorPool[1], collaboratorPool[3]],
+      starred: false,
+      updated_at: '2026-09-11 14:35',
+    },
+    {
+      id: 'kb-flow-001',
+      title: '任务从发起到复用的标准流程',
+      type: '流程', category: '研发流程',
+      content: '# 任务从发起到复用的标准流程\n## 七步链路\n1. 任务登记\n2. Context 组包\n3. 执行与记录轨迹\n4. Review 人工审核\n5. Eval 质量门禁\n6. Memory 沉淀\n7. Skill 发布与复用\n## 关键约束\n每一步的产出都要能回到原始证据，缺失即阻断。',
+      tags: ['流程', '闭环', 'SOP'],
+      collaborators: [collaboratorPool[0], collaboratorPool[1], collaboratorPool[2], collaboratorPool[3]],
+      starred: true,
+      updated_at: '2026-09-10 11:00',
+    },
+    {
+      id: 'kb-flow-002',
+      title: 'MCP 接入与外部 AI 回写流程',
+      type: '流程', category: '知识管理',
+      content: '# MCP 接入与外部 AI 回写流程\n## 目标\n让 Codex / Claude Code / Cursor 把任务过程直接写回一休，省去手工整理。\n## 步骤\n1. 复制导入提示词发给外部 AI\n2. 它调用一休 MCP 工具上传结构化内容\n3. 一休生成 Memory / Skill / Eval 候选\n4. 人工审核后入库\n## 安全边界\n禁止上传密钥、Token、隐私数据与完整 .env。',
+      tags: ['MCP', '接入', '流程'],
+      collaborators: [collaboratorPool[0], collaboratorPool[3]],
+      starred: false,
+      updated_at: '2026-09-09 16:25',
+    },
+    {
+      id: 'kb-guide-001',
+      title: '新成员上手指南（一休使用手册）',
+      type: '手册', category: '协作沟通',
+      content: '# 新成员上手指南\n## 第一天\n熟悉工作台、上下文中心与任务执行三个入口，完成一次需求体检。\n## 第一周\n参与一个真实任务的上下文组装与 Review，理解证据链要求。\n## 常见误区\n把 AI 输出直接当结论；跳过 Eval 直接发布 Skill。',
+      tags: ['手册', '新人', '上手'],
+      collaborators: [collaboratorPool[1], collaboratorPool[2]],
+      starred: false,
+      updated_at: '2026-09-08 09:45',
+    },
+    {
+      id: 'kb-meeting-002',
+      title: '技术方案评审会纪要（第九次）',
+      type: '会议纪要', category: '协作沟通',
+      content: '# 技术方案评审会纪要\n## 时间\n2026年9月17日 15:00\n## 参会\n聪明的一休、李志勇、赵宁、陈程\n## 决议\n1. 上下文组装默认预算调整为 8k tokens\n2. 记忆入库置信下界阈值定在 0.7\n3. 下周补一版失败样例回归集',
+      tags: ['会议', '纪要', '评审'],
+      collaborators: [collaboratorPool[0], collaboratorPool[1], collaboratorPool[2], collaboratorPool[3]],
+      starred: false,
+      updated_at: '2026-09-17 16:10',
+    },
+    {
+      id: 'kb-risk-001',
+      title: '风险登记册与应对措施',
+      type: '规范', category: '质量管理',
+      content: '# 风险登记册与应对措施\n## 需求风险\n业务方表达模糊 → 用标准需求单收敛口径。\n## 交付风险\n数据源变更导致结果失效 → 保留人工复核环节与异常告警。\n## 成本风险\n托管运行调用超支 → 设置运行次数与额度上限。\n## 安全风险\n高风险动作 → 一律人工确认后才执行。',
+      tags: ['风险', '规范', '质量'],
+      collaborators: [collaboratorPool[0], collaboratorPool[2]],
+      starred: false,
+      updated_at: '2026-09-07 13:30',
+    },
+    {
+      id: 'kb-eval-002',
+      title: 'Eval 质量门禁标准（Skill 发布前）',
+      type: 'Eval', category: '质量管理',
+      content: '# Eval 质量门禁标准\n## 必过项\n1. 回归样例通过率 ≥ 95%\n2. 输入输出结构一致性 ≥ 90%\n3. 人工修改率 ≤ 15%\n## 阻断项\n存在未审迁移脚本、权限越权或密钥外泄风险时直接阻断。\n## 留档\n每次 Eval 结果写入版本记录，可对比不同版本。',
+      tags: ['Eval', '门禁', '质量'],
+      collaborators: [collaboratorPool[0], collaboratorPool[1]],
+      starred: true,
+      updated_at: '2026-09-06 10:15',
     },
   ]
   knowledgeDocs.value = [...mockDocs, ...docs.map((k, idx) => ({
@@ -8537,12 +8916,12 @@ const applySearchHistory = (item) => {
     maintenanceLevel: item.maintenanceLevel,
     query: item.query
   })
-  searchPanel.value = 'multimodal'
+  searchPanel.value = 'external'
   toast('已回填历史检索条件')
 }
 const applyLearningRecommendation = (item) => {
   searchForm.query = `${searchForm.query ? `${searchForm.query}；` : ''}${item.query}`.trim()
-  searchPanel.value = 'multimodal'
+  searchPanel.value = 'external'
   toast('已加入经验推荐关键词')
 }
 const openLearningRecommendation = (item) => {
@@ -8582,7 +8961,73 @@ const fillExternalImportExample = (provider = externalImportForm.provider) => {
     }
   }, null, 2)
 }
+// 导入记录：默认折叠成一行，点开才看候选明细，避免一屏铺满几十张卡片
+const expandedImport = ref('')
+const importLimit = ref(6)
+const visibleImports = computed(() => externalImports.value.slice(0, importLimit.value))
+
+const relayTargets = [
+  { key: 'codex', name: 'Codex', logo: '/static/agent-logos/codex.svg' },
+  { key: 'claude', name: 'Claude Code', logo: '/static/agent-logos/claude-code.png' },
+  { key: 'cursor', name: 'Cursor', logo: '/static/agent-logos/cursor.png' }
+]
+
+const relayFields = [
+  { key: 'task_goal', desc: '这次任务要达成什么目标', required: true },
+  { key: 'work_summary', desc: '实际做了什么、结论是什么', required: true },
+  { key: 'changed_files', desc: '改动或涉及的文件清单', required: true },
+  { key: 'validation', desc: '怎么验证的、结果如何', required: true },
+  { key: 'decisions', desc: '关键决策与选择理由' },
+  { key: 'risks', desc: '风险点与尚未解决的问题' },
+  { key: 'todos', desc: '后续待办事项' },
+  { key: 'memory_candidates / skill_candidates / eval_cases', desc: '适合复用的候选资产（人工审核后入库）' }
+]
+
+const relayChecks = [
+  '一休后端已启动，上方 MCP 状态显示「已就绪」',
+  '工作区 Access Token 已在本机配置完成',
+  '对话内容不含密钥、Token、隐私数据或完整 .env',
+  '任务已结束，结论与验证方式都已写进对话'
+]
+
+const relayFaq = [
+  { q: '发完提示词没有出现记录？', a: '先点「测试连接」确认 MCP 通不通；再从上方的平台按钮重新复制一次提示词，确保带上了真实接入地址。' },
+  { q: '记录显示「未同步」怎么办？', a: '说明外部 AI 没能调通 MCP。检查客户端是否配置了接入地址与工作区 Token，然后重新发送一次。' },
+  { q: '候选资产怎么入库？', a: '在下方「导入记录」里点开任意一条，逐个「通过」或「退回」；通过后才会进入团队记忆库。' },
+  { q: '会上传我的密钥吗？', a: '提示词里已明确禁止上传密钥、Token、隐私数据和完整 .env，平台侧对本地数据也只做只读扫描。' }
+]
+
+const copyImportPromptFor = async (provider, label) => {
+  const text = mcpUsagePrompt.value.replace(/provider \u4f7f\u7528 \S+/, `provider \u4f7f\u7528 ${provider}`)
+  try {
+    await navigator.clipboard.writeText(text)
+    toast(`\u5df2\u590d\u5236\u7ed9 ${label || provider} \u7684\u63d0\u793a\u8bcd\uff0c\u7c98\u5230\u5bf9\u8bdd\u6846\u53d1\u9001\u5373\u53ef`)
+  } catch (error) {
+    toast('\u6d4f\u89c8\u5668\u672a\u6388\u6743\u526a\u8d34\u677f\uff0c\u8bf7\u624b\u52a8\u590d\u5236')
+  }
+}
+
+const jumpToRecords = () => {
+  const el = document.querySelector('.import-record-panel')
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+const pendingArtifactCount = (item) => (item.artifacts || []).filter((a) => a.review_status === 'pending_review').length
+const reviewStateText = (state) => ({ approved: '已通过', rejected: '已退回', pending_review: '待审核' }[state] || state || '待审核')
+
+// MCP 接入配置按需加载：启动时那次调用可能早于鉴权就绪而静默失败，
+// 因此在「打开导入页」和「刷新记录」时补拉一次，拿到 endpoint 才写入。
+const loadMcpManifest = async () => {
+  if (mcpManifest.value.endpoint) return
+  try {
+    const data = await yixiuApi.mcpManifest()
+    if (data && data.endpoint) mcpManifest.value = data
+  } catch (error) {
+    // 保持空对象：状态条会显示「未获取到 MCP 配置」，不阻断导入
+  }
+}
+
 const loadExternalImports = async () => {
+  loadMcpManifest()
   try {
     const data = await yixiuApi.externalImports()
     externalImports.value = data.imports || []
@@ -8590,50 +9035,11 @@ const loadExternalImports = async () => {
     if (activePage.value === 'search' && searchPanel.value === 'external') toast(`导入记录加载失败：${error.message}`)
   }
 }
-const openMcpConfig = async () => {
-  activePage.value = 'knowledge'
-  knowledgePanel.value = 'mcp'
-  try {
-    mcpManifest.value = await yixiuApi.mcpManifest()
-  } catch (error) {
-    toast(`MCP 配置加载失败：${error.message}`)
-  }
-}
-const testMcpConnection = async () => {
-  if (mcpTesting.value) return
-  mcpTesting.value = true
-  mcpConnectionStatus.text = '连接中'
-  mcpConnectionStatus.tone = ''
-  const startedAt = performance.now()
-  try {
-    const manifest = await yixiuApi.mcpManifest()
-    mcpManifest.value = manifest
-    mcpConnectionStatus.latency = Math.max(1, Math.round(performance.now() - startedAt))
-    mcpConnectionStatus.text = manifest?.tools?.length ? '连接正常' : '已连接，未发现工具'
-    mcpConnectionStatus.tone = manifest?.tools?.length ? 'ok' : 'warn'
-    toast(`MCP 连接正常，发现 ${manifest?.tools?.length || 0} 个工具`)
-  } catch (error) {
-    mcpConnectionStatus.latency = 0
-    mcpConnectionStatus.text = '连接失败'
-    mcpConnectionStatus.tone = 'bad'
-    toast(`MCP 连接失败：${error.message}`)
-  } finally {
-    mcpTesting.value = false
-  }
-}
-const copyMcpConfig = async () => {
-  const payload = JSON.stringify({
-    name: mcpManifest.value.name || 'yixiu-ai-import',
-    endpoint: mcpManifest.value.endpoint || 'http://127.0.0.1:5000/api/yixiu/mcp',
-    auth: mcpManifest.value.auth || { header: 'Authorization: Bearer <YIXIU_IMPORT_TOKEN>' }
-  }, null, 2)
-  try {
-    await navigator.clipboard.writeText(payload)
-    toast('MCP 配置已复制')
-  } catch {
-    toast('浏览器未授权剪贴板，请手动复制接入地址和鉴权信息')
-  }
-}
+
+// 进入导入页时补齐 MCP 配置与导入记录
+watch([activePage, searchPanel], ([page, pnl]) => {
+  if (page === 'search' && pnl === 'external') { loadMcpManifest(); loadExternalImports() }
+})
 const submitExternalImport = async () => {
   if (!externalImportForm.raw_content.trim()) return toast('请先粘贴 Codex / Claude 的总结、对话或 diff')
   externalImportLoading.value = true
@@ -8676,7 +9082,7 @@ const reviewExternalArtifact = async (artifact, status) => {
 }
 const prepareKnowledgeFromSearch = () => {
   if (!searchResult.value) {
-    searchPanel.value = 'multimodal'
+    searchPanel.value = 'external'
     return toast('请先生成一次 Context Pack')
   }
   Object.assign(knowledgeForm, {
@@ -8694,7 +9100,8 @@ const prepareKnowledgeFromSearch = () => {
       `引用依据：${(searchResult.value.references || []).slice(0, 3).map((item) => item.title).join('、')}`
     ].filter(Boolean).join('\n')
   })
-  searchPanel.value = 'update'
+  activePage.value = 'knowledge'
+  knowledgePanel.value = 'update'
   toast('已根据当前 Context Pack 生成 Memory 草稿')
 }
 const submitTask = async () => {
@@ -8772,8 +9179,8 @@ const prepareMemoryFromTask = (task) => {
     ].join('\n')
   })
   task.memoryStatus = '草稿待审核'
-  activePage.value = 'search'
-  searchPanel.value = 'update'
+  activePage.value = 'knowledge'
+  knowledgePanel.value = 'update'
   selectedTask.value = null
   toast('已从执行 Trace 生成 Memory 草稿，请审核后入库')
 }
@@ -8992,8 +9399,8 @@ const sendOperatorPrompt = async (prompt) => {
   // 高频快捷动作必须立即给出页面结果，不依赖公网模型或后端是否在线。
   if (value === '任务简报') return runOperatorPrimary()
   if (value === '系统状态') return replyLocally(`当前项目：${currentProject.value.name}；活跃任务 ${tasks.value.filter((task) => task.status !== 'completed').length} 项，待 Eval ${tasks.value.filter((task) => task.status === 'review').length} 项，Agent 可用 ${connectedAgents.value.length} 个。后端未连接时，消息会明确标记“未同步”，不会伪装成已送达。`, '系统状态已生成')
-  if (value === '知识更新') { activePage.value = 'search'; searchPanel.value = 'update'; return toast('已打开 Memory Evolution') }
-  if (value === '生成 Context Pack') { activePage.value = 'search'; searchPanel.value = 'multimodal'; searchMultimodalExpanded.value = true; return toast('已打开 Context Pack 组装台') }
+  if (value === '知识更新') { activePage.value = 'knowledge'; knowledgePanel.value = 'update'; return toast('已打开 Memory Evolution') }
+  if (value === '生成 Context Pack') { activePage.value = 'search'; searchPanel.value = 'external'; searchMultimodalExpanded.value = true; return toast('已打开 Context Pack 组装台') }
   if (value === '查看引用') { activePage.value = 'search'; searchPanel.value = searchResult.value ? 'results' : 'multimodal'; return toast(searchResult.value ? '已打开引用依据' : '请先生成 Context Pack') }
   if (value === '推荐 Skill') { activePage.value = 'knowledge'; knowledgePanel.value = 'recheck'; skillStage.value = ''; return toast('已打开 Skill 工厂') }
   if (value === '协作成员') { activePage.value = 'tasks'; taskPanel.value = 'contacts'; return toast('已打开协作成员') }
@@ -9066,8 +9473,8 @@ const sendOperatorPrompt = async (prompt) => {
     return
   }
   if (value.includes('提交沉淀')) {
-    activePage.value = 'search'
-    searchPanel.value = 'update'
+    activePage.value = 'knowledge'
+    knowledgePanel.value = 'update'
     return
   }
   if (value.includes('运行核查')) return runAudit()
@@ -10127,10 +10534,10 @@ const tgApplyStepState = async (step = {}) => {
   if (page === 'search') {
     const pageLabel = String(step.page || step.target || '')
     if (pageLabel.includes('知识网络') || action === 'openKnowledgeGraph') searchPanel.value = 'network'
-    else if (pageLabel.includes('记忆库') || pageLabel.includes('沉淀')) searchPanel.value = 'update'
+    else if (pageLabel.includes('记忆库') || pageLabel.includes('沉淀')) { activePage.value = 'knowledge'; knowledgePanel.value = 'update' }
     else if (pageLabel.includes('资料库')) searchPanel.value = 'library'
     else if (pageLabel.includes('导入')) searchPanel.value = 'import'
-    else searchPanel.value = action === 'summarize' ? 'history' : 'multimodal'
+    else searchPanel.value = action === 'summarize' ? 'history' : 'external'
     if (keyword) {
       searchForm.query = String(keyword)
       if (input.model !== undefined) searchForm.deviceModel = input.model || ''
@@ -10148,10 +10555,9 @@ const tgApplyStepState = async (step = {}) => {
 
   if (page === 'knowledge') {
     // 图谱 / 资料库 / Memory 沉淀都搬到上下文中心了，这里要顺手把页面切过去
-    if (String(step.page || step.target || '').includes('沉淀')) { activePage.value = 'search'; searchPanel.value = 'update' }
+    if (String(step.page || step.target || '').includes('沉淀')) { activePage.value = 'knowledge'; knowledgePanel.value = 'update' }
     else if (String(step.page || step.target || '').includes('Skill 工厂')) knowledgePanel.value = 'recheck'
-    else if (String(step.page || step.target || '').includes('MCP 配置')) knowledgePanel.value = 'mcp'
-    else if (action === 'openKnowledgeGraph' || String(step.page || step.target || '').includes('图谱')) { activePage.value = 'search'; searchPanel.value = 'network'; window.setTimeout(settleGraphChart, 120) }
+        else if (action === 'openKnowledgeGraph' || String(step.page || step.target || '').includes('图谱')) { activePage.value = 'search'; searchPanel.value = 'network'; window.setTimeout(settleGraphChart, 120) }
     else if (String(step.page || step.target || '').includes('资料库')) { activePage.value = 'search'; searchPanel.value = 'library' }
     else knowledgePanel.value = 'files'
     knowledgeKeyword.value = keyword
@@ -10405,7 +10811,7 @@ async function tgClickContactSend() {
 
 const tgTransferAttachmentsToSearch = async (attachments = [], step = {}) => {
   activePage.value = 'search'
-  searchPanel.value = 'multimodal'
+  searchPanel.value = 'external'
   selectedAgentId.value = 'guanwei'
   searchResult.value = null
   selectedAiosReport.value = null
@@ -10547,54 +10953,65 @@ async function executeUIPlan(steps, context = {}) {
 }
 
 const playBootAnimation = async () => {
-  // 安全网：3.5秒后强制关闭启动画面，防止动画卡住
-  const forceClose = window.setTimeout(() => { showSplash.value = false }, 3500)
-  
+  // 兜底：任何异常都不至于把界面卡在开屏
+  const forceClose = window.setTimeout(() => { showSplash.value = false }, 5200)
+
   await nextTick()
   await new Promise((resolve) => window.requestAnimationFrame(resolve))
   const screen = bootScreenRef.value
   const mark = bootMarkRef.value
   const bootLogo = bootLogoRef.value
   const brandLogo = brandLogoRef.value
+  const caption = bootCaptionRef.value
   if (!screen || !mark || !bootLogo || !brandLogo || !mark.animate || !screen.animate) {
     window.clearTimeout(forceClose)
-    window.setTimeout(() => { showSplash.value = false }, 1400)
+    window.setTimeout(() => { showSplash.value = false }, 1500)
     return
   }
 
-  const from = mark.getBoundingClientRect()
+  const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
+
+  // 入场：logo(.08s+..66s) → 标语(.46s+..60s) → 进度条(.62s+..86s)，等它们走完
+  await wait(1180)
+
+  // 标语与进度条先淡出，再让 logo 起飞
+  caption?.animate?.([
+    { opacity: 1, transform: 'translate3d(0,0,0)' },
+    { opacity: 0, transform: 'translate3d(0,-10px,0)' }
+  ], { duration: 280, easing: 'ease-in', fill: 'forwards' })
+
+  await wait(280)
+
+  // 精确落位：按「内容盒」对齐侧栏 logo（brand 有 padding，boot 没有）
+  const from = bootLogo.getBoundingClientRect()
   const to = brandLogo.getBoundingClientRect()
-  const fromCenterX = from.left + from.width / 2
-  const fromCenterY = from.top + from.height / 2
-  const toCenterX = to.left + to.width / 2
-  const toCenterY = to.top + to.height / 2
-  const dx = Math.round(toCenterX - fromCenterX)
-  const dy = Math.round(toCenterY - fromCenterY)
-  const scale = Number((to.width / bootLogo.getBoundingClientRect().width).toFixed(3))
+  const cs = window.getComputedStyle(brandLogo)
+  const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0)
+  const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
+  const toBox = { w: Math.max(1, to.width - padX), h: Math.max(1, to.height - padY) }
+  const scale = Number(Math.min(toBox.w / from.width, toBox.h / from.height).toFixed(4))
+  const dx = Math.round((to.left + to.width / 2) - (from.left + from.width / 2))
+  const dy = Math.round((to.top + to.height / 2) - (from.top + from.height / 2))
+  const midScale = Number((1 - (1 - scale) * 0.74).toFixed(4))
 
   const markMotion = mark.animate([
-    { opacity: 0, transform: 'translate3d(0, 18px, 0) scale(.96)', offset: 0 },
-    { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1)', offset: .26 },
-    { opacity: 1, transform: `translate3d(${Math.round(dx * .72)}px, ${Math.round(dy * .62 - 18)}px, 0) scale(${Math.min(scale + .1, 1)})`, offset: .76 },
+    { opacity: 1, transform: `translate3d(0,0,0) scale(1)`, offset: 0 },
+    { opacity: 1, transform: `translate3d(${Math.round(dx * 0.18)}px, ${Math.round(dy * 0.14 - 12)}px, 0) scale(${Number((1 + (1 - scale) * 0.06).toFixed(4))})`, offset: 0.16 },
+    { opacity: 1, transform: `translate3d(${Math.round(dx * 0.82)}px, ${Math.round(dy * 0.78)}px, 0) scale(${midScale})`, offset: 0.7 },
     { opacity: 1, transform: `translate3d(${dx}px, ${dy}px, 0) scale(${scale})`, offset: 1 }
-  ], {
-    duration: 1580,
-    delay: 900,
-    easing: 'cubic-bezier(.18,.84,.18,1)',
-    fill: 'forwards'
-  })
+  ], { duration: 720, easing: 'cubic-bezier(.34,.72,.2,1)', fill: 'forwards' })
+
+  const gridOut = screen.querySelector('.boot-grid')?.animate?.(
+    [{ opacity: 1 }, { opacity: 0 }],
+    { duration: 460, delay: 1180, easing: 'ease', fill: 'forwards' })
 
   const screenFade = screen.animate([
-    { opacity: 1 },
-    { opacity: 1, offset: .86 },
-    { opacity: 0 }
-  ], {
-    duration: 2800,
-    easing: 'ease',
-    fill: 'forwards'
-  })
+    { opacity: 1, offset: 0 },
+    { opacity: 1, offset: 0.94 },
+    { opacity: 0, offset: 1 }
+  ], { duration: 760, delay: 640, easing: 'ease', fill: 'forwards' })
 
-  await Promise.allSettled([markMotion.finished, screenFade.finished])
+  await Promise.allSettled([markMotion.finished, screenFade.finished, gridOut ? gridOut.finished : Promise.resolve()])
   window.clearTimeout(forceClose)
   showSplash.value = false
 }
@@ -10655,6 +11072,34 @@ onBeforeUnmount(() => {
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 .external-import-list { margin-top: 18px; }
+
+/* 导入面板精简版：表单铺满，去掉说明侧栏 */
+.external-import-layout {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px 16px;
+  border: 1px solid #e5e3dc;
+  border-radius: 14px;
+  background: #fbfaf7;
+}
+.import-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px 14px; }
+.import-form label { display: grid; gap: 7px; min-width: 0; color: #33494e; font-size: 12px; font-weight: 800; }
+.import-form label.wide { grid-column: 1 / -1; }
+.import-form input, .import-form select, .import-form textarea {
+  width: 100%; border: 1px solid #d8e2e3; border-radius: 10px; background: #fbfdfd; color: #111110; outline: 0;
+  transition: border-color .18s, background .18s, box-shadow .18s;
+}
+.import-form input, .import-form select { height: 46px; padding: 0 13px; }
+.import-form textarea { min-height: 124px; padding: 13px; line-height: 1.65; }
+.import-form input:focus, .import-form select:focus, .import-form textarea:focus {
+  border-color: #75aaa5; background: #fff; box-shadow: 0 0 0 3px rgba(22,118,111,.09);
+}
+.import-submit-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.import-submit-row small { color: #93a3a7; font-size: 11.5px; }
+.import-submit-row button { min-width: 168px; flex: 0 0 auto; }
+@media (max-width: 1200px) {
+  .import-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .external-artifact-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
 .external-artifact-grid span { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; min-width: 0; padding: 10px; border: 1px solid #e5ece8; border-radius: 8px; background: #fffdfa; }
 .external-artifact-grid b { color: #244f45; font-size: 12px; }
@@ -10673,9 +11118,39 @@ button { cursor: pointer; }
 .boot-flow { position: absolute; height: 1px; width: 36vw; background: linear-gradient(90deg, transparent, rgba(17,17,16,.16), transparent); opacity: 0; animation: bootFlow 1.4s linear .44s both; }
 .boot-flow.flow-a { top: 39%; left: 12%; }
 .boot-flow.flow-b { top: 57%; right: 10%; animation-delay: .7s; }
+.boot-flow.flow-c { top: 69%; left: 26%; animation-delay: 1.02s; }
+.boot-stage { position: relative; z-index: 1; display: grid; justify-items: center; gap: 30px; }
 .boot-mark { position: relative; display: grid; place-items: center; will-change: transform, opacity; backface-visibility: hidden; }
-.boot-mark img { position: relative; z-index: 2; width: 300px; height: 126px; object-fit: contain; border-radius: 12px; opacity: 0; animation: bootLogoIn .72s ease .18s forwards; will-change: opacity, transform; }
-@keyframes bootLogoIn { from { opacity: 0; transform: scale(.985); } to { opacity: 1; transform: scale(1); } }
+.boot-caption { display: grid; justify-items: center; gap: 18px; }
+.boot-slogan {
+  margin: 0; color: #3d2f14; font-size: 23px; font-weight: 800; letter-spacing: .26em; text-indent: .26em;
+  opacity: 0; animation: bootSloganIn .54s cubic-bezier(.2,.86,.24,1) .36s forwards;
+}
+.boot-slogan span { display: inline-block; width: 1.1em; }
+.boot-progress {
+  width: 236px; height: 3px; border-radius: 999px; background: rgba(61,47,20,.1); overflow: hidden;
+  opacity: 0; animation: bootBarWrapIn .28s ease .5s forwards;
+}
+.boot-progress i {
+  display: block; height: 100%; width: 0; border-radius: 999px;
+  background: linear-gradient(90deg, #c8872e, #e0a94a); animation: bootBarIn .78s cubic-bezier(.42,.2,.2,1) .5s forwards;
+}
+.boot-halo {
+  position: absolute; width: 560px; height: 560px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(200,135,46,.14), rgba(200,135,46,0) 66%);
+  opacity: 0; animation: bootHaloIn 1.5s ease .1s forwards;
+}
+.boot-ring {
+  position: absolute; width: 400px; height: 400px; border: 1px solid rgba(200,135,46,.26); border-radius: 50%;
+  opacity: 0; animation: bootRingIn 1.5s cubic-bezier(.2,.8,.2,1) .18s forwards;
+}
+.boot-mark img { position: relative; z-index: 2; width: 300px; height: 126px; object-fit: contain; border-radius: 0; opacity: 0; animation: bootLogoIn .58s cubic-bezier(.2,.86,.24,1) .06s forwards; will-change: opacity, transform; }
+@keyframes bootLogoIn { from { opacity: 0; transform: translate3d(0, 16px, 0) scale(.94); } to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); } }
+@keyframes bootSloganIn { from { opacity: 0; transform: translate3d(0, 10px, 0); letter-spacing: .5em; } to { opacity: 1; transform: translate3d(0, 0, 0); letter-spacing: .26em; } }
+@keyframes bootBarWrapIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bootBarIn { from { width: 0; } to { width: 100%; } }
+@keyframes bootHaloIn { from { opacity: 0; transform: scale(.86); } to { opacity: 1; transform: scale(1); } }
+@keyframes bootRingIn { from { opacity: 0; transform: scale(.82); } to { opacity: .9; transform: scale(1); } }
 @keyframes bootFlow { 0% { opacity: 0; transform: translate3d(-16vw,0,0); } 18% { opacity: .55; } 100% { opacity: 0; transform: translate3d(16vw,0,0); } }.side-nav { display: flex; flex-direction: column; gap: 18px; padding: 18px 14px; border-right: 1px solid #ddd8d3; background: linear-gradient(180deg, #fbfaf8, #f4f2ef); }
 .side-nav nav button, .collapse-btn { width: 100%; border: 0; border-radius: 12px; background: transparent; color: #484336; }
 .brand { display: block; width: 176px; height: 74px; object-fit: contain; cursor: pointer; background: transparent; filter: drop-shadow(0 8px 12px rgba(17,17,16,.05)); }
@@ -12494,13 +12969,13 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .task-event-heading > span { padding: 5px 9px; border-radius: 999px; background: #e8f3f2; color: var(--teal); font-size: 10px; font-weight: 900; }
 .task-events { position: relative; gap: 0; margin: 0; padding: 8px 4px 8px 2px; overflow: auto; }
 .task-events::before { content: ""; position: absolute; left: 11px; top: 20px; bottom: 20px; width: 1px; background: linear-gradient(#7db5b0, #d7e6e5); }
-.task-events article { position: relative; display: grid; grid-template-columns: 18px 112px minmax(0, 1fr); align-items: start; gap: 9px; min-height: 72px; padding: 11px 9px 11px 0; border-bottom: 1px solid #edf1f2; }
+.task-events article { position: relative; display: grid; grid-template-columns: 20px 132px minmax(0, 1fr); align-items: start; gap: 12px; min-height: 88px; padding: 15px 10px 15px 0; border-bottom: 1px solid #edf1f2; }
 .task-events article:last-child { border-bottom: 0; }
-.task-events article > i { position: relative; z-index: 1; width: 9px; height: 9px; margin: 5px 0 0 7px; border: 2px solid #fff; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 3px #d9eeeb; }
+.task-events article > i { position: relative; z-index: 1; width: 10px; height: 10px; margin: 6px 0 0 7px; border: 2px solid #fff; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 3px #d9eeeb; }
 .task-events article:nth-child(3n+2) > i { background: var(--amber); box-shadow: 0 0 0 3px #f6ead8; }
 .task-events article:nth-child(3n) > i { background: var(--blue); box-shadow: 0 0 0 3px #e0ebf5; }
-.task-events time { color: #52666b; font-family: ui-monospace, "Cascadia Code", monospace; font-size: 11px; font-weight: 800; line-height: 1.5; }
-.task-events p { color: #30464b; font-size: 12px; line-height: 1.65; }
+.task-events time { color: #52666b; font-family: ui-monospace, "Cascadia Code", monospace; font-size: 13px; font-weight: 800; line-height: 1.55; }
+.task-events p { color: #30464b; font-size: 14.5px; line-height: 1.7; }
 .task-events article:hover { background: linear-gradient(90deg, transparent, #f0f7f6); }
 
 /* 知识库页头与图谱工具栏。 */
@@ -13105,6 +13580,12 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .profile-setting-list b, .profile-preference-list b { color: #3a4d57; font-size: 13px; font-weight: 720; white-space: nowrap; }
 .profile-setting-list small { color: #718089; font-size: 12px; }
 .profile-setting-list em { color: #438c61; font-size: 12px; font-style: normal; }
+/* 窄屏下「说明」列被 max-content 的名称列和 auto 的状态列挤没，文字逐字竖排。
+   此处直接隐去说明列，保留名称与状态可读。 */
+@media (max-width: 1400px) {
+  .profile-setting-list small { display: none; }
+  .profile-setting-list button { grid-template-columns: 22px max-content minmax(0, 1fr) auto; }
+}
 .profile-tool-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 8px 20px 4px; }
 .profile-tool-grid button { min-height: 88px; display: grid; place-items: center; gap: 8px; border: 0; border-radius: 14px; background: linear-gradient(180deg, #f7f9fb, #eef3f6); color: #456474; }
 .profile-tool-grid .ui-icon { width: 25px; height: 25px; color: #5f8ec7; }
@@ -13276,21 +13757,49 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .profile-focus-shell .profile-growth-card i { margin-top: 12px; }
 .profile-focus-shell .profile-growth-benefits { align-items: center; gap: 10px; }
 .profile-focus-shell .profile-growth-benefits span { min-height: 58px; }
+
+/* 协作画像卡与右侧「个性化设置」共用第二行，被撑到 383px，而自身内容只有 174px。
+   原先是 align-content:center，上下各留 105px 空白（占卡片 55%）。
+   改为让内容撑满：能力格吸收多余高度、评分与等级块垂直居中、阶梯贴底。
+
+   注意：这些填充规则只在桌面三列栅格（≥1401px）生效。
+   1400px 以下栅格变等宽三列、文字换行变多，行高被内容撑大，1fr 会跟着把每张卡
+   拉到极高（实测 1366px 下账号项被拉到 190px、常用功能按钮 350px）。 */
+@media (min-width: 1401px) {
+  /* 协作画像卡：内容撑满，避免上下各留一大段空白。
+     行高与卡片高度的收紧规则放在下面 .profile-focus-shell 那一组里（那里才生效）。 */
+  .profile-focus-shell .profile-growth-card {
+    align-content: stretch;
+    align-items: stretch;
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .profile-focus-shell .profile-growth-card > div:first-child { display: grid; align-content: center; }
+  .profile-focus-shell .profile-growth-level { align-content: center; }
+  .profile-focus-shell .profile-growth-benefits {
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    align-content: stretch;
+    align-items: stretch;
+  }
+  .profile-focus-shell .profile-growth-benefits span { height: 100%; }
+  .profile-focus-shell .profile-level-ladder { align-self: end; }
+}
 .profile-focus-shell .profile-preference-panel { padding: 16px 18px; }
 .profile-focus-shell .profile-preference-panel .profile-panel-head { margin-bottom: 8px; }
 .profile-focus-shell .profile-preference-list { grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .profile-focus-shell .profile-preference-list button {
-  min-height: 40px;
+  min-height: 34px;
   grid-template-columns: 20px minmax(0, 1fr) auto;
   padding: 0 12px;
   border: 1px solid #edf2f4;
   border-radius: 10px;
   background: #fbfdfe;
 }
-.profile-focus-shell .profile-setting-list button { min-height: 39px; }
-.profile-focus-shell .profile-tool-grid { height: calc(100% - 42px); align-content: center; padding: 4px 10px 0; gap: 12px; }
-.profile-focus-shell .profile-tool-grid button { min-height: 76px; }
-.profile-focus-shell .profile-timeline button { min-height: 45px; }
+/* 个人空间整体压矮：三块列表的行高统一收紧，卡片等高、内容等比填满。
+   之前 39/76/45 的搭配让「账号与安全」撑到 429、协作画像卡撑到 383，整页偏高。 */
+.profile-focus-shell .profile-setting-list button { min-height: 34px; }
+.profile-focus-shell .profile-tool-grid { height: calc(100% - 42px); grid-template-rows: repeat(2, minmax(0, 1fr)); align-content: stretch; padding: 4px 10px 0; gap: 12px; }
+.profile-focus-shell .profile-tool-grid button { min-height: 0; height: 100%; }
+.profile-focus-shell .profile-timeline button { min-height: 44px; }
 .operator-panel.op-theme-tiangong { --op-accent: #2563EB; --op-accent-dark: #1a4cc0; --op-soft: #fafbfd; --op-tint: linear-gradient(178deg, #fcfdfe 0%, #f8fafe 50%, #f2f5fc 100%); }
 .operator-panel.op-theme-guanwei { --op-accent: #6B8E23; --op-accent-dark: #4f6b1a; --op-soft: #fcfcf7; --op-tint: linear-gradient(178deg, #fdfdf8 0%, #fbfcf4 50%, #f7f9ef 100%); }
 .operator-panel.op-theme-zhiju { --op-accent: #FF6B35; --op-accent-dark: #c84d1f; --op-soft: #fffaf8; --op-tint: linear-gradient(178deg, #fffcfa 0%, #fffbf5 50%, #fff6ef 100%); }
@@ -13448,41 +13957,41 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .assistant-attachments span img { width: 30px; height: 30px; border-radius: 7px; object-fit: cover; }
 .assistant-attachments span i { padding: 2px 5px; border-radius: 5px; background: #e6f3f2; color: var(--teal); font-size: 9px; font-style: normal; font-weight: 900; }
 /* 登录与注册：独立门禁页面，不依赖业务接口，避免影响现有服务连接。 */
-.app-shell.auth-shell { display: block; min-width: 0; background: #f2f8fc; }
-.auth-gate { min-height: 100vh; display: grid; grid-template-columns: minmax(520px, 1.08fr) minmax(460px, .92fr); background: #f6fbff; }
-.auth-visual { position: relative; min-height: 100vh; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; padding: 52px 64px 44px; background: linear-gradient(145deg, #e9f8ff 0%, #bfe6ff 46%, #7fc6ef 100%); color: #17364a; }
-.auth-visual::before { content: ""; position: absolute; width: 560px; height: 560px; right: -180px; bottom: -170px; border: 1px solid rgba(255,255,255,.74); border-radius: 50%; box-shadow: 0 0 0 74px rgba(255,255,255,.28), 0 0 0 148px rgba(77,164,219,.08); }
-.auth-visual::after { content: ""; position: absolute; width: 380px; height: 380px; left: -140px; top: 18%; border-radius: 50%; background: rgba(255,255,255,.34); filter: blur(2px); }
-.auth-grid { position: absolute; inset: 0; opacity: .42; background-image: linear-gradient(rgba(44,126,178,.16) 1px, transparent 1px), linear-gradient(90deg, rgba(44,126,178,.16) 1px, transparent 1px); background-size: 54px 54px; mask-image: linear-gradient(135deg, #000, transparent 82%); }
+.app-shell.auth-shell { display: block; min-width: 0; background: #fbf7ee; }
+.auth-gate { min-height: 100vh; display: grid; grid-template-columns: minmax(520px, 1.08fr) minmax(460px, .92fr); background: #fbf7ee; }
+.auth-visual { position: relative; min-height: 100vh; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; padding: 52px 64px 44px; background: linear-gradient(145deg, #fffdf7 0%, #fbf2dc 46%, #f0dfae 100%); color: #4a3a1e; }
+.auth-visual::before { content: ""; position: absolute; width: 560px; height: 560px; right: -180px; bottom: -170px; border: 1px solid rgba(255,255,255,.74); border-radius: 50%; box-shadow: 0 0 0 74px rgba(255,255,255,.5), 0 0 0 148px rgba(196,148,58,.10); }
+.auth-visual::after { content: ""; position: absolute; width: 380px; height: 380px; left: -140px; top: 18%; border-radius: 50%; background: rgba(255,255,255,.45); filter: blur(2px); }
+.auth-grid { position: absolute; inset: 0; opacity: .42; background-image: linear-gradient(rgba(190,139,56,.16) 1px, transparent 1px), linear-gradient(90deg, rgba(190,139,56,.16) 1px, transparent 1px); background-size: 54px 54px; mask-image: linear-gradient(135deg, #000, transparent 82%); }
 .auth-brand, .auth-intro, .auth-footnote { position: relative; z-index: 1; }
-.auth-brand { display: flex; align-items: center; gap: 20px; width: fit-content; padding: 12px 18px 12px 14px; border: 1px solid rgba(255,255,255,.78); border-radius: 20px; background: rgba(255,255,255,.58); box-shadow: 0 18px 38px rgba(44,126,178,.14); backdrop-filter: blur(10px); color: #285a73; font-size: 14px; letter-spacing: .08em; }
-.auth-brand img { width: 190px; height: 82px; padding: 0; object-fit: contain; border-radius: 14px; background: transparent; filter: drop-shadow(0 12px 18px rgba(37,95,130,.12)); }
+.auth-brand { display: flex; align-items: center; gap: 20px; width: fit-content; padding: 12px 18px 12px 14px; border: 1px solid rgba(255,255,255,.85); border-radius: 20px; background: rgba(255,255,255,.66); box-shadow: 0 18px 38px rgba(160,115,40,.14); backdrop-filter: blur(10px); color: #6b5220; font-size: 14px; letter-spacing: .08em; }
+.auth-brand img { width: 190px; height: 82px; padding: 0; object-fit: contain; border-radius: 14px; background: transparent; filter: drop-shadow(0 12px 18px rgba(140,100,30,.12)); }
 .auth-intro { max-width: 650px; margin: auto 0; }
-.auth-intro > p { margin-bottom: 18px; color: #236d91; font-size: 14px; font-weight: 800; letter-spacing: .12em; }
-.auth-intro h1 { margin: 0; color: #183c54; font-size: clamp(42px, 4vw, 68px); line-height: 1.24; letter-spacing: -.04em; text-shadow: 0 1px 0 rgba(255,255,255,.72); }
+.auth-intro > p { margin-bottom: 18px; color: #a06a1c; font-size: 14px; font-weight: 800; letter-spacing: .12em; }
+.auth-intro h1 { margin: 0; color: #3d2f14; font-size: clamp(42px, 4vw, 68px); line-height: 1.24; letter-spacing: -.04em; text-shadow: 0 1px 0 rgba(255,255,255,.72); }
 .auth-capabilities { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 48px; }
-.auth-capabilities span { display: grid; gap: 10px; padding: 18px; border: 1px solid rgba(255,255,255,.68); border-radius: 14px; background: rgba(255,255,255,.45); backdrop-filter: blur(8px); color: #2c6179; font-size: 13px; box-shadow: 0 10px 28px rgba(68,142,186,.08); }
-.auth-capabilities b { color: #237eaf; font-size: 11px; letter-spacing: .12em; }
-.auth-footnote { color: rgba(31,82,108,.66); font-size: 12px; }
-.auth-form-side { display: grid; place-items: center; padding: 48px; background: radial-gradient(circle at 85% 12%, rgba(112,190,235,.16), transparent 28%), #f6fbff; }
-.auth-card { width: min(460px, 100%); display: grid; gap: 22px; padding: 38px; border: 1px solid #d5e8f2; border-radius: 24px; background: rgba(255,255,255,.96); box-shadow: 0 28px 70px rgba(56,118,153,.14); }
-.auth-card-head p { color: #2c8cbd; font-size: 13px; font-weight: 900; letter-spacing: .1em; }
-.auth-card-head h2 { margin: 8px 0; color: #18384c; font-size: 28px; }
-.auth-card-head span { color: #6b8492; font-size: 13px; }
-.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; border-radius: 12px; background: #ecf6fb; }
-.auth-tabs button { min-height: 42px; border: 0; background: transparent; color: #6f8794; font-weight: 800; }
-.auth-tabs button.active { background: #fff; color: #237eaf; box-shadow: 0 5px 14px rgba(56,118,153,.1); }
+.auth-capabilities span { display: grid; gap: 10px; padding: 18px; border: 1px solid rgba(255,255,255,.82); border-radius: 14px; background: rgba(255,255,255,.56); backdrop-filter: blur(8px); color: #6b5220; font-size: 13px; box-shadow: 0 10px 28px rgba(68,142,186,.08); }
+.auth-capabilities b { color: #c8872e; font-size: 11px; letter-spacing: .12em; }
+.auth-footnote { color: rgba(92,70,26,.66); font-size: 12px; }
+.auth-form-side { display: grid; place-items: center; padding: 48px; background: radial-gradient(circle at 85% 12%, rgba(200,150,60,.16), transparent 28%), #fdfaf3; }
+.auth-card { width: min(460px, 100%); display: grid; gap: 22px; padding: 38px; border: 1px solid #ece0c8; border-radius: 24px; background: rgba(255,255,255,.97); box-shadow: 0 28px 70px rgba(151,102,27,.13); }
+.auth-card-head p { color: #c8872e; font-size: 13px; font-weight: 900; letter-spacing: .1em; }
+.auth-card-head h2 { margin: 8px 0; color: #3d2f14; font-size: 28px; }
+.auth-card-head span { color: #8a7a5c; font-size: 13px; }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; border-radius: 12px; background: #f7f0e0; }
+.auth-tabs button { min-height: 42px; border: 0; background: transparent; color: #8a7a5c; font-weight: 800; }
+.auth-tabs button.active { background: #fff; color: #c8872e; box-shadow: 0 5px 14px rgba(151,102,27,.1); }
 .auth-fields { display: grid; gap: 15px; }
-.auth-fields label { display: grid; gap: 7px; color: #345266; font-size: 12px; font-weight: 800; }
-.auth-fields input { width: 100%; height: 48px; padding: 0 14px; border: 1px solid #d1e4ee; border-radius: 11px; outline: 0; color: #18384c; background: #fbfdff; }
-.auth-fields input:focus { border-color: #68b5df; box-shadow: 0 0 0 3px rgba(79,171,224,.14); background: #fff; }
-.remember-row { display: flex; align-items: center; gap: 8px; color: #647a7f; font-size: 12px; }
+.auth-fields label { display: grid; gap: 7px; color: #6b5220; font-size: 12px; font-weight: 800; }
+.auth-fields input { width: 100%; height: 48px; padding: 0 14px; border: 1px solid #eadfc6; border-radius: 11px; outline: 0; color: #3d2f14; background: #fffdf8; }
+.auth-fields input:focus { border-color: #d2a94f; box-shadow: 0 0 0 3px rgba(200,135,46,.16); background: #fff; }
+.remember-row { display: flex; align-items: center; gap: 8px; color: #8a7a5c; font-size: 12px; }
 .remember-row input { accent-color: var(--teal); }
 .auth-error, .form-error { padding: 10px 12px; border: 1px solid #f0c7c0; border-radius: 9px; background: #fff4f2; color: #a84437; font-size: 12px; }
-.auth-submit { min-height: 50px; border: 0; border-radius: 12px; background: linear-gradient(135deg, #247faf, #53b5e8); color: #fff; font-weight: 900; box-shadow: 0 10px 22px rgba(44,140,189,.23); }
-.auth-submit:hover { transform: translateY(-1px); box-shadow: 0 14px 26px rgba(44,140,189,.28); }
-.demo-account { display: grid; grid-template-columns: 1fr auto; gap: 6px 14px; padding: 13px 15px; border: 1px dashed #c9d9d9; border-radius: 11px; background: #f3f8f7; color: #496267; font-size: 11px; }
-.demo-account span { grid-column: 1 / -1; color: var(--teal); font-weight: 900; }
+.auth-submit { min-height: 50px; border: 0; border-radius: 12px; background: linear-gradient(135deg, #c8872e, #e0a94a); color: #fff; font-weight: 900; box-shadow: 0 10px 22px rgba(184,124,32,.25); }
+.auth-submit:hover { transform: translateY(-1px); box-shadow: 0 14px 26px rgba(184,124,32,.30); }
+.demo-account { display: grid; grid-template-columns: 1fr auto; gap: 6px 14px; padding: 13px 15px; border: 1px dashed #e0d0ab; border-radius: 11px; background: #fdf8ec; color: #6b5220; font-size: 11px; }
+.demo-account span { grid-column: 1 / -1; color: #c8872e; font-weight: 900; }
 .demo-account b { font-weight: 700; }
 
 /* 个人资料编辑。 */
@@ -15224,7 +15733,7 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
   .schedule-head-meta { justify-content: flex-start; flex-wrap: wrap; }
 }
 @media (max-width: 1250px) {
-  .home-task-track-row { grid-template-columns: 1fr; }
+  .home-task-track-row { grid-template-columns: minmax(0, 1.42fr) minmax(310px, .78fr); }
   .home-quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .home-task-row { grid-template-columns: 36px minmax(180px, 1.35fr) minmax(130px, .9fr) 100px minmax(120px, .8fr) 18px; gap: 9px; }
   .home-task-compact .home-task-row { grid-template-columns: 34px minmax(180px, 1.35fr) minmax(130px, .9fr) 100px minmax(120px, .8fr) 18px; }
@@ -18168,7 +18677,9 @@ textarea,
 select,
 .global-search,
 .ask-box,
-.bubble,
+/* 排除用户气泡：它的文字是 #fff，被这条 !important 白底覆盖后会变成白字白底、
+   整条消息渲染成一个空框（就是那个"空白对话框"）。 */
+.bubble:not(.user),
 .message > div,
 .library-searchbar,
 .kb-search input,
@@ -18265,8 +18776,16 @@ select,
 .skf-form textarea { min-height: 62px; resize: vertical; }
 .skf-form select[multiple] { min-height: 78px; }
 .skf-form input:focus, .skf-form select:focus, .skf-form textarea:focus { outline: none; border-color: #8fc4bf; box-shadow: 0 0 0 3px rgba(22,118,111,.12); }
-.skf-generate-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
-.skf-pack-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--sf-muted); font-size: 10px; }
+
+/* 简化后的 Skill 生成表单：核心 4 项常显，其余 9 项收在「高级设置」里（值已按轨迹填好） */
+.skf-form-more { margin-top: 11px; }
+.skf-more-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; border: 1px dashed #cfdde6;
+  border-radius: 9px; background: #fafcfd; color: #4d6a70; font: inherit; font-size: 11.5px; font-weight: 800; cursor: pointer; }
+.skf-more-toggle:hover { border-color: #8fc4bf; color: var(--teal); }
+.skf-more-toggle .ui-icon { width: 14px; height: 14px; transition: transform .18s ease; }
+.skf-more-toggle.open .ui-icon { transform: rotate(180deg); }
+.skf-form-advanced { margin-top: 11px; padding-top: 13px; border-top: 1px dashed #e2eaee; }
+.skf-generate-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }.skf-pack-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--sf-muted); font-size: 10px; }
 .skf-pack-preview b { padding: 4px 8px; border: 1px solid #dfe6ea; border-radius: 7px; background: #fff; color: #2f5f59; font-family: ui-monospace, Consolas, monospace; font-size: 10px; }
 .skf-generate-foot button { padding: 10px 18px; border: 0; border-radius: 10px; background: var(--teal); color: #fff; font: inherit; font-size: 12px; font-weight: 900; cursor: pointer; }
 .skf-generate-foot button:disabled { background: #cfd9dd; cursor: not-allowed; }
@@ -18774,38 +19293,42 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .operator-panel .router-decision-card { box-shadow: 0 5px 16px rgba(42,70,68,.035); }
 
 /* 项目态势：工作台先回答“项目走到哪一步、下一步做什么”。 */
-.project-command-panel { position: relative; overflow: hidden; padding: 19px 20px 17px; border-color: #d8e5e5 !important; background: #fff !important; box-shadow: 0 12px 30px rgba(24,60,68,.055) !important; }
+.project-command-panel { position: relative; overflow: hidden; padding: 26px 28px 22px; border-color: #d8e5e5 !important; background: #fff !important; box-shadow: 0 12px 30px rgba(24,60,68,.055) !important; }
 .project-command-panel::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: linear-gradient(180deg, #16766f, #5ba49c); }
-.project-command-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, .36fr); align-items: end; gap: 24px; }
+.project-command-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, .34fr); align-items: end; gap: 28px; }
 .project-command-head > div:first-child { min-width: 0; }
-.project-command-head h2 { margin: 2px 0 5px; color: #213940; font-size: 21px; letter-spacing: -.02em; }
-.project-command-head p:last-child { max-width: 760px; margin: 0; color: #708287; font-size: 11px; line-height: 1.65; }
-.project-command-progress { display: grid; grid-template-columns: auto minmax(100px, 1fr); align-items: center; gap: 5px 12px; }
-.project-command-progress > span { display: grid; grid-row: span 2; gap: 1px; }
-.project-command-progress > span b { color: #145f5a; font-size: 22px; }
-.project-command-progress > span small, .project-command-progress em { color: #84969a; font-size: 9px; font-style: normal; font-weight: 700; }
-.project-command-progress > div { height: 7px; overflow: hidden; border-radius: 999px; background: #e8efef; }
+.project-command-head h2 { margin: 3px 0 7px; color: #1b3238; font-size: 26px; letter-spacing: -.02em; }
+.project-command-head p:last-child { max-width: 720px; margin: 0; color: #708287; font-size: 12.5px; line-height: 1.6; }
+.project-command-progress { display: grid; grid-template-columns: auto minmax(120px, 1fr); align-items: center; gap: 6px 16px; }
+.project-command-progress > span { display: grid; grid-row: span 2; gap: 2px; }
+/* 进度是本卡片的视觉锚点：数字放大到 40px，进度条加粗到 10px */
+.project-command-progress > span b { color: #0f5b56; font-size: 40px; line-height: 1; letter-spacing: -.03em; }
+.project-command-progress > span small, .project-command-progress em { color: #84969a; font-size: 11px; font-style: normal; font-weight: 700; }
+.project-command-progress > div { height: 10px; overflow: hidden; border-radius: 999px; background: #e8efef; }
 .project-command-progress > div i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #16766f, #66aaa3); }
-.project-pulse-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; margin-top: 17px; border: 1px solid #e0e8e9; border-radius: 12px; background: #fbfcfc; }
-.project-pulse-grid button { min-width: 0; display: grid; align-content: start; gap: 6px; padding: 12px 13px; border: 0; border-right: 1px solid #e4eaeb; background: transparent; color: #314c53; text-align: left; font: inherit; cursor: pointer; transition: background .16s ease, transform .16s ease; }
+
+/* 指标条：原来每格是「9px 标签 + 13px 数值 + 9px 说明」三行小字，密集且没有重点。
+   现在去掉说明行（改挂 title 悬浮显示），标签在上、数值放大到 21px，六格等高读起来清爽。 */
+.project-pulse-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; margin-top: 22px; border: 1px solid #e0e8e9; border-radius: 14px; background: #fbfcfc; }
+.project-pulse-grid button { min-width: 0; display: grid; align-content: center; padding: 18px; border: 0; border-right: 1px solid #e4eaeb; background: transparent; color: #314c53; text-align: left; font: inherit; cursor: pointer; transition: background .16s ease, transform .16s ease; }
 .project-pulse-grid button:last-child { border-right: 0; }
 .project-pulse-grid button:hover { z-index: 1; background: #fff; transform: translateY(-1px); }
-.project-pulse-grid button > span { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
-.project-pulse-grid small { color: #829399; font-size: 9px; font-weight: 800; }
-.project-pulse-grid b { color: #29464d; font-size: 13px; }
-.project-pulse-grid em { overflow: hidden; color: #74878d; font-size: 9px; font-style: normal; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+.project-pulse-grid button > span { display: grid; gap: 7px; min-width: 0; }
+.project-pulse-grid small { color: #7d9095; font-size: 10.5px; font-weight: 800; }
+.project-pulse-grid b { color: #1e3d44; font-size: 21px; line-height: 1.1; letter-spacing: -.01em; }
 .project-pulse-grid .tone-red b { color: #a44b43; }
 .project-pulse-grid .tone-amber b { color: #976a26; }
 .project-pulse-grid .tone-teal b, .project-pulse-grid .tone-green b { color: #146b64; }
-.project-command-foot { display: flex; align-items: stretch; gap: 8px; margin-top: 11px; }
-.dynamic-action-label { min-width: 156px; display: grid; align-content: center; gap: 2px; padding-right: 12px; }
-.dynamic-action-label b { color: #355159; font-size: 11px; }
-.dynamic-action-label small { color: #93a0a4; font-size: 8.5px; }
-.project-command-foot > button { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; flex: 1 1 0; gap: 1px 8px; padding: 8px 10px; border: 1px solid #dce6e7; border-radius: 9px; background: #f9fbfb; color: #36545b; text-align: left; font: inherit; cursor: pointer; }
-.project-command-foot > button span { overflow: hidden; font-size: 10px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
-.project-command-foot > button small { overflow: hidden; color: #89999d; font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
+
+.project-command-foot { display: flex; align-items: stretch; gap: 10px; margin-top: 18px; }
+.dynamic-action-label { min-width: 150px; display: grid; align-content: center; gap: 3px; padding-right: 12px; }
+.dynamic-action-label b { color: #2c4a51; font-size: 12.5px; }
+.dynamic-action-label small { color: #93a0a4; font-size: 9.5px; line-height: 1.5; }
+.project-command-foot > button { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; flex: 1 1 0; gap: 2px 10px; padding: 12px 15px; border: 1px solid #dce6e7; border-radius: 12px; background: #f9fbfb; color: #2c4a51; text-align: left; font: inherit; cursor: pointer; }
+.project-command-foot > button span { overflow: hidden; font-size: 12px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
+.project-command-foot > button small { overflow: hidden; color: #89999d; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .project-command-foot > button i { grid-area: 1 / 2 / 3 / 3; align-self: center; color: #6f868b; font-style: normal; }
-.project-command-foot > button.primary { border-color: #1b746d; background: #176d67; color: #fff; }
+.project-command-foot > button.primary { border-color: #1b746d; background: #176d67; color: #fff; box-shadow: 0 8px 18px rgba(23,109,103,.18); }
 .project-command-foot > button.primary small, .project-command-foot > button.primary i { color: rgba(255,255,255,.72); }
 
 /* Skill 推荐同时交代“为什么推荐”和“准备怎么用”。 */
@@ -19123,6 +19646,633 @@ button:disabled { cursor: not-allowed; opacity: .48; }
   .modal-card,
   .task-report-card,
   .knowledge-detail-card { width: min(100%, calc(100vw - 16px)) !important; max-width: 100%; }
+}
+
+/* 服务台：隐藏天工面板后正文单列铺满，并撑满可用高度 */
+.content-shell.service-focus-shell { grid-template-columns: minmax(0, 1fr); }
+.service-desk-page { display: block; height: 100%; min-height: 0; }
+
+/* ── 一键导入引导卡（上下文中心 · 导入页顶部） ─────────────────────────── */
+.import-hero { display: grid; gap: 14px; grid-template-columns: minmax(0, 1.6fr) auto; align-items: start; }
+.import-hero-main h3 { margin: 2px 0 6px; color: var(--sf-ink, #1d3238); font-size: 20px; }
+.import-hero-main p { margin: 0; max-width: 760px; color: #4d656c; font-size: 12.5px; line-height: 1.66; }
+.import-hero-cta { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.import-hero-cta button { padding: 9px 14px; border: 1px solid #dfe6ea; border-radius: 10px; background: #fff;
+  color: #334a51; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
+.import-hero-cta button.primary { border: 0; background: var(--teal, #16766f); color: #fff; }
+.import-hero-prompt { grid-column: 1 / -1; padding: 12px 14px; border: 1px solid #dfe6ea; border-radius: 12px; background: #f7fafb; }
+.import-hero-prompt code { color: #2f474e; font-family: ui-monospace, Consolas, monospace; font-size: 11.5px;
+  line-height: 1.7; word-break: break-word; }
+.import-hero-steps { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;
+  margin: 0; padding: 0; list-style: none; }
+.import-hero-steps li { display: grid; gap: 6px; align-content: start; padding: 12px; border: 1px solid #e8eef1;
+  border-radius: 12px; background: #fff; }
+.import-hero-steps em { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%;
+  background: #eef5f4; color: var(--teal, #16766f); font-size: 11px; font-style: normal; font-weight: 900; }
+.import-hero-steps span { color: #4d656c; font-size: 11.5px; line-height: 1.55; }
+
+/* MCP 接入状态条：地址 / 工具数 / 鉴权 / 延迟 */
+.import-hero-status { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+  padding: 10px 12px; border: 1px solid #e8eef1; border-radius: 12px; background: #f8fbfb; }
+.import-hero-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: #b7c2c6; }
+.import-hero-status.ok .import-hero-dot { background: #16766f; box-shadow: 0 0 0 4px rgba(22,118,111,.12); }
+.import-hero-status.bad .import-hero-dot { background: #b0641c; box-shadow: 0 0 0 4px rgba(176,100,28,.12); }
+.import-hero-status > b { color: #334a51; font-size: 12.5px; }
+.import-hero-status.bad > b { color: #b0641c; }
+.import-hero-meta { display: inline-flex; align-items: baseline; gap: 5px; min-width: 0; }
+.import-hero-meta small { color: #8d9ba0; font-size: 10.5px; }
+.import-hero-meta b, .import-hero-meta code { color: #2f474e; font-size: 11.5px; font-weight: 700; }
+.import-hero-meta code { font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+.import-hero-prompt code { display: block; max-height: 190px; overflow: auto; white-space: pre-wrap; }
+
+/* 展开的接入详情：工具清单 + 上传字段示例 */
+.import-hero-detail { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.import-hero-detail > div { display: grid; gap: 6px; align-content: start; padding: 12px 14px;
+  border: 1px solid #e8eef1; border-radius: 12px; background: #fff; }
+.import-hero-detail b { color: #334a51; font-size: 12px; }
+.import-hero-detail ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.import-hero-detail li { display: grid; gap: 2px; }
+.import-hero-detail li small { color: #7d8b90; font-size: 11px; line-height: 1.5; }
+.import-hero-detail li.empty { color: #a89e8c; font-size: 11.5px; }
+.import-hero-detail code { color: #2f474e; font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+  line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+@media (max-width: 1000px) { .import-hero-detail { grid-template-columns: minmax(0, 1fr); } }
+
+/* 导入记录：折叠成一行，点开才看候选明细 */
+.external-import-list { display: grid; gap: 8px; }
+.import-row { border: 1px solid #e8eef1; border-radius: 12px; background: #fff; overflow: hidden; }
+.import-row > header { display: flex; align-items: center; gap: 12px; padding: 11px 14px; cursor: pointer; }
+.import-row > header:hover { background: #f8fbfb; }
+.import-row-main { display: grid; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.import-row-main b { color: #2f474e; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-row-main small { color: #8d9ba0; font-size: 11px; }
+.import-badge { flex: none; padding: 3px 9px; border-radius: 999px; font-size: 10.5px; font-style: normal; font-weight: 800; }
+.import-badge.pending { background: #fff4e6; color: #a8681c; }
+.import-badge.done { background: #eef5f4; color: #16766f; }
+.import-row-toggle { flex: none; padding: 5px 12px; border: 1px solid #dfe6ea; border-radius: 8px; background: #fff;
+  color: #334a51; font-size: 11.5px; font-weight: 800; }
+.import-row-body { display: grid; gap: 10px; padding: 0 14px 14px; border-top: 1px solid #f0f4f5; }
+.import-row-body > p { margin: 10px 0 0; color: #6d7c82; font-size: 11.5px; line-height: 1.6; }
+.import-artifacts { display: grid; gap: 4px; margin: 10px 0 0; padding: 0; list-style: none; }
+.import-artifacts li { display: grid; grid-template-columns: 96px minmax(0, 1fr) 46px 62px auto;
+  align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; background: #f8fbfb; }
+.import-artifacts li.empty { display: block; color: #a89e8c; background: transparent; }
+.ia-type { color: #334a51; font-size: 11.5px; font-weight: 800; }
+.ia-title { color: #6d7c82; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ia-conf { color: #2f474e; font-size: 11.5px; font-weight: 800; text-align: right; }
+.ia-state { font-size: 10.5px; font-weight: 800; }
+.ia-state.approved { color: #16766f; }
+.ia-state.rejected { color: #b0641c; }
+.ia-state.pending_review { color: #8d9ba0; }
+.ia-actions { display: flex; gap: 5px; justify-content: flex-end; }
+.ia-actions button { padding: 4px 10px; border: 1px solid #dfe6ea; border-radius: 7px; background: #fff;
+  color: #334a51; font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
+.import-row-actions { display: flex; gap: 8px; }
+.import-row-actions button { padding: 6px 12px; border: 1px solid #dfe6ea; border-radius: 8px; background: #fff;
+  color: #334a51; font: inherit; font-size: 11.5px; font-weight: 800; cursor: pointer; }
+.import-empty { margin: 0; padding: 18px; border: 1px dashed #dfe6ea; border-radius: 12px;
+  color: #8d9ba0; font-size: 12px; text-align: center; }
+@media (max-width: 900px) {
+  .import-artifacts li { grid-template-columns: minmax(0, 1fr); }
+  .ia-conf, .ia-state { text-align: left; }
+}
+@media (max-width: 1180px) {
+  .import-hero { grid-template-columns: minmax(0, 1fr); }
+  .import-hero-cta { justify-content: flex-start; }
+  .import-hero-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .import-hero-steps { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---- 导入面板精简：步骤单行 / 提示词折叠 / 记录区 ---- */
+/* 步骤行是辅助说明，不是主操作：底色再淡一档、字号收小，避免和上面的状态条、
+   统计条抢视觉重量（原来这一行和状态条一样醒目，整张卡看着有 5 条横带）。 */
+.import-hero-steps {
+  grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 4px;
+  margin: 0; padding: 8px 14px; list-style: none;
+  border: 0; border-radius: 10px; background: #f7fafb;
+}
+.import-hero-steps li { display: flex; align-items: center; gap: 7px; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.import-hero-steps li + li::before { content: "→"; margin-right: 8px; color: #cbd6da; font-size: 11px; }
+.import-hero-steps em { width: 16px; height: 16px; font-size: 9.5px; background: #e8eff1; color: #7b8f95; }
+.import-hero-steps span { color: #84979d; font-size: 11.5px; line-height: 1.4; }
+
+.import-hero-link {
+  padding: 3px 10px; border: 1px solid #dfe6ea; border-radius: 999px; background: #fff;
+  color: #4d656c; font: inherit; font-size: 11.5px; font-weight: 800; cursor: pointer;
+}
+.import-hero-link:hover { border-color: var(--teal, #16766f); color: var(--teal, #16766f); }
+.import-hero-link:disabled { opacity: .55; cursor: not-allowed; }
+
+.import-hero-prompt { position: relative; }
+.import-hero-prompt.collapsed { max-height: 96px; overflow: hidden; }
+.import-hero-prompt.collapsed code { display: block; max-height: 72px; overflow: hidden; }
+.import-hero-prompt.collapsed::after {
+  content: "";
+  position: absolute; left: 0; right: 0; bottom: 34px; height: 46px;
+  background: linear-gradient(rgba(247,250,251,0), #f7fafb); pointer-events: none;
+}
+.import-prompt-toggle {
+  display: block; width: 100%; margin-top: 8px; padding: 6px 0 0; border: 0;
+  border-top: 1px dashed #e2eaee; background: transparent; color: var(--teal, #16766f);
+  font: inherit; font-size: 11.5px; font-weight: 800; cursor: pointer; text-align: center;
+}
+
+.import-record-panel { display: grid; gap: 12px; }
+.import-record-head { display: flex; align-items: baseline; gap: 10px; }
+.import-record-head b { color: #1d3238; font-size: 14px; }
+.import-record-head small { color: #8fa2a8; font-size: 11.5px; }
+.import-record-head button {
+  margin-left: auto; padding: 6px 12px; border: 1px solid #dfe6ea; border-radius: 9px;
+  background: #fff; color: #334a51; font: inherit; font-size: 11.5px; font-weight: 800; cursor: pointer;
+}
+.import-record-panel .external-import-list { margin-top: 0; }
+
+/* ---- 上下文中心标签：精致分段控件，靠右 ---- */
+.search-agent-hero .tabs {
+  justify-self: end;
+  width: fit-content;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid rgba(22, 118, 111, .13);
+  border-radius: 15px;
+  background: linear-gradient(180deg, #ffffff 0%, #f5fafa 100%);
+  box-shadow: inset 0 1px 0 #fff, 0 8px 22px rgba(30, 74, 78, .055);
+}
+.search-agent-hero .tabs button {
+  position: relative;
+  min-height: 40px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: #5b736f;
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: .02em;
+  transition: color .18s ease, background .2s ease, box-shadow .2s ease, transform .18s ease;
+}
+.search-agent-hero .tabs button:hover {
+  color: var(--teal-dark, #0f5854);
+  background: rgba(22, 118, 111, .07);
+}
+.search-agent-hero .tabs button.active {
+  color: #fff;
+  background: linear-gradient(135deg, #1c837a 0%, #12655f 100%);
+  box-shadow: 0 9px 20px rgba(18, 101, 95, .26), inset 0 1px 0 rgba(255, 255, 255, .2);
+}
+.search-agent-hero .tabs button.active:hover { transform: translateY(-1px); }
+.search-agent-hero .tabs button em { background: #e8f1f0; color: #6d8a86; }
+.search-agent-hero .tabs button.active em { background: rgba(255, 255, 255, .22); color: #fff; }
+
+/* ---- 上下文接力：统计条 / 发送目标 / 记录折叠 ---- */
+.import-hero-stats { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* 统计改成可点击：原来是一排死数据，「181 待审核」这种明显该点进去处理的数字点不动。
+   现在每个都是一枚按钮，点了滚到下方记录列表；desc 挂 title 悬浮可看。 */
+.import-hero-stats > button {
+  display: inline-flex; align-items: baseline; gap: 6px; padding: 8px 13px;
+  border: 1px solid #e6eef0; border-radius: 11px; background: #fbfdfd;
+  font: inherit; cursor: pointer;
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+.import-hero-stats > button:hover {
+  border-color: rgba(22,118,111,.38); background: #fff;
+  box-shadow: 0 6px 14px rgba(30,74,78,.07); transform: translateY(-1px);
+}
+.import-hero-stats > button b { color: #1d3238; font-size: 17px; font-weight: 800; }
+.import-hero-stats > button small { color: #7b8f95; font-size: 11.5px; }
+.import-hero-stats > button.tone-amber { border-color: #f0dcbc; background: #fffaf3; }
+.import-hero-stats > button.tone-amber b { color: #b0741f; }
+.import-hero-stats > button.tone-red b { color: #b3543f; }
+.import-hero-stats > button.tone-green b { color: #16766f; }
+.import-hero-jump {
+  margin-left: auto; padding: 7px 14px; border: 1px solid rgba(22,118,111,.22); border-radius: 999px;
+  background: #fff; color: var(--teal, #16766f); font: inherit; font-size: 11.5px; font-weight: 800; cursor: pointer;
+}
+.import-hero-jump:hover { background: #f2f9f8; }
+
+.import-hero-targets { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.import-hero-targets > small { color: #8fa2a8; font-size: 11.5px; font-weight: 700; }
+.import-hero-targets button {
+  display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px 7px 9px;
+  border: 1px solid #e2eaee; border-radius: 999px; background: #fff;
+  color: #334a51; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer;
+  transition: border-color .18s, box-shadow .18s, transform .18s;
+}
+.import-hero-targets button:hover { border-color: rgba(22,118,111,.4); box-shadow: 0 6px 14px rgba(30,74,78,.08); transform: translateY(-1px); }
+.import-hero-targets button img { width: 16px; height: 16px; object-fit: contain; }
+.import-hero-hint { margin-left: 4px; color: #b0bcc0 !important; font-weight: 400 !important; }
+
+.import-more {
+  align-self: center; margin-top: 4px; padding: 8px 20px; border: 1px dashed #d7e3e5;
+  border-radius: 999px; background: #fbfdfd; color: #4d656c;
+  font: inherit; font-size: 12px; font-weight: 800; cursor: pointer;
+}
+.import-more:hover { border-color: var(--teal, #16766f); color: var(--teal, #16766f); background: #f3faf9; }
+
+/* ---- 上下文接力：字段规范 / 检查清单 / 常见问题 ---- */
+.import-guide { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .85fr); gap: 22px; align-items: start; }
+.import-guide-col { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.import-guide-col > header { display: grid; gap: 3px; }
+.import-guide-col h3 { margin: 0; color: #1d3238; font-size: 16px; }
+.import-guide-col > header small { color: #8fa2a8; font-size: 11.5px; }
+
+.import-field-table { width: 100%; border-collapse: collapse; }
+.import-field-table td { padding: 8px 10px 8px 0; border-bottom: 1px solid #eef3f4; vertical-align: top; }
+.import-field-table tr:last-child td { border-bottom: 0; }
+.import-field-table td:first-child { width: 38%; }
+.import-field-table code {
+  padding: 2px 7px; border-radius: 6px; background: #f2f7f7;
+  color: #1f6b64; font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+}
+.import-field-table td:nth-child(2) { color: #5a7076; font-size: 12px; line-height: 1.6; }
+.import-field-table td:last-child { width: 52px; text-align: right; }
+.import-field-table em {
+  padding: 2px 7px; border-radius: 999px; background: #fdeceb; color: #b3543f;
+  font-size: 10px; font-style: normal; font-weight: 800;
+}
+.import-field-table em.opt { background: #f1f4f5; color: #8b9ba0; }
+
+.import-checklist { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.import-checklist li {
+  display: flex; gap: 9px; align-items: flex-start; padding: 10px 12px;
+  border: 1px solid #e8eff0; border-radius: 11px; background: #fbfdfd;
+}
+.import-checklist b {
+  flex: none; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%;
+  background: #e6f3f1; color: #16766f; font-size: 10.5px;
+}
+.import-checklist span { color: #4d656c; font-size: 12px; line-height: 1.6; }
+
+.import-faq { display: grid; gap: 14px; }
+.import-faq > header { display: grid; gap: 3px; }
+.import-faq > header h3 { margin: 0; color: #1d3238; font-size: 16px; }
+.import-faq-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.import-faq-list article { padding: 13px 15px; border: 1px solid #eef3f4; border-radius: 12px; background: #fbfdfd; }
+.import-faq-list b { display: block; margin-bottom: 6px; color: #1d3238; font-size: 12.5px; }
+.import-faq-list p { margin: 0; color: #5a7076; font-size: 12px; line-height: 1.7; }
+
+/* ---- 知识网络：搜索框靠左置顶，控制组靠右 ---- */
+.graph-toolbar-main {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  /* 原来是 justify-items: end —— 搜索框被推到右端贴着控制组，看着像缩进了一大截。
+     改为靠左，控制组仍贴右，形成标准工具栏布局。 */
+  justify-items: start;
+}
+/* 控制组原本 grid-column:1/-1 跨整行，会和搜索框重叠，改为只占第二列 */
+.graph-toolbar-main .graph-controls {
+  grid-column: auto !important;
+  justify-self: end;
+}
+.graph-toolbar-main .graph-search,
+.graph-toolbar-main .graph-search.expanded,
+.graph-toolbar-main .graph-search:focus-within {
+  width: 340px !important;
+  max-width: 100%;
+  justify-self: start;
+}
+@media (max-width: 1180px) {
+  .graph-toolbar-main { grid-template-columns: minmax(0, 1fr) !important; justify-items: stretch; }
+  .graph-toolbar-main .graph-search,
+  .graph-toolbar-main .graph-search.expanded,
+  .graph-toolbar-main .graph-search:focus-within { width: 100% !important; }
+  .graph-toolbar-main .graph-controls { grid-column: 1 / -1 !important; }
+}
+
+/* ---- MCP 工具库 ---- */
+.mcp-library { display: grid; gap: 22px; }
+.mcp-block { display: grid; gap: 14px; }
+.mcp-block-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.mcp-block-head h3 { margin: 2px 0 5px; color: #1d3238; font-size: 19px; }
+.mcp-block-head small { color: #7b9096; font-size: 12.5px; line-height: 1.6; }
+.mcp-state { display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border-radius: 999px; background: #f4f6f6; color: #7b8f95; font-size: 12px; font-weight: 800; white-space: nowrap; }
+.mcp-state i { width: 8px; height: 8px; border-radius: 50%; background: #b7c2c6; }
+.mcp-state.ok { background: #eef7f5; color: #16766f; }
+.mcp-state.ok i { background: #16766f; box-shadow: 0 0 0 4px rgba(22,118,111,.12); }
+
+.mcp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+.mcp-card {
+  display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 12px; align-items: start;
+  padding: 14px 15px; border: 1px solid #e6edef; border-radius: 14px; background: #fff;
+  transition: border-color .18s, box-shadow .18s, transform .18s;
+}
+.mcp-card:hover { border-color: rgba(22,118,111,.35); box-shadow: 0 10px 24px rgba(30,74,78,.07); transform: translateY(-1px); }
+.mcp-card.own { background: linear-gradient(180deg, #fbfdfd 0%, #ffffff 100%); border-color: #d9e8e6; }
+.mcp-logo {
+  width: 48px; height: 48px; display: grid; place-items: center; border-radius: 12px;
+  background: #f6f9f9; border: 1px solid #eaf0f1; overflow: hidden;
+}
+.mcp-logo img { width: 30px; height: 30px; object-fit: contain; }
+.mcp-logo .ui-icon { width: 22px; height: 22px; }
+.mcp-logo.tone-teal { background: #e9f4f2; color: #16766f; border-color: #d8ebe8; }
+.mcp-logo.tone-amber { background: #fdf3e2; color: #b0741f; border-color: #f3e5c9; }
+.mcp-logo.tone-violet { background: #f1eefa; color: #6b53a8; border-color: #e5dff5; }
+.mcp-logo.tone-green { background: #e9f4ec; color: #2f7d4f; border-color: #dceade; }
+.mcp-logo.tone-blue { background: #eaf1f8; color: #3979b8; border-color: #dde8f3; }
+.mcp-body { display: grid; gap: 5px; min-width: 0; }
+.mcp-body b { color: #1d3238; font-size: 13.5px; }
+.mcp-body code {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #7b9096; font-family: ui-monospace, Consolas, monospace; font-size: 10.5px;
+}
+.mcp-body p { margin: 0; color: #5a7076; font-size: 12px; line-height: 1.65; }
+.mcp-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+.mcp-tags em { padding: 2px 8px; border-radius: 999px; background: #f2f6f6; color: #6d8489; font-size: 10px; font-style: normal; font-weight: 800; }
+.mcp-card > button {
+  align-self: center; padding: 7px 12px; border: 1px solid #e1e9ea; border-radius: 9px;
+  background: #fff; color: #4d656c; font: inherit; font-size: 11.5px; font-weight: 800; cursor: pointer; white-space: nowrap;
+}
+.mcp-card > button:hover { border-color: var(--teal, #16766f); color: var(--teal, #16766f); }
+.mcp-card.own > button { border-color: rgba(22,118,111,.32); color: var(--teal, #16766f); }
+
+.mcp-endpoint { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border: 1px dashed #dce8e6; border-radius: 11px; background: #fbfdfd; }
+.mcp-endpoint small { color: #8fa2a8; font-size: 11.5px; }
+.mcp-endpoint code { color: #1f6b64; font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }
+
+.mcp-clients { display: flex; flex-wrap: wrap; gap: 10px; }
+.mcp-clients span {
+  display: inline-flex; align-items: center; gap: 8px; padding: 9px 15px 9px 11px;
+  border: 1px solid #e6edef; border-radius: 999px; background: #fff;
+}
+.mcp-clients img { width: 18px; height: 18px; object-fit: contain; }
+.mcp-clients b { color: #3d5459; font-size: 12.5px; }
+@media (max-width: 1200px) {
+  .mcp-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---- 首页项目脉搏：项目切换 ---- */
+.project-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
+.project-switch > small { color: #93a3a7; font-size: 11.5px; font-weight: 800; }
+.project-switch > em { margin-left: auto; color: #7b8f95; font-size: 11.5px; font-style: normal; font-weight: 700; }
+.project-switch button {
+  padding: 7px 16px; border: 1px solid #dfe8e9; border-radius: 999px; background: #fff;
+  color: #4d656c; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer;
+  transition: border-color .18s ease, background .2s ease, color .18s ease, box-shadow .2s ease, transform .18s ease;
+}
+.project-switch button:hover { border-color: rgba(22,118,111,.4); color: var(--teal-dark, #0f5854); }
+.project-switch button.active {
+  border-color: transparent; color: #fff;
+  background: linear-gradient(135deg, #1c837a 0%, #12655f 100%);
+  box-shadow: 0 8px 18px rgba(18,101,95,.22);
+}
+.project-switch button.active:hover { transform: translateY(-1px); }
+
+/* ---- 协作成员界面打磨 ---- */
+.chat-workbench {
+  border-radius: 18px;
+  border: 1px solid #dbe9e7;
+  box-shadow: 0 16px 40px rgba(24,60,68,.06);
+  background: #fff;
+}
+
+/* 左栏 */
+.conversation-list { background: linear-gradient(180deg, #fbfdfd 0%, #f6fbfa 100%); border-right: 1px solid #e2eeec; }
+.contact-toolbar { border-bottom: 1px solid #e8f1ef; }
+.conversation-scroll > button {
+  border: 1px solid transparent; border-radius: 12px; transition: background .16s ease, border-color .16s ease, transform .16s ease;
+}
+.conversation-scroll > button:hover { background: #fff; border-color: #e2eeec; }
+.conversation-scroll > button.active {
+  background: #fff; border-color: rgba(22,118,111,.28); box-shadow: 0 8px 18px rgba(24,60,68,.06);
+}
+
+/* 中栏 */
+.chat-title { background: linear-gradient(180deg, #ffffff 0%, #fbfdfd 100%); }
+.chat-context-strip > span {
+  border: 1px solid #e6f0ee; border-radius: 11px; background: #fff; padding: 9px 13px;
+}
+.chat-messages.is-empty { align-content: center; justify-items: center; }
+.chat-empty { display: grid; justify-items: center; gap: 10px; max-width: 420px; text-align: center; padding: 24px; }
+.chat-empty-art {
+  width: 62px; height: 62px; display: grid; place-items: center; border-radius: 20px;
+  background: linear-gradient(135deg, #eef7f5, #e3f1ee); color: #1f7a6f;
+  box-shadow: inset 0 1px 0 #fff, 0 10px 22px rgba(24,60,68,.07);
+}
+.chat-empty-art .ui-icon { width: 26px; height: 26px; }
+.chat-empty b { color: #1d3238; font-size: 15px; }
+.chat-empty p { margin: 0; color: #7b9096; font-size: 12.5px; line-height: 1.75; }
+.chat-empty-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 4px; }
+.chat-empty-actions button {
+  padding: 8px 16px; border: 1px solid #dfeae8; border-radius: 999px; background: #fff;
+  color: #4d656c; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer;
+  transition: border-color .18s, color .18s, transform .18s, box-shadow .18s;
+}
+.chat-empty-actions button:hover { border-color: rgba(22,118,111,.4); color: var(--teal-dark, #0f5854); transform: translateY(-1px); }
+.chat-empty-actions button.primary {
+  border-color: transparent; color: #fff;
+  background: linear-gradient(135deg, #1c837a, #12655f); box-shadow: 0 8px 18px rgba(18,101,95,.22);
+}
+
+/* 输入区 */
+.chat-compose-tools button {
+  border: 1px solid #e4efec; border-radius: 9px; background: #fff;
+  transition: border-color .16s ease, color .16s ease, background .16s ease;
+}
+.chat-compose-tools button:hover { border-color: rgba(22,118,111,.38); color: var(--teal-dark, #0f5854); background: #f6fbfa; }
+.chat-compose-editor input { border: 1px solid #dfeae8; border-radius: 12px; background: #fbfdfd; }
+.chat-compose-editor input:focus { border-color: #75aaa5; background: #fff; box-shadow: 0 0 0 3px rgba(22,118,111,.09); }
+.chat-compose-editor button.primary {
+  border-radius: 12px; border: 0;
+  background: linear-gradient(135deg, #1c837a, #12655f); box-shadow: 0 8px 18px rgba(18,101,95,.2);
+}
+
+/* 右栏 */
+.collab-info { background: linear-gradient(180deg, #fbfdfd 0%, #f6fbfa 100%); }
+.group-profile { border-bottom: 1px solid #e8f1ef; }
+.detail-grid > * , .collab-info .detail-grid span {
+  border: 1px solid #e8f1ef; border-radius: 11px; background: #fff;
+}
+.collab-info .side-section-title { border-bottom: 1px solid #e8f1ef; }
+
+/* ---- Skill 工厂：卡片图标 ---- */
+.skf-icon {
+  flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px;
+  background: #f1f6f5; border: 1px solid #e6efed; color: #16766f;
+}
+.skf-icon .ui-icon { width: 19px; height: 19px; }
+.skf-icon.tone-teal { background: #e9f4f2; color: #16766f; border-color: #d8ebe8; }
+.skf-icon.tone-blue { background: #eaf1f8; color: #3979b8; border-color: #dde8f3; }
+.skf-icon.tone-amber { background: #fdf3e2; color: #b0741f; border-color: #f3e5c9; }
+.skf-icon.tone-violet { background: #f1eefa; color: #6b53a8; border-color: #e5dff5; }
+.skf-icon.tone-green { background: #e9f4ec; color: #2f7d4f; border-color: #dceade; }
+.skf-icon.tone-coral { background: #fbeeea; color: #c2563f; border-color: #f2ddd6; }
+.skf-icon.tone-slate { background: #f1f4f5; color: #6d8489; border-color: #e7edee; }
+.skf-card-head { align-items: flex-start; gap: 11px; }
+
+/* ---- 项目脉搏：紧凑版 ---- */
+.project-command-panel { padding: 17px 20px 15px !important; }
+.project-command-head { gap: 18px; }
+.project-command-head h2 { margin: 2px 0 5px; font-size: 20px; }
+.project-command-head p:last-of-type { max-width: 620px; font-size: 12px; }
+.project-command-head .eyebrow { font-size: 11.5px; }
+.project-command-progress { gap: 6px; }
+.project-command-progress span b { font-size: 24px; }
+
+.project-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.project-switch select {
+  height: 30px; padding: 0 28px 0 10px; border: 1px solid #dfe8e9; border-radius: 8px;
+  background: #fff url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b8b86' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 7px center / 13px 13px;
+  color: #33494e; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer;
+  appearance: none; -webkit-appearance: none; outline: 0; max-width: 260px;
+}
+.project-switch select:hover { border-color: rgba(22,118,111,.4); }
+.project-switch select:focus { border-color: #75aaa5; box-shadow: 0 0 0 3px rgba(22,118,111,.1); }
+.project-switch em { color: #8fa2a8; font-size: 11.5px; font-style: normal; font-weight: 700; }
+
+.project-pulse-grid { margin-top: 14px; border-radius: 12px; }
+.project-pulse-grid button { padding: 12px 14px; }
+.project-pulse-grid button small { font-size: 11.5px; }
+.project-pulse-grid button b { font-size: 19px; }
+
+/* 指标格上的 tone-* 会命中别处给提示卡定义的全局 .tone-amber/.tone-violet
+   （带 !important 的琥珀/紫色底与边框），导致「待审记忆」「待评测技能」等格子
+   莫名染上色块。这里把底色和分隔线还原成指标条自己的样式，颜色只保留在数字上。 */
+.project-pulse-grid button[class*='tone-'] {
+  background: transparent !important;
+  border-color: #e4eaeb !important;
+}
+
+.project-command-foot { margin-top: 14px; gap: 10px; }
+
+/* ================= 协作成员：折叠与交互修正 ================= */
+
+/* 1) 彻底消除横向滚动条残影 */
+.chat-workbench { overflow: hidden; }
+.conversation-list,
+.conversation-scroll,
+.chat-main,
+.chat-messages,
+.collab-info { overflow-x: hidden; }
+.conversation-scroll { scrollbar-width: thin; scrollbar-color: #cfe0dd transparent; }
+.conversation-scroll::-webkit-scrollbar { width: 7px; height: 0; }
+.conversation-scroll::-webkit-scrollbar-thumb { border-radius: 999px; background: #cfe0dd; }
+.conversation-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* 2) 折叠按钮：统一成方形圆角图标按钮 */
+.contact-collapse-btn,
+.group-settings-head button {
+  width: 30px; height: 30px; min-width: 30px; min-height: 30px; padding: 0;
+  display: grid; place-items: center;
+  border: 1px solid #dfeae8; border-radius: 10px; background: #fff;
+  color: #6d8489; font-size: 14px; font-weight: 900; line-height: 1;
+  cursor: pointer; transition: border-color .16s ease, color .16s ease, background .16s ease, transform .16s ease;
+}
+.contact-collapse-btn:hover,
+.group-settings-head button:hover {
+  border-color: rgba(22,118,111,.42); color: var(--teal-dark, #0f5854);
+  background: #f3faf8; transform: translateY(-1px);
+}
+.contact-collapse-btn:active,
+.group-settings-head button:active { transform: translateY(0); }
+
+/* 3) 左栏折叠态：头像轨 */
+.chat-workbench.left-collapsed .contact-toolbar {
+  display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center;
+  gap: 10px; padding: 12px 0; border-bottom: 1px solid #e8f1ef;
+}
+.chat-workbench.left-collapsed .conversation-scroll { padding: 8px 0 12px; gap: 4px; }
+.chat-workbench.left-collapsed .conversation-scroll > button {
+  min-height: 56px; margin: 0 auto; width: 52px;
+  grid-template-columns: 40px; justify-content: center; align-items: center;
+  padding: 6px 0; border: 1px solid transparent; border-radius: 13px;
+}
+.chat-workbench.left-collapsed .conversation-scroll > button:hover { background: #fff; border-color: #e2eeec; }
+.chat-workbench.left-collapsed .conversation-scroll > button.active {
+  background: #fff; border-color: rgba(22,118,111,.32); box-shadow: 0 6px 16px rgba(24,60,68,.07);
+}
+.chat-workbench.left-collapsed .conversation-scroll > button img { width: 40px; height: 40px; border-radius: 12px; }
+.chat-workbench.left-collapsed .conversation-scroll i { left: 38px; top: 6px; }
+
+/* 4) 右栏折叠态：竖排标签 + 展开按钮，居中规整 */
+.chat-workbench.right-collapsed .collab-info {
+  background: linear-gradient(180deg, #fbfdfd 0%, #f4faf9 100%);
+  overflow-x: hidden;
+}
+.chat-workbench.right-collapsed .group-settings-head {
+  height: 100%; min-height: 100%; display: grid; align-content: start; justify-items: center;
+  gap: 14px; padding: 14px 0; border-bottom: 0; writing-mode: horizontal-tb;
+}
+.chat-workbench.right-collapsed .group-settings-head h3 {
+  margin: 0; writing-mode: vertical-rl; text-orientation: mixed;
+  color: #6d8489; font-size: 12px; font-weight: 800; letter-spacing: .22em;
+}
+.chat-workbench.right-collapsed .group-settings-head button {
+  writing-mode: horizontal-tb; border-radius: 10px;
+}
+
+/* 5) 消息气泡：双方都有实体气泡 */
+.chat-messages { gap: 16px; }
+.message { align-items: flex-start; }
+.message > img {
+  width: 34px; height: 34px; flex: none; margin-top: 2px; border-radius: 11px;
+  border: 2px solid #fff; box-shadow: 0 3px 10px rgba(31,69,75,.1);
+}
+.message > div { padding: 11px 14px; border: 1px solid #e8f0ee; box-shadow: 0 2px 8px rgba(31,69,75,.045); }
+.message.peer > div { background: #fff; border-radius: 6px 16px 16px 16px; }
+.message.mine > div {
+  background: linear-gradient(135deg, #e9f6f4 0%, #ddf0ee 100%);
+  border-color: #d3e9e6; border-radius: 16px 6px 16px 16px;
+}
+.message > div p { margin: 0; line-height: 1.7; }
+
+/* 6) 消息里的任务卡片 */
+.message-card {
+  display: grid; gap: 3px; width: 100%; margin-top: 9px; padding: 10px 12px;
+  border: 1px solid #e2ecea; border-radius: 11px; background: #f8fcfb;
+  text-align: left; cursor: pointer; transition: border-color .16s ease, background .16s ease, transform .16s ease;
+}
+.message-card:hover { border-color: rgba(22,118,111,.42); background: #f1faf8; transform: translateY(-1px); }
+.message-card b { color: #1f5a55; font-size: 12.5px; }
+.message-card small { color: #7b9096; font-size: 11.5px; }
+.message-delivery { display: block; margin-top: 5px; color: #9aacb0; font-size: 10.5px; }
+
+/* 7) 输入区工具按钮 */
+.chat-compose-tools button {
+  min-height: 32px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid #e4efec; border-radius: 9px; background: #fff; color: #5a7076;
+  font: inherit; font-size: 11.5px; font-weight: 800; cursor: pointer;
+  transition: border-color .16s ease, color .16s ease, background .16s ease;
+}
+.chat-compose-tools button:hover { border-color: rgba(22,118,111,.38); color: var(--teal-dark, #0f5854); background: #f6fbfa; }
+.chat-compose-tools button.recording { border-color: #e6a89c; color: #b3543f; background: #fdf3f1; }
+
+/* 发送方气泡：提高对比度，和对方明确区分 */
+.chat-messages .message.mine > div {
+  background: linear-gradient(135deg, #dcf0ed 0%, #cbe7e2 100%) !important;
+  border-color: #b9ddd6 !important;
+  color: #17474a !important;
+}
+.chat-messages .message.peer > div {
+  background: #ffffff !important;
+  border-color: #e8f0ee !important;
+}
+.chat-messages .message.mine .message-delivery { color: #6f9a95 !important; }
+
+/* ---- Skill 推荐榜：去掉匹配度后的列布局 ---- */
+.home-task-row.skill-row {
+  grid-template-columns: 34px minmax(190px, 1.7fr) minmax(112px, .68fr) minmax(96px, .5fr) 72px 20px;
+  gap: 12px;
+  align-items: center;
+}
+.home-task-row.skill-row .task-device-block b { font-size: 15px; }
+.home-task-row.skill-row .task-device-block em {
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+}
+.home-task-row.skill-row .task-fault-block > span > b {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.home-task-row.skill-row .task-state-block { display: grid; place-items: center; }
+.home-task-row.skill-row .task-state-block .badge { white-space: nowrap; }
+.home-task-row.skill-row .task-owner-block > span > small { white-space: nowrap; }
+.home-task-row.skill-row .task-owner-block > i { flex: none; }
+
+@media (max-width: 1400px) {
+  .home-task-row.skill-row {
+    grid-template-columns: 30px minmax(150px, 1.5fr) minmax(96px, .62fr) minmax(84px, .46fr) 66px 18px;
+    gap: 9px;
+  }
 }
 </style>
 

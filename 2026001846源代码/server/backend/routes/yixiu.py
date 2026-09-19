@@ -13,7 +13,7 @@ import mimetypes
 import os
 import sqlite3
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from flask import Blueprint, current_app, g, request, send_file
@@ -291,6 +291,19 @@ def _db() -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS idx_yixiu_task_handoffs_task
           ON yixiu_task_handoffs(task_id, created_at);
+        CREATE TABLE IF NOT EXISTS yixiu_agent_relays (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          step_key TEXT NOT NULL,
+          from_agent TEXT DEFAULT '',
+          action TEXT DEFAULT '',
+          consumes_json TEXT DEFAULT '[]',
+          envelope_json TEXT DEFAULT '{}',
+          degraded INTEGER DEFAULT 0,
+          created_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_yixiu_agent_relays_run
+          ON yixiu_agent_relays(run_id, created_at);
         CREATE TABLE IF NOT EXISTS yixiu_knowledge_versions (
           id TEXT PRIMARY KEY,
           knowledge_id TEXT NOT NULL,
@@ -607,6 +620,29 @@ def _db() -> sqlite3.Connection:
           ON external_ai_imports(project_id, provider, imported_at);
         CREATE INDEX IF NOT EXISTS idx_external_ai_artifacts_import
           ON external_ai_artifacts(import_id, artifact_type, review_status);
+        CREATE TABLE IF NOT EXISTS service_diagnoses (
+          id TEXT PRIMARY KEY, account TEXT, project TEXT,
+          transcript TEXT DEFAULT '[]', report TEXT DEFAULT '{}',
+          status TEXT DEFAULT 'draft', created_at TEXT, updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS service_requisitions (
+          id TEXT PRIMARY KEY, diagnosis_id TEXT, account TEXT, title TEXT, goal TEXT,
+          inputs TEXT, outputs TEXT, cycle TEXT, price TEXT,
+          acceptance TEXT DEFAULT '[]', tasks TEXT DEFAULT '[]',
+          positions TEXT DEFAULT '[]', status TEXT DEFAULT 'open', created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS service_hostings (
+          id TEXT PRIMARY KEY, account TEXT, requisition_id TEXT, name TEXT, plan TEXT,
+          cycle TEXT, price TEXT, next_run_at TEXT, quota_runs INTEGER DEFAULT 4,
+          used_runs INTEGER DEFAULT 0, status TEXT DEFAULT 'running', created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS service_hosting_runs (
+          id TEXT PRIMARY KEY, hosting_id TEXT, started_at TEXT, finished_at TEXT,
+          status TEXT DEFAULT 'success', duration TEXT, cost REAL DEFAULT 0,
+          artifacts TEXT DEFAULT '[]', reviewed INTEGER DEFAULT 0, note TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_service_runs_hosting
+          ON service_hosting_runs(hosting_id, started_at);
         """
     )
     # 预置模板数据
@@ -615,6 +651,7 @@ def _db() -> sqlite3.Connection:
     _seed_agent_configs(conn)
     _seed_agent_teams(conn)
     _seed_aios_channels(conn)
+    _seed_service_desk(conn)
     _ensure_skill_columns(conn)
     # 公网环境不自动创建可预测的演示凭据；本机演示需显式开启。
     demo_account_enabled = os.getenv("YIXIU_ENABLE_DEMO_ACCOUNT", "").strip().lower() in {"1", "true", "yes"}
@@ -1479,6 +1516,162 @@ def _demo_tasks(status: str = "") -> list[dict]:
             "sop": ["梳理需求", "改造接口", "更新前端状态", "补充回归用例", "记录决策"],
             "recheck": {"status": "waiting", "result": "", "comment": ""},
         },
+        {
+            "id": "tm-3",
+            "workOrderNo": "TM-20260910-003",
+            "title": "智能检索多模态上下文增强",
+            "equipment_name": "上下文中心",
+            "equipment_no": "repo/yixiu-web",
+            "equipment_model": "Vue 3 + ECharts",
+            "equipment_category": "前端体验",
+            "fault_code": "FE-207",
+            "fault_type": "功能改造",
+            "projectProgressSummary": "多模态证据分层规则已定稿，检索链路联调中，向量召回精度待优化。",
+            "description": "检索结果支持图片与文档混合引用，组包时按证据类型分层排序。",
+            "severity": "medium",
+            "status": "in_progress",
+            "assignee_name": "陈程",
+            "collaborators": ["观微｜Context Engine", "聪明的一休"],
+            "current_step": "证据分层规则联调",
+            "progress": 62,
+            "due_at": "2026-09-22 18:00",
+            "created_at": "2026-09-10 09:10",
+            "tools": ["多模态解析", "向量检索", "图谱查询"],
+            "parts": ["证据分层 Skill", "多模态 Memory"],
+            "safety": ["图片脱敏", "来源可追溯"],
+            "sop": ["梳理证据类型", "定义分层规则", "联调检索链路", "补回归用例"],
+            "recheck": {"status": "waiting", "result": "", "comment": ""},
+        },
+        {
+            "id": "tm-4",
+            "workOrderNo": "TM-20260911-004",
+            "title": "Skill 工厂候选审核流程改造",
+            "equipment_name": "能力中心",
+            "equipment_no": "repo/yixiu-web",
+            "equipment_model": "Vue 3 + Flask",
+            "equipment_category": "流程改造",
+            "fault_code": "PR-131",
+            "fault_type": "流程改造",
+            "projectProgressSummary": "批量审核与退回理由留痕已开发完成，等待人工复核后合并。",
+            "description": "候选 Skill 增加批量审核与退回理由留痕，审核记录进入证据链。",
+            "severity": "medium",
+            "status": "review",
+            "assignee_name": "王铭",
+            "collaborators": ["明鉴｜Eval Lab", "聪明的一休"],
+            "current_step": "等待人工复核",
+            "progress": 82,
+            "due_at": "2026-09-20 18:00",
+            "created_at": "2026-09-11 10:20",
+            "tools": ["审核留痕", "版本对比"],
+            "parts": ["审核 Skill", "证据链 Memory"],
+            "safety": ["退回需填理由", "审核人可追溯"],
+            "sop": ["梳理审核节点", "补充留痕字段", "改造审核接口", "跑一遍回归"],
+            "recheck": {"status": "waiting", "result": "", "comment": ""},
+        },
+        {
+            "id": "tm-5",
+            "workOrderNo": "TM-20260912-005",
+            "title": "Memory 图谱关系抽取优化",
+            "equipment_name": "知识网络",
+            "equipment_no": "repo/yixiu",
+            "equipment_model": "Python + LightRAG",
+            "equipment_category": "算法服务",
+            "fault_code": "ALG-058",
+            "fault_type": "算法优化",
+            "projectProgressSummary": "带类型语义关系抽取已灰度上线，正在对比连线质量与无效连线比例。",
+            "description": "关系抽取从共现升级为带类型的语义关系，降低无效连线比例。",
+            "severity": "high",
+            "status": "in_progress",
+            "assignee_name": "李志勇",
+            "collaborators": ["观微｜Context Engine", "和鸣｜Memory Evolution"],
+            "current_step": "关系类型回归对比",
+            "progress": 45,
+            "due_at": "2026-09-24 18:00",
+            "created_at": "2026-09-12 14:05",
+            "tools": ["关系抽取", "图谱评估"],
+            "parts": ["关系类型 Skill", "抽取结果 Memory"],
+            "safety": ["抽取结果需人工抽检", "错误关系可回滚"],
+            "sop": ["定义关系类型", "改造抽取链路", "对比连线质量", "补评估用例"],
+            "recheck": {"status": "waiting", "result": "", "comment": ""},
+        },
+        {
+            "id": "tm-6",
+            "workOrderNo": "TM-20260913-006",
+            "title": "托管运行额度与异常告警",
+            "equipment_name": "服务台",
+            "equipment_no": "repo/yixiu-web",
+            "equipment_model": "Vue 3 + Flask",
+            "equipment_category": "功能改造",
+            "fault_code": "FE-214",
+            "fault_type": "功能改造",
+            "projectProgressSummary": "额度口径已确认，正在评估对托管运行与告警链路的影响面。",
+            "description": "托管服务增加月度额度、超额提示与运行异常告警，可直接定位到具体服务。",
+            "severity": "medium",
+            "status": "pending",
+            "assignee_name": "聪明的一休",
+            "collaborators": ["执矩｜Task Execution"],
+            "current_step": "需求澄清与影响面评估",
+            "progress": 15,
+            "due_at": "2026-09-26 18:00",
+            "created_at": "2026-09-13 08:40",
+            "tools": ["额度统计", "告警通道"],
+            "parts": ["额度规则 Memory", "告警 Skill"],
+            "safety": ["超额先提醒后暂停", "暂停不影响已归档产物"],
+            "sop": ["确认额度口径", "加告警规则", "补异常定位入口", "灰度验证"],
+            "recheck": {"status": "waiting", "result": "", "comment": ""},
+        },
+        {
+            "id": "tm-7",
+            "workOrderNo": "TM-20260905-007",
+            "title": "MCP 接入文档与示例整理",
+            "equipment_name": "接入文档",
+            "equipment_no": "repo/yixiu-docs",
+            "equipment_model": "Markdown",
+            "equipment_category": "文档",
+            "fault_code": "DOC-019",
+            "fault_type": "文档",
+            "projectProgressSummary": "MCP 接入步骤、字段规范与常见问题已整理完毕，示例全部校验通过。",
+            "description": "补齐 MCP 接入步骤、字段规范与常见问题，附可复制的安装命令。",
+            "severity": "low",
+            "status": "completed",
+            "assignee_name": "赵宁",
+            "collaborators": ["和鸣｜Memory Evolution"],
+            "current_step": "已归档",
+            "progress": 100,
+            "due_at": "2026-09-09 18:00",
+            "created_at": "2026-09-05 11:30",
+            "tools": ["文档生成", "示例校验"],
+            "parts": ["接入文档", "示例模板"],
+            "safety": ["示例不含真实密钥"],
+            "sop": ["梳理接入步骤", "整理字段规范", "补常见问题", "交叉校对"],
+            "recheck": {"status": "approved", "result": "已通过", "comment": "示例均可直接运行"},
+        },
+        {
+            "id": "tm-8",
+            "workOrderNo": "TM-20260914-008",
+            "title": "工作台指标口径统一",
+            "equipment_name": "数据口径",
+            "equipment_no": "repo/yixiu",
+            "equipment_model": "Python + SQLite",
+            "equipment_category": "数据治理",
+            "fault_code": "DATA-033",
+            "fault_type": "数据治理",
+            "projectProgressSummary": "各页面指标口径已对齐，等待口径评审通过后做回归验证。",
+            "description": "统一活跃任务、待审记忆、待评测技能的统计口径，避免各页面数字不一致。",
+            "severity": "high",
+            "status": "review",
+            "assignee_name": "唐忆罗",
+            "collaborators": ["执矩｜Task Execution", "明鉴｜Eval Lab"],
+            "current_step": "口径评审",
+            "progress": 74,
+            "due_at": "2026-09-21 18:00",
+            "created_at": "2026-09-14 15:50",
+            "tools": ["口径核验", "数据对比"],
+            "parts": ["口径定义 Memory", "统计 Skill"],
+            "safety": ["口径变更需评审", "历史数据不追溯"],
+            "sop": ["列出全部指标", "定义唯一口径", "对齐各页面", "回归验证"],
+            "recheck": {"status": "waiting", "result": "", "comment": ""},
+        },
     ]
     return [item for item in items if not status or item.get("status") == status]
 
@@ -1601,40 +1794,67 @@ def _normalize_sop(value, fallback: list[dict]) -> list[dict]:
 
 
 def _search_llm_prompt(result: dict, matched: list[dict], attachments: list[dict]) -> str:
-    evidence = []
-    for item in matched[:6]:
-        evidence.append({
-            "title": item.get("title") or item.get("name"),
-            "type": item.get("type"),
-            "summary": item.get("summary"),
-            "tags": item.get("tags", []),
-        })
-    files = []
-    for item in attachments[:6]:
-        files.append({
-            "name": item.get("name"),
-            "type": item.get("type"),
-            "analysis": item.get("analysis", {}),
-        })
-    return (
-        "请作为一休系统的多模态 Context Engine，根据项目目标、图片/文档分析和召回资料，"
-        "生成可直接展示在 Context Pack 面板里的中文结构化内容。必须只返回 JSON 对象，不要 Markdown，不要代码块。"
-        "不要编造具体检测数值；不确定处写“待现场确认”。"
-        "JSON 字段必须包含：phenomenon_summary, match_score, risk, stop_advice, "
-        "causes, positions, tools, visual_findings, recommended_sop, safety, audit。"
-        "risk 只能是 low/medium/high；match_score 为 0-100 整数；"
-        "causes/positions/tools/visual_findings/safety 为字符串数组；"
-        "recommended_sop 为数组，每项包含 step 和 action；audit 包含 risk_level, must_check, auditor。\n"
-        f"当前基础结果：{json.dumps(result, ensure_ascii=False)[:5000]}\n"
-        f"召回资料：{json.dumps(evidence, ensure_ascii=False)[:3000]}\n"
-        f"附件分析：{json.dumps(files, ensure_ascii=False)[:3000]}"
+    """对照实现（baseline）：固定指令与可变内容混在同一条 user message 里。
+
+    CPSC 生效路径见 _enhance_search_with_llm；这里保留旧结构仅用于对比实验与降级。
+    """
+    from services.context_pack_cache import build_flat_prompt
+
+    return build_flat_prompt(result, matched, attachments)
+
+
+def _merge_llm_fields(enhanced: dict, parsed: dict) -> dict:
+    """把大模型返回字段合并进结果，并返回「本次由模型产出的字段」。
+
+    返回值的用途是 CPSC 缓存：只缓存可复用的模型结论，不缓存任务自身的基础数据。
+    """
+    applied = {}
+    if parsed.get("phenomenon_summary"):
+        applied["phenomenon_summary"] = enhanced["phenomenon_summary"] = str(parsed["phenomenon_summary"]).strip()
+    if isinstance(parsed.get("match_score"), (int, float)):
+        applied["match_score"] = enhanced["match_score"] = max(0, min(100, int(parsed["match_score"])))
+    if parsed.get("risk") in {"low", "medium", "high"}:
+        applied["risk"] = enhanced["risk"] = parsed["risk"]
+    if parsed.get("stop_advice"):
+        applied["stop_advice"] = enhanced["stop_advice"] = str(parsed["stop_advice"]).strip()
+    for key, normalizer in (
+        ("causes", _normalize_text_list),
+        ("positions", _normalize_text_list),
+        ("tools", _normalize_text_list),
+        ("visual_findings", _normalize_text_list),
+        ("safety", _normalize_text_list),
+    ):
+        value = normalizer(parsed.get(key), enhanced.get(key, []))
+        enhanced[key] = value
+        applied[key] = value
+    enhanced["recommended_sop"] = applied["recommended_sop"] = _normalize_sop(
+        parsed.get("recommended_sop"), enhanced.get("recommended_sop", [])
     )
+    if isinstance(parsed.get("audit"), dict):
+        audit = dict(enhanced.get("audit") or {})
+        audit.update(parsed["audit"])
+        audit.setdefault("auditor", "明鉴")
+        enhanced["audit"] = applied["audit"] = audit
+    return applied
 
 
 def _enhance_search_with_llm(result: dict, matched: list[dict], attachments: list[dict]) -> dict:
+    """上下文包语义缓存（CPSC）接入点。
+
+    流程：结构化上下文 → 语义缓存查询 → 命中则直接复用结论；未命中才调用大模型并回填。
+    """
     enhanced = dict(result)
     try:
         from services.ai_gateway import ai_agent
+        from services.context_pack_cache import (
+            PREFIX_FINGERPRINT,
+            STABLE_PREFIX,
+            build_structured_context,
+            pack_cache,
+            prompt_metrics,
+            render_structured_payload,
+        )
+
         status = ai_agent.status()
         enhanced["llm"] = {
             "enabled": bool(status.get("configured")),
@@ -1642,47 +1862,63 @@ def _enhance_search_with_llm(result: dict, matched: list[dict], attachments: lis
             "model": status.get("chat_model"),
             "generated": False,
         }
-        if not status.get("configured"):
-            enhanced["llm"]["error"] = "AI 服务未配置，已使用本地规则结果"
-            return enhanced
-        messages = [
-            {"role": "system", "content": "你是一休 TeamMemory OS 的上下文组装助手，只依据当前任务、项目资料和引用来源输出合法 JSON。"},
-            {"role": "user", "content": _search_llm_prompt(result, matched, attachments)},
-        ]
-        try:
-            answer = ai_agent.chat(
-                messages,
-                temperature=0.25,
-                max_tokens=1800,
-                response_format={"type": "json_object"},
-            )
-        except Exception as exc:  # noqa: BLE001
-            if "response_format" not in str(exc):
-                raise
-            answer = ai_agent.chat(messages, temperature=0.25, max_tokens=1800)
-        parsed = ai_agent.parse_json(answer)
-        if not parsed:
-            enhanced["llm"]["error"] = "模型返回内容无法解析，已使用本地规则结果"
-            return enhanced
-        if parsed.get("phenomenon_summary"):
-            enhanced["phenomenon_summary"] = str(parsed["phenomenon_summary"]).strip()
-        if isinstance(parsed.get("match_score"), (int, float)):
-            enhanced["match_score"] = max(0, min(100, int(parsed["match_score"])))
-        if parsed.get("risk") in {"low", "medium", "high"}:
-            enhanced["risk"] = parsed["risk"]
-        if parsed.get("stop_advice"):
-            enhanced["stop_advice"] = str(parsed["stop_advice"]).strip()
-        enhanced["causes"] = _normalize_text_list(parsed.get("causes"), enhanced.get("causes", []))
-        enhanced["positions"] = _normalize_text_list(parsed.get("positions"), enhanced.get("positions", []))
-        enhanced["tools"] = _normalize_text_list(parsed.get("tools"), enhanced.get("tools", []))
-        enhanced["visual_findings"] = _normalize_text_list(parsed.get("visual_findings"), enhanced.get("visual_findings", []))
-        enhanced["recommended_sop"] = _normalize_sop(parsed.get("recommended_sop"), enhanced.get("recommended_sop", []))
-        enhanced["safety"] = _normalize_text_list(parsed.get("safety"), enhanced.get("safety", []))
-        if isinstance(parsed.get("audit"), dict):
-            audit = dict(enhanced.get("audit") or {})
-            audit.update(parsed["audit"])
-            audit.setdefault("auditor", "明鉴")
-            enhanced["audit"] = audit
+
+        # ---- ② 结构化上下文：带 ref 的引用替代文本扁平化 ----
+        context = build_structured_context(result, matched, attachments)
+        payload = render_structured_payload(context)
+        metrics = prompt_metrics(STABLE_PREFIX, payload)
+        enhanced["cpsc"] = {
+            "algorithm": "Context Pack Semantic Cache",
+            "prefix_fingerprint": PREFIX_FINGERPRINT,
+            "prefix_chars": metrics["prefix_chars"],
+            "payload_chars": metrics["payload_chars"],
+            "total_chars": metrics["total_chars"],
+            "estimated_total_tokens": metrics["estimated_total_tokens"],
+        }
+
+        # ---- ③ 语义包缓存查询 ----
+        cached, score, how, source_category = pack_cache.lookup(context)
+        enhanced["cpsc"]["cache"] = how
+        enhanced["cpsc"]["similarity"] = score
+
+        if cached is None:
+            if not status.get("configured"):
+                enhanced["llm"]["error"] = "AI 服务未配置，已使用本地规则结果"
+                return enhanced
+
+            # ---- ① 组包前缀复用：稳定指令进 system，可变内容进 user ----
+            messages = [
+                {"role": "system", "content": STABLE_PREFIX},
+                {"role": "user", "content": payload},
+            ]
+            try:
+                answer = ai_agent.chat(
+                    messages,
+                    temperature=0.25,
+                    max_tokens=1800,
+                    response_format={"type": "json_object"},
+                )
+            except Exception as exc:  # noqa: BLE001
+                if "response_format" not in str(exc):
+                    raise
+                answer = ai_agent.chat(messages, temperature=0.25, max_tokens=1800)
+            parsed = ai_agent.parse_json(answer)
+            if not parsed:
+                enhanced["llm"]["error"] = "模型返回内容无法解析，已使用本地规则结果"
+                return enhanced
+
+            produced = _merge_llm_fields(enhanced, parsed)
+            if produced:
+                pack_cache.store(context, produced, metrics["total_chars"])
+            enhanced["llm"]["reused"] = False
+            enhanced["cpsc"]["reused_fields"] = sorted(produced.keys())
+        else:
+            for key, value in cached.items():
+                enhanced[key] = value
+            pack_cache.note_saved(metrics["total_chars"])
+            enhanced["llm"]["reused"] = True
+            enhanced["cpsc"]["reused_fields"] = sorted(cached.keys())
+
         enhanced["llm"]["generated"] = True
         enhanced["llm"]["generated_at"] = _now()
     except Exception as exc:  # noqa: BLE001
@@ -1852,6 +2088,24 @@ def _aios_mode(goal: str, requested: str = "auto") -> str:
     return "project"
 
 
+# 每步声明它要消费接力信封的哪些部分。由下游声明、由 project_relay 裁剪 ——
+# 既不全量透传（12 步之后会把 prompt 撑爆），也不让上游提前总结（上游不知道下游要什么）。
+RELAY_CONSUMES = {
+    "sense": ("goal", "constraints"),
+    "open_search": ("goal", "constraints", "facts"),
+    "retrieve": ("goal", "facts", "refs"),
+    "diagnose": ("goal", "constraints", "facts", "refs", "open_questions"),
+    "open_task": ("goal", "facts"),
+    "operate": ("goal", "constraints", "facts", "open_questions"),
+    "collaborate": ("goal", "facts", "open_questions"),
+    "open_knowledge": ("goal", "facts", "refs"),
+    "archive": ("goal", "facts", "refs", "artifacts"),
+    "review": ("goal", "constraints", "facts", "artifacts", "open_questions"),
+    "memory": ("goal", "facts", "refs"),
+    "finalize": ("goal", "constraints", "facts", "refs", "artifacts", "open_questions"),
+}
+
+
 def _aios_plan(goal: str, mode: str = "auto", task_id: str = "") -> dict:
     goal = (goal or "").strip() or "统筹推进当前项目任务，形成 Context、执行、Eval、Memory 与 Skill 闭环。"
     mode = _aios_mode(goal, mode)
@@ -1904,6 +2158,8 @@ def _aios_plan(goal: str, mode: str = "auto", task_id: str = "") -> dict:
             "tool_description": meta.get("description", ""),
             "status": "pending",
             "input": step_input,
+            # 接力声明：本步从信封里要什么、产出后往里写什么
+            "consumes": list(RELAY_CONSUMES.get(key, ("goal", "constraints", "facts"))),
             "expected_output": meta.get("description", ""),
             "visualizable": True,
         })
@@ -1920,6 +2176,13 @@ def _aios_plan(goal: str, mode: str = "auto", task_id: str = "") -> dict:
         "progress": 0,
         "created_at": _now(),
     }
+    # 接力信封随 plan 一起持久化，中断后可从任意断点续跑
+    try:
+        from services.agent_relay import empty_envelope
+
+        plan["relay"] = empty_envelope(plan_id, str(task.get("id") or ""), goal)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("接力信封初始化失败: %s", exc)
     plan = attach_state_machine(plan)
     with _db() as conn:
         conn.execute("INSERT INTO yixiu_aios_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (plan_id, goal, mode, json.dumps(plan, ensure_ascii=False), "planned", 0, "{}", _now(), _now()))
@@ -2305,8 +2568,8 @@ def register_yixiu_user():
     data = request.get_json(silent=True) or {}
     account = str(data.get("account") or "").strip()
     password = str(data.get("password") or "")
-    name = str(data.get("name") or "").strip()
-    if not account or not password or not name:
+    name = str(data.get("name") or "").strip() or account
+    if not account or not password:
         return error_response(400, "请完整填写姓名、账号和密码")
     if not account.replace("_", "").isalnum() or not 4 <= len(account) <= 20:
         return error_response(400, "账号需为 4—20 位字母、数字或下划线")
@@ -2867,6 +3130,42 @@ def _handoff_dict(row) -> dict:
     return item
 
 
+def _persist_agent_relay(conn, run_id: str, step: dict, envelope: dict) -> None:
+    """把这一步之后的接力信封落库，供接力链视图与断点续跑使用。"""
+    try:
+        from services.agent_relay import envelope_size
+
+        agent = step.get("agent") or {}
+        conn.execute(
+            "INSERT OR REPLACE INTO yixiu_agent_relays"
+            " (id, run_id, step_key, from_agent, action, consumes_json, envelope_json, degraded, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                f"{run_id}:{step.get('key', '')}",
+                run_id,
+                str(step.get("key") or ""),
+                str(agent.get("name") or agent.get("id") or ""),
+                str(step.get("action") or ""),
+                json.dumps(list(step.get("consumes") or []), ensure_ascii=False),
+                json.dumps({"envelope": envelope, "size": envelope_size(envelope)}, ensure_ascii=False),
+                1 if envelope.get("degraded") else 0,
+                _now(),
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("接力信封落库失败: %s", exc)
+
+
+def _relay_dict(row) -> dict:
+    item = dict(row)
+    payload = _json(item.pop("envelope_json", "{}"), {})
+    item["envelope"] = payload.get("envelope", {})
+    item["size"] = payload.get("size", {})
+    item["consumes"] = _json(item.pop("consumes_json", "[]"), [])
+    item["degraded"] = bool(item.get("degraded"))
+    return item
+
+
 @yixiu_bp.get("/tasks/<task_id>/handoffs")
 @require_jwt_roles(AUDIT_ROLES)
 def task_handoffs(task_id: str):
@@ -3291,6 +3590,24 @@ def search():
 @yixiu_bp.post("/team-os/context/pack")
 def team_os_context_pack():
     return search()
+
+
+@yixiu_bp.get("/team-os/context/cache/stats")
+def team_os_context_cache_stats():
+    """CPSC 运行观测：命中率、复用字段、节省的 prompt 体积。"""
+    from services.context_pack_cache import build_flat_prompt, pack_cache
+
+    stats = pack_cache.stats()
+    stats["baseline_note"] = "baseline 为固定指令与可变内容混排的扁平 prompt，前缀不可命中"
+    return success_response(stats, "CPSC 缓存统计获取成功")
+
+
+@yixiu_bp.post("/team-os/context/cache/clear")
+def team_os_context_cache_clear():
+    from services.context_pack_cache import pack_cache
+
+    pack_cache.clear()
+    return success_response({"cleared": True}, "CPSC 缓存已清空")
 
 
 @yixiu_bp.get("/integrations/mcp/manifest")
@@ -3956,7 +4273,7 @@ def list_conversations():
 @require_confirmed_write("conversation.create", "/api/yixiu/conversations")
 def create_conversation():
     data = request.get_json(silent=True) or {}
-    name = str(data.get("name") or "").strip()
+    name = str(data.get("name") or "").strip() or account
     if not name:
         return error_response(400, "会话名称不能为空")
     conversation_id = str(data.get("id") or f"conversation-{uuid.uuid4().hex[:12]}")
@@ -4834,10 +5151,36 @@ def aios_execute():
                             payload={"step_key": step.get("key"), "action": step.get("action"), "input": step.get("input")},
                             run_id=plan.get("id", ""),
                         )
+                # ① 执行前：按本步声明的 consumes 注入投影后的接力输入
+                relay_env = plan.get("relay") or {}
+                try:
+                    from services.agent_relay import empty_envelope, project_relay
+
+                    if not relay_env:
+                        relay_env = empty_envelope(
+                            plan.get("id", ""),
+                            str((plan.get("focus") or {}).get("id") or ""),
+                            plan.get("goal", ""),
+                        )
+                    projected = project_relay(relay_env, step.get("consumes"))
+                    step["relay_input"] = projected
+                    step["input"] = {**(step.get("input") or {}), "relay": projected}
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("接力输入投影失败: %s", exc)
+
                 result = _aios_execute_action(step, plan.get("snapshot") or {}, commit=commit)
                 step["result"] = result
                 step["executed_at"] = _now()
                 artifacts[step["key"]] = result
+
+                # ② 执行后：产出并入接力信封，裁剪到有界，交给下一步
+                try:
+                    from services.agent_relay import build_relay, envelope_size
+
+                    plan["relay"] = build_relay(relay_env, step, result)
+                    step["relay_size"] = envelope_size(plan["relay"])
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("接力信封构建失败: %s", exc)
                 if commit and (result.get("needs_confirmation") or step.get("requires_approval")):
                     with _db() as conn:
                         approval = _ensure_aios_approval(conn, plan.get("id", ""), step, result.get("summary", ""))
@@ -4865,6 +5208,8 @@ def aios_execute():
                             payload={"step_key": step.get("key"), "action": step.get("action"), "result": result},
                             run_id=plan.get("id", ""),
                         )
+                        if plan.get("relay"):
+                            _persist_agent_relay(conn, plan.get("id", ""), step, plan["relay"])
             except Exception as exc:  # noqa: BLE001
                 plan, _ = transition_step(plan, step["key"], "fail", error=str(exc))
                 artifacts[step["key"]] = {"summary": "AIOS 步骤执行失败", "error": str(exc)}
@@ -4936,6 +5281,35 @@ def aios_run_detail(run_id: str):
     return success_response(run, "AIOS 运行详情获取成功")
 
 
+@yixiu_bp.get("/aios/runs/<run_id>/relays")
+@require_jwt_roles(AUDIT_ROLES)
+def aios_run_relays(run_id: str):
+    """Agent 上下文接力链：每一步之后信封长什么样、谁传给谁、收了什么。
+
+    返回的是完整接力链，前端可据此画出「收→产」的流转，而不是只看一句状态。
+    """
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM yixiu_agent_relays WHERE run_id=? ORDER BY created_at, step_key",
+            (run_id,),
+        ).fetchall()
+    relays = [_relay_dict(row) for row in rows]
+    latest = relays[-1] if relays else None
+    try:
+        from services.agent_relay import relay_cache
+
+        cache_stats = relay_cache.stats()
+    except Exception:  # noqa: BLE001
+        cache_stats = {}
+    return success_response({
+        "run_id": run_id,
+        "count": len(relays),
+        "relays": relays,
+        "latest": latest,
+        "relay_cache": cache_stats,
+    }, "接力链获取成功")
+
+
 @yixiu_bp.get("/aios/events")
 def aios_events():
     run_id = request.args.get("run_id", "").strip()
@@ -5002,3 +5376,633 @@ def database_bootstrap():
         _seed_templates(conn)
         _seed_agent_memory(conn)
     return success_response(_database_status(), "一休业务数据库已完成初始化检查")
+
+
+# ==========================================================================
+# 服务台：需求体检 + 托管运行
+# 说明：需求体检采用「级联结构化抽取」思路——第一级关键词命中候选任务，
+#       第二级多信号打分定优先级，第三级映射到 Agent 岗位并给出报价与验收标准。
+#       托管运行当前为模拟执行（产出产物、记录耗时与成本），未接真实调度。
+#       ponytail: 规则实现，接入 LLM 后可直接替换 _service_extract。
+# ==========================================================================
+
+SERVICE_POSITIONS = [
+    {"keywords": ("竞品", "同行", "对手", "价格监控", "活动监控"), "position": "AI 竞品分析员",
+     "task": "竞品价格与活动监控", "deliverable": "竞品变化表、周报、异常提醒",
+     "price": "¥499~899/月", "cycle": "每周一 09:00",
+     "acceptance": ["价格变动条目 ≥ 3 条", "本周新增竞品动作清单", "异常项经人工确认后才推送"],
+     "freq_per_week": 5, "minutes_per_run": 40, "regularity": 0.80,
+     "data_sources": ("web", "sheet"), "monthly_price": 699, "roles": ("运营", "市场")},
+    {"keywords": ("客户", "咨询", "聊天记录", "跟进", "线索", "私信"), "position": "AI 客户整理员",
+     "task": "客户咨询与聊天记录整理", "deliverable": "客户分类表、问题统计、跟进清单",
+     "price": "¥399~799/月", "cycle": "每日 18:00",
+     "acceptance": ["分类准确率 ≥ 90%", "待跟进清单非空", "敏感信息已脱敏"],
+     "freq_per_week": 10, "minutes_per_run": 25, "regularity": 0.85,
+     "data_sources": ("chat", "sheet"), "monthly_price": 549, "roles": ("销售", "客服")},
+    {"keywords": ("内容", "选题", "文案", "脚本", "公众号", "小红书", "短视频"), "position": "AI 内容助理",
+     "task": "选题与内容草稿生成", "deliverable": "选题库、内容草稿、发布建议",
+     "price": "¥499~999/月", "cycle": "每周二、周五 10:00",
+     "acceptance": ["每条选题附来源链接", "标题候选 ≥ 5 条", "人工确认后才发布"],
+     "freq_per_week": 4, "minutes_per_run": 60, "regularity": 0.70,
+     "data_sources": ("web", "file"), "monthly_price": 699, "roles": ("内容", "运营")},
+    {"keywords": ("报表", "日报", "周报", "月报", "汇总", "统计", "经营"), "position": "AI 数据整理员",
+     "task": "经营数据汇总与日报生成", "deliverable": "汇总表、经营日报、异常提示",
+     "price": "¥299~599/月", "cycle": "每日 09:00",
+     "acceptance": ["数据源全部拉取成功", "缺失字段已标注", "汇总数可回溯到原始记录"],
+     "freq_per_week": 5, "minutes_per_run": 30, "regularity": 0.90,
+     "data_sources": ("sheet", "api", "file"), "monthly_price": 449, "roles": ("运营", "研发")},
+    {"keywords": ("学习", "笔记", "整理资料", "复盘", "考试", "课程"), "position": "AI 学习督导",
+     "task": "学习计划拆解与资料整理", "deliverable": "学习计划、笔记、复盘表",
+     "price": "免费试用 / ¥99/月", "cycle": "每周日 20:00",
+     "acceptance": ["计划项可执行且带截止日", "笔记含要点提炼", "复盘含下周计划"],
+     "freq_per_week": 3, "minutes_per_run": 45, "regularity": 0.65,
+     "data_sources": ("file", "web"), "monthly_price": 99, "roles": ("研发", "其他")},
+    {"keywords": ("简历", "招聘", "面试", "候选人", "岗位画像", "人才"), "position": "AI 招聘助理",
+     "task": "简历筛选与候选人初评", "deliverable": "候选人对照表、初评结论、面试问题清单",
+     "price": "¥399~799/月", "cycle": "每日 10:00",
+     "acceptance": ["每份简历给出匹配度与理由", "硬性条件不满足的直接标注", "结论需人工复核后才联系候选人"],
+     "freq_per_week": 6, "minutes_per_run": 35, "regularity": 0.78,
+     "data_sources": ("file", "mail", "sheet"), "monthly_price": 599, "roles": ("人力", "其他")},
+    {"keywords": ("报销", "发票", "对账", "财务", "成本", "付款"), "position": "AI 财务核对员",
+     "task": "发票与报销单核对", "deliverable": "核对结果表、异常单据清单、差异说明",
+     "price": "¥499~899/月", "cycle": "每周三、周五 17:00",
+     "acceptance": ["金额与单据逐条比对", "异常项标注具体差异", "不修改任何财务系统数据"],
+     "freq_per_week": 4, "minutes_per_run": 50, "regularity": 0.92,
+     "data_sources": ("file", "sheet", "api"), "monthly_price": 799, "roles": ("财务", "其他")},
+    {"keywords": ("合同", "资质", "证照", "到期", "续签", "合规"), "position": "AI 合规巡检员",
+     "task": "合同与证照到期提醒", "deliverable": "到期台账、提前提醒清单、续签材料清单",
+     "price": "¥299~599/月", "cycle": "每周一 08:30",
+     "acceptance": ["提前 30 天提醒", "每条附原始文件位置", "续签材料清单可直接使用"],
+     "freq_per_week": 2, "minutes_per_run": 40, "regularity": 0.95,
+     "data_sources": ("file", "sheet"), "monthly_price": 449, "roles": ("法务", "行政")},
+    {"keywords": ("会议", "纪要", "待办", "录音", "例会", "决议"), "position": "AI 会议记录员",
+     "task": "会议纪要与待办跟踪", "deliverable": "会议纪要、决议清单、待办跟踪表",
+     "price": "¥299~699/月", "cycle": "会议结束后 15 分钟内",
+     "acceptance": ["决议与待办分离", "每条待办有负责人和截止日", "纪要需参会人确认后才分发"],
+     "freq_per_week": 8, "minutes_per_run": 30, "regularity": 0.82,
+     "data_sources": ("file", "chat", "mail"), "monthly_price": 549, "roles": ("行政", "项目管理", "其他")},
+    {"keywords": ("供应商", "采购", "询价", "比价", "物料", "报价单"), "position": "AI 采购比价员",
+     "task": "供应商比价与询价整理", "deliverable": "比价表、供应商对比、议价建议",
+     "price": "¥499~899/月", "cycle": "每周四 15:00",
+     "acceptance": ["同规格同口径对比", "价格含税口径统一", "不代替人工对外发询价邮件"],
+     "freq_per_week": 3, "minutes_per_run": 55, "regularity": 0.80,
+     "data_sources": ("web", "sheet", "mail"), "monthly_price": 699, "roles": ("采购", "运营")},
+    {"keywords": ("工单", "客服", "投诉", "故障", "售后", "支持"), "position": "AI 工单分析员",
+     "task": "工单聚类与根因初判", "deliverable": "工单分类表、高频问题排行、根因初判",
+     "price": "¥599~999/月", "cycle": "每日 20:00",
+     "acceptance": ["聚类口径可解释", "高频问题带样例工单号", "根因结论需人工确认"],
+     "freq_per_week": 12, "minutes_per_run": 45, "regularity": 0.86,
+     "data_sources": ("api", "chat", "sheet"), "monthly_price": 899, "roles": ("客服", "技术支持", "研发")},
+    {"keywords": ("政策", "行业动态", "舆情", "监测", "法规", "标准"), "position": "AI 行业监测员",
+     "task": "行业政策与舆情监测", "deliverable": "每日摘要、影响面初判、待跟进清单",
+     "price": "¥399~799/月", "cycle": "每日 08:00",
+     "acceptance": ["每条附原文链接", "影响面分级标注", "不转发未经核实的消息"],
+     "freq_per_week": 7, "minutes_per_run": 25, "regularity": 0.75,
+     "data_sources": ("web", "mail"), "monthly_price": 599, "roles": ("市场", "战略", "法务")},
+    {"keywords": ("评论", "评价", "口碑", "用户反馈", "店铺评分", "社群"), "position": "AI 口碑分析员",
+     "task": "用户评价汇总与情感分析", "deliverable": "评价分类表、情感分布、改进建议",
+     "price": "¥299~599/月", "cycle": "每周二、周五 16:00",
+     "acceptance": ["正负面分类准确率 ≥ 88%", "典型差评附原文", "改进建议可落到具体环节"],
+     "freq_per_week": 4, "minutes_per_run": 35, "regularity": 0.72,
+     "data_sources": ("web", "api", "sheet"), "monthly_price": 499, "roles": ("市场", "运营", "客服")},
+]
+
+# ── 引导式问卷的选项表（前端直接渲染，避免前后端两处硬编码） ──────────────
+SERVICE_ROLE_OPTIONS = ["运营", "销售", "客服", "内容", "研发", "市场", "人力", "财务",
+                       "行政", "法务", "采购", "项目管理", "技术支持", "战略", "其他"]
+
+SERVICE_DATA_SOURCES = [
+    {"key": "web", "label": "网页 / 公开站点"},
+    {"key": "sheet", "label": "表格 / Excel"},
+    {"key": "chat", "label": "聊天记录"},
+    {"key": "file", "label": "文档 / PDF"},
+    {"key": "api", "label": "业务系统接口"},
+    {"key": "mail", "label": "邮件"},
+    {"key": "db", "label": "数据库 / 数仓"},
+    {"key": "ticket", "label": "工单 / 客服系统"},
+    {"key": "meeting", "label": "会议录音 / 纪要"},
+    {"key": "social", "label": "社媒 / 评价平台"},
+]
+
+SERVICE_FREQ_OPTIONS = [
+    {"key": "daily_multi", "label": "每天多次", "per_week": 15},
+    {"key": "daily", "label": "每天一次", "per_week": 7},
+    {"key": "weekly_multi", "label": "每周几次", "per_week": 3},
+    {"key": "weekly", "label": "每周一次", "per_week": 1},
+    {"key": "monthly", "label": "每月一次", "per_week": 0.25},
+]
+
+SERVICE_TIME_OPTIONS = [
+    {"key": "t15", "label": "15 分钟以内", "minutes": 10},
+    {"key": "t30", "label": "15—30 分钟", "minutes": 25},
+    {"key": "t60", "label": "30—60 分钟", "minutes": 45},
+    {"key": "t120", "label": "1 小时以上", "minutes": 90},
+]
+
+# 人力时薪（用于 ROI 折算，可按团队实际调整）
+SERVICE_HOURLY_RATE = 80
+
+
+def _service_extract(text: str) -> list:
+    """三级级联抽取：关键词命中 → 多信号打分 → 岗位/报价/验收映射。"""
+    hits = []
+    for rule in SERVICE_POSITIONS:
+        score = sum(1 for kw in rule["keywords"] if kw in text)
+        if score:
+            hits.append({**rule, "score": score})
+    hits.sort(key=lambda item: -item["score"])
+    return hits
+
+
+def _service_data_score(rule: dict, sources) -> int:
+    """数据可得性：用户勾选的来源覆盖了该岗位多少比例的数据需求。
+
+    未提供勾选结果（纯文本体检）时按 0.75 的保守默认值，不虚高。
+    """
+    need = list(rule.get("data_sources") or [])
+    if not need:
+        return 75
+    if not sources:
+        return 75
+    picked = set(str(s) for s in sources)
+    return int(round(100 * sum(1 for n in need if n in picked) / len(need)))
+
+
+def _service_feasibility(freq_per_week: float, minutes: int, regularity: float, data_score: int) -> int:
+    """可行性评分（0—100）。
+
+    四个维度加权求和，而非直接相乘：任一维度偏低不应把整体归零，
+    但低分维度会显著拉低结论，从而把「偶发+无数据源」的伪需求筛掉。
+      频次 0.30 ｜ 规则化程度 0.25 ｜ 数据可得性 0.25 ｜ 单次耗时 0.20
+    """
+    freq = min(100.0, float(freq_per_week) / 15 * 100)
+    time_cost = min(100.0, float(minutes) / 90 * 100)
+    reg = float(regularity) * 100
+    return int(round(0.30 * freq + 0.25 * reg + 0.25 * data_score + 0.20 * time_cost))
+
+
+def _service_automation(rule: dict, freq_per_week: float, minutes: int, data_score: int) -> dict:
+    """由「频次 × 耗时 × 可自动化比例」推算节省工时与 ROI。"""
+    weekly_hours = float(freq_per_week) * float(minutes) / 60.0
+    auto_ratio = float(rule.get("regularity", 0.75)) * (data_score / 100.0)
+    saved_week = weekly_hours * auto_ratio
+    saved_month = saved_week * 4.3
+    monthly_saving = saved_month * SERVICE_HOURLY_RATE
+    price = int(rule.get("monthly_price") or 0)
+    net = monthly_saving - price
+    return {
+        "weeklyHours": round(weekly_hours, 1),
+        "autoRatio": round(auto_ratio, 2),
+        "savedHoursPerWeek": round(saved_week, 1),
+        "savedHoursPerMonth": round(saved_month, 1),
+        "monthlySaving": int(round(monthly_saving)),
+        "monthlyCost": price,
+        "netBenefit": int(round(net)),
+        "roi": round(net / price, 2) if price else 0,
+        "paybackDays": int(round(price / (monthly_saving / 30))) if monthly_saving > 0 else 0,
+    }
+
+
+def _service_rollout(rule: dict, saved_week: float) -> list:
+    """按周拆解的落地路径——回答「接下来到底做什么」。"""
+    labels = {s["key"]: s["label"] for s in SERVICE_DATA_SOURCES}
+    needs = "、".join(labels.get(k, k) for k in (rule.get("data_sources") or []))
+    return [
+        {"week": "第 1 周", "title": "接入与试跑", "items": [
+            "开通数据源只读权限：" + (needs or "按实际来源确认"),
+            "人工复核跑通一轮，标出误判与遗漏",
+            "与团队确认验收口径：" + "；".join((rule.get("acceptance") or [])[:2]),
+        ]},
+        {"week": "第 2 周", "title": "固化与定时", "items": [
+            "固化为定时任务：" + str(rule.get("cycle") or "按约定周期"),
+            "产出物写入团队记忆库，可被后续任务引用",
+            "记录基线指标，作为后续提效对比依据",
+        ]},
+        {"week": "第 3—4 周", "title": "评测与转常规", "items": [
+            "为核心场景接入 Eval 回归用例，防止能力退化",
+            "异常自动告警到协作群，保留人工确认闸门",
+            "稳定后按 %s 转常规托管（约每周节省 %.1f 小时）" % (rule.get("price"), saved_week),
+        ]},
+    ]
+
+
+def _service_prerequisites(rule: dict, sources) -> list:
+    """前置条件清单——把「需要你先准备什么」讲清楚，而不是只报个价。"""
+    labels = {s["key"]: s["label"] for s in SERVICE_DATA_SOURCES}
+    picked = set(str(s) for s in (sources or []))
+    out = []
+    for key in (rule.get("data_sources") or []):
+        ok = key in picked
+        out.append({
+            "item": labels.get(key, key),
+            "ready": ok,
+            "note": "已具备，可直接接入" if ok else "待开通只读权限或提供样例数据",
+        })
+    out.append({"item": "人工复核环节", "ready": True,
+                "note": "涉及对外发布、改业务数据、发送消息的动作保留人工确认"})
+    out.append({"item": "验收基线", "ready": True,
+                "note": "首周需人工标注一轮，作为后续自动化的对照标准"})
+    return out
+
+
+def _service_report(text: str, project: str, intake: Optional[dict] = None) -> dict:
+    """需求体检报告。
+
+    intake 为空时走「自由描述」路径：关键词命中 + 基线参数。
+    intake 非空时走「引导问卷」路径：用用户填写的频次/耗时/数据源替换基线，
+    评分与 ROI 因此更贴近真实情况（这也是引导式体检精度更高的原因）。
+    """
+    intake = intake if isinstance(intake, dict) else {}
+    hits = _service_extract(text)
+
+    # 把问卷勾选的任务也纳入候选（用户可能勾了但没在文本里提）
+    picked_tasks = [str(t) for t in (intake.get("tasks") or [])]
+    for rule in SERVICE_POSITIONS:
+        if rule["task"] in picked_tasks and not any(h["task"] == rule["task"] for h in hits):
+            hits.append({**rule, "score": 2})
+    hits.sort(key=lambda item: -item["score"])
+
+    freq_map = {o["key"]: o["per_week"] for o in SERVICE_FREQ_OPTIONS}
+    time_map = {o["key"]: o["minutes"] for o in SERVICE_TIME_OPTIONS}
+    user_freq = freq_map.get(str(intake.get("frequency") or ""))
+    user_minutes = time_map.get(str(intake.get("duration") or ""))
+    sources = intake.get("sources") or []
+
+    tasks, positions, details = [], [], []
+    for h in hits[:3]:
+        freq = float(user_freq if user_freq is not None else h.get("freq_per_week", 7))
+        minutes = int(user_minutes if user_minutes is not None else h.get("minutes_per_run", 20))
+        dscore = _service_data_score(h, sources)
+        feasibility = _service_feasibility(freq, minutes, float(h.get("regularity", 0.75)), dscore)
+        auto = _service_automation(h, freq, minutes, dscore)
+        headline = feasibility >= 75 and auto["netBenefit"] > 0
+
+        tasks.append({
+            "title": h["task"], "position": h["position"],
+            "priority": "高" if headline else ("中" if feasibility >= 55 else "观察"),
+            "feasibility": feasibility,
+        })
+        positions.append({
+            "position": h["position"], "deliverable": h["deliverable"], "price": h["price"],
+            "cycle": h["cycle"], "acceptance": h["acceptance"], "match": feasibility,
+            "feasibility": feasibility, "automation": auto,
+        })
+        details.append({
+            "position": h["position"], "task": h["task"],
+            "feasibility": feasibility,
+            "dimensions": {
+                "frequency": min(100, int(round(freq / 15 * 100))),
+                "regularity": int(round(float(h.get("regularity", 0.75)) * 100)),
+                "data": dscore,
+                "timeCost": min(100, int(round(minutes / 90 * 100))),
+            },
+            "automation": auto,
+            "rollout": _service_rollout(h, auto["savedHoursPerWeek"]),
+            "prerequisites": _service_prerequisites(h, sources),
+            "risks": [
+                "涉及对外发送消息、发布内容、修改业务系统的动作，均需人工确认",
+                "数据源须经用户授权，仅按最小必要范围读取",
+                "网页结构或接口变更时结果可能失效，需保留人工复核环节",
+            ],
+        })
+
+    top = details[0] if details else None
+    saved = top["automation"]["savedHoursPerWeek"] if top else 0.0
+    saved_month = top["automation"]["savedHoursPerMonth"] if top else 0.0
+    net = top["automation"]["netBenefit"] if top else 0
+
+    # 结论：净收益为负时明确劝退，而不是无条件推销托管。
+    # 一个只会说「值得买」的体检工具没有可信度。
+    if top is None:
+        verdict, advice = "信息不足", "补充描述你每天或每周重复在做的事，再重新体检。"
+    elif top["automation"]["netBenefit"] <= 0:
+        verdict = "建议先不托管"
+        advice = ("按当前频次与单次耗时估算，每月节省约 ¥%d，低于托管费 ¥%d，"
+                  "此时开通并不划算。建议先把流程标准化，或先用不计费的内置能力按需处理。" % (
+                      top["automation"]["monthlySaving"], top["automation"]["monthlyCost"]))
+    elif top["feasibility"] >= 75:
+        verdict = "建议开通托管"
+        advice = ("该项频次高、流程规则稳定、数据可得性良好，自动化收益可覆盖托管成本，"
+                  "建议按下方落地路径推进。")
+    elif top["feasibility"] >= 55:
+        verdict = "可试跑验证"
+        advice = "收益与成本接近平衡，建议先按首周试跑数据再决定是否转常规托管。"
+    else:
+        verdict = "建议先标准化"
+        advice = "该项规则化程度或数据可得性偏低，建议先把流程整理成清单与样例，再交给 Agent。"
+
+    if tasks:
+        summary = "识别到 %d 类可自动化任务，建议优先从「%s」切入：每周约省 %.1f 小时，净收益约 ¥%d/月。" % (
+            len(tasks), tasks[0]["title"], saved, net)
+    else:
+        summary = "信息还不够。说说具体是哪些事、多久做一次、现在用什么工具？"
+
+    prices = [p["automation"]["monthlyCost"] for p in positions]
+    return {
+        "project": project,
+        "summary": summary,
+        "verdict": verdict,
+        "advice": advice,
+        "hourlyRate": SERVICE_HOURLY_RATE,
+        "tasks": tasks,
+        "positions": positions,
+        "details": details,
+        "savingHours": saved,
+        "savingHoursPerMonth": saved_month,
+        "netBenefit": net,
+        "priceRange": ("¥%d~%d/月" % (min(prices), max(prices))) if prices else "待评估",
+        "risks": details[0]["risks"] if details else [
+            "数据源须经用户授权，仅按最小必要范围读取",
+            "涉及对外动作一律保留人工确认",
+        ],
+        "ready": bool(hits),
+        "mode": "guided" if intake else "freeform",
+        "intakeEcho": {
+            "role": intake.get("role") or "",
+            "frequency": intake.get("frequency") or "",
+            "duration": intake.get("duration") or "",
+            "sources": list(sources),
+        },
+    }
+
+
+@yixiu_bp.post("/service/diagnose")
+def service_diagnose():
+    """需求体检（自由描述）：接收对话，返回诊断报告（不落库，便于反复试答）。"""
+    data = request.get_json(silent=True) or {}
+    messages = data.get("messages") if isinstance(data.get("messages"), list) else []
+    text = " ".join(str(m.get("text") or "") for m in messages if isinstance(m, dict))
+    project = str(data.get("project") or "").strip() or "未命名需求"
+    return success_response({"report": _service_report(text, project)}, "诊断已更新")
+
+
+@yixiu_bp.get("/service/intake/options")
+def service_intake_options():
+    """引导式体检的选项表，供前端直接渲染，避免前后端两处硬编码。"""
+    return success_response({
+        "roles": SERVICE_ROLE_OPTIONS,
+        "dataSources": SERVICE_DATA_SOURCES,
+        "frequency": SERVICE_FREQ_OPTIONS,
+        "duration": SERVICE_TIME_OPTIONS,
+        "tasks": [
+            {"task": r["task"], "position": r["position"], "keywords": list(r["keywords"])}
+            for r in SERVICE_POSITIONS
+        ],
+        "hourlyRate": SERVICE_HOURLY_RATE,
+    }, "体检选项获取成功")
+
+
+@yixiu_bp.post("/service/intake")
+def service_intake():
+    """引导式需求体检：接收结构化问卷，用真实频次/耗时/数据源替换基线参数。
+
+    与 /service/diagnose 的区别：那条走关键词猜参数，这条用用户填的真实值，
+    因此评分与 ROI 精度更高（报告中的 mode 字段会标注 guided / freeform）。
+    """
+    data = request.get_json(silent=True) or {}
+    intake = data.get("intake") if isinstance(data.get("intake"), dict) else {}
+    project = str(data.get("project") or "").strip() or "未命名需求"
+    text = " ".join([
+        str(intake.get("role") or ""),
+        " ".join(str(t) for t in (intake.get("tasks") or [])),
+        str(intake.get("note") or ""),
+    ])
+    return success_response({"report": _service_report(text, project, intake)}, "体检完成")
+
+
+@yixiu_bp.post("/service/diagnose/save")
+def service_diagnose_save():
+    """保存本次体检记录。"""
+    data = request.get_json(silent=True) or {}
+    account = str(data.get("account") or "").strip()
+    project = str(data.get("project") or "").strip() or "未命名需求"
+    messages = data.get("messages") if isinstance(data.get("messages"), list) else []
+    report = data.get("report") if isinstance(data.get("report"), dict) else {}
+    if not account or not report:
+        return error_response(400, "缺少账号或诊断报告")
+    did = "diag-" + uuid.uuid4().hex[:12]
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO service_diagnoses (id, account, project, transcript, report, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, 'saved', ?, ?)",
+            (did, account, project, json.dumps(messages, ensure_ascii=False),
+             json.dumps(report, ensure_ascii=False), _now(), _now()),
+        )
+        conn.commit()
+    return success_response({"id": did}, "体检记录已保存")
+
+
+@yixiu_bp.post("/service/requisition")
+def service_requisition_create():
+    """诊断报告 → 标准需求单。"""
+    data = request.get_json(silent=True) or {}
+    account = str(data.get("account") or "").strip()
+    diagnosis_id = str(data.get("diagnosis_id") or "").strip()
+    report = data.get("report") if isinstance(data.get("report"), dict) else {}
+    if not account or not report:
+        return error_response(400, "缺少账号或诊断报告")
+    positions = report.get("positions") or []
+    top = positions[0] if positions else {}
+    rid = "req-" + uuid.uuid4().hex[:12]
+    title = str(data.get("title") or "").strip() or (top.get("position") or "定制 Agent 需求")
+    goal = str(data.get("goal") or "").strip() or report.get("summary") or ""
+    row = (rid, diagnosis_id, account, title, goal,
+           json.dumps(report.get("inputs") or ["由工程师在接单后与客户确认"], ensure_ascii=False),
+           top.get("deliverable") or "", top.get("cycle") or "", top.get("price") or "",
+           json.dumps(top.get("acceptance") or [], ensure_ascii=False),
+           json.dumps(report.get("tasks") or [], ensure_ascii=False),
+           json.dumps(positions, ensure_ascii=False), _now())
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO service_requisitions (id, diagnosis_id, account, title, goal, inputs, outputs, "
+            "cycle, price, acceptance, tasks, positions, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
+        conn.commit()
+    return success_response({"id": rid, "title": title}, "需求单已生成")
+
+
+@yixiu_bp.get("/service/requisitions")
+def service_requisition_list():
+    account = str(request.args.get("account") or "").strip()
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM service_requisitions WHERE account=? ORDER BY created_at DESC LIMIT 20",
+            (account,)).fetchall() if account else []
+    return success_response({"items": [_json_row_requisition(r) for r in rows]})
+
+
+def _json_row_requisition(row) -> dict:
+    return {
+        "id": row["id"], "title": row["title"], "goal": row["goal"],
+        "outputs": row["outputs"], "cycle": row["cycle"], "price": row["price"],
+        "acceptance": _json(row["acceptance"], []),
+        "tasks": _json(row["tasks"], []), "positions": _json(row["positions"], []),
+        "status": row["status"], "createdAt": row["created_at"],
+    }
+
+
+@yixiu_bp.post("/service/hosting/<hosting_id>/status")
+def service_hosting_status(hosting_id):
+    """暂停 / 恢复托管服务。"""
+    data = request.get_json(silent=True) or {}
+    status = str(data.get("status") or "").strip()
+    if status not in ("running", "paused"):
+        return error_response(400, "状态仅支持 running / paused")
+    with _db() as conn:
+        row = conn.execute("SELECT id FROM service_hostings WHERE id=?", (hosting_id,)).fetchone()
+        if not row:
+            return error_response(404, "托管服务不存在")
+        conn.execute("UPDATE service_hostings SET status=? WHERE id=?", (status, hosting_id))
+        conn.commit()
+    return success_response({"id": hosting_id, "status": status}, "已暂停" if status == "paused" else "已恢复")
+
+
+@yixiu_bp.get("/service/hosting")
+def service_hosting_list():
+    """托管服务列表 + KPI。"""
+    account = str(request.args.get("account") or "").strip()
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM service_hostings WHERE account=? ORDER BY created_at DESC", (account,)
+        ).fetchall() if account else []
+        items = []
+        total_runs = ok_runs = 0
+        cost = 0.0
+        warnings = 0
+        for row in rows:
+            runs = conn.execute(
+                "SELECT * FROM service_hosting_runs WHERE hosting_id=? ORDER BY started_at DESC LIMIT 8",
+                (row["id"],)).fetchall()
+            run_items = [{
+                "id": r["id"], "startedAt": r["started_at"], "finishedAt": r["finished_at"],
+                "status": r["status"], "duration": r["duration"], "cost": r["cost"],
+                "artifacts": _json(r["artifacts"], []), "reviewed": bool(r["reviewed"]),
+                "note": r["note"],
+            } for r in runs]
+            allruns = conn.execute(
+                "SELECT status, cost FROM service_hosting_runs WHERE hosting_id=?", (row["id"],)).fetchall()
+            total_runs += len(allruns)
+            ok_runs += sum(1 for r in allruns if r["status"] == "success")
+            cost += sum(float(r["cost"] or 0) for r in allruns)
+            warnings += sum(1 for r in allruns if r["status"] != "success")
+            items.append({
+                "id": row["id"], "name": row["name"], "plan": row["plan"], "cycle": row["cycle"],
+                "price": row["price"], "nextRunAt": row["next_run_at"],
+                "quotaRuns": row["quota_runs"], "usedRuns": row["used_runs"],
+                "status": row["status"], "runs": run_items,
+                "successRate": round(ok_runs * 100 / total_runs) if total_runs else 100,
+            })
+    return success_response({
+        "items": items,
+        "kpi": {
+            "hosting": len(items), "runs": total_runs,
+            "successRate": round(ok_runs * 100 / total_runs) if total_runs else 100,
+            "cost": round(cost, 2), "warnings": warnings,
+        },
+    })
+
+
+@yixiu_bp.post("/service/hosting")
+def service_hosting_create():
+    """需求单 → 托管订阅。"""
+    data = request.get_json(silent=True) or {}
+    account = str(data.get("account") or "").strip()
+    name = str(data.get("name") or "").strip()
+    if not account or not name:
+        return error_response(400, "缺少账号或服务名称")
+    hid = "host-" + uuid.uuid4().hex[:12]
+    plan = str(data.get("plan") or "基础版")
+    quota = {"基础版": 4, "专业版": 20, "企业版": 60}.get(plan, 4)
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO service_hostings (id, account, requisition_id, name, plan, cycle, price, "
+            "next_run_at, quota_runs, used_runs, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'running', ?)",
+            (hid, account, str(data.get("requisition_id") or ""), name, plan,
+             str(data.get("cycle") or "每周一 09:00"), str(data.get("price") or "¥499/月"),
+             (datetime.now() + timedelta(days=2)).strftime("%m-%d %H:%M"), quota, _now()),
+        )
+        conn.commit()
+    return success_response({"id": hid}, "已开通托管")
+
+
+@yixiu_bp.post("/service/hosting/<hosting_id>/run")
+def service_hosting_run(hosting_id):
+    """模拟执行一次托管任务，生成产物与运行记录。"""
+    with _db() as conn:
+        row = conn.execute("SELECT * FROM service_hostings WHERE id=?", (hosting_id,)).fetchone()
+        if not row:
+            return error_response(404, "托管服务不存在")
+        now = datetime.now()
+        artifacts = _service_artifacts(row["name"], now)
+        ok = _hash_int(hosting_id + now.strftime("%Y%m%d%H%M")) % 10 > 1
+        rid = "run-" + uuid.uuid4().hex[:12]
+        conn.execute(
+            "INSERT INTO service_hosting_runs (id, hosting_id, started_at, finished_at, status, duration, "
+            "cost, artifacts, reviewed, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (rid, hosting_id, now.strftime("%Y-%m-%d %H:%M"), now.strftime("%Y-%m-%d %H:%M"),
+             "success" if ok else "warning", "%d 分 %d 秒" % (1 + _hash_int(rid) % 4, _hash_int(rid[::-1]) % 60),
+             round(0.5 + (_hash_int(rid) % 90) / 100, 2),
+             json.dumps(artifacts, ensure_ascii=False), 1 if ok else 0,
+             "" if ok else "数据源偶发超时，已自动重试成功"),
+        )
+        conn.execute(
+            "UPDATE service_hostings SET used_runs = used_runs + 1, "
+            "next_run_at = ? WHERE id=?",
+            ((now + timedelta(days=7)).strftime("%m-%d %H:%M"), hosting_id),
+        )
+        conn.commit()
+    return success_response({"id": rid, "artifacts": artifacts, "ok": ok}, "本次运行完成")
+
+
+def _hash_int(text: str) -> int:
+    return sum(ord(c) for c in text)
+
+
+def _service_artifacts(name: str, when: datetime) -> list:
+    stamp = when.strftime("%m%d")
+    if "竞品" in name:
+        return ["竞品价格变动表_%s.xlsx" % stamp, "竞品动作周报_%s.pdf" % stamp, "异常提醒_%s.txt" % stamp]
+    if "客户" in name:
+        return ["客户分类表_%s.xlsx" % stamp, "待跟进清单_%s.xlsx" % stamp]
+    if "内容" in name:
+        return ["选题库_%s.xlsx" % stamp, "内容草稿_%s.md" % stamp]
+    if "日报" in name or "周报" in name or "经营" in name or "报表" in name or "数据" in name:
+        return ["汇总表_%s.xlsx" % stamp, "经营日报_%s.pdf" % stamp, "异常提示_%s.txt" % stamp]
+    return ["运行产物_%s.xlsx" % stamp]
+
+
+def _seed_service_desk(conn):
+    """预置服务台演示数据（挂在演示账号 yixiu 下）。"""
+    if conn.execute("SELECT COUNT(*) AS c FROM service_hostings").fetchone()["c"] > 0:
+        return
+    now = datetime.now()
+    plans = [
+        ("host-demo-competitor", "竞品价格周报", "专业版", "每周一 09:00", "¥1,299/月", 4, 3),
+        ("host-demo-inquiry", "客户咨询整理", "基础版", "每日 18:00", "¥499/月", 20, 12),
+        ("host-demo-daily", "经营日报托管", "专业版", "每日 09:00", "¥899/月", 20, 15),
+        ("host-demo-ticket", "工单聚类分析", "专业版", "每日 20:00", "¥1,099/月", 20, 18),
+        ("host-demo-meeting", "会议纪要跟踪", "基础版", "每日 19:30", "¥299/月", 12, 7),
+        ("host-demo-review", "用户评价汇总", "基础版", "每周二、周五 16:00", "¥499/月", 8, 5),
+    ]
+    for hid, name, plan, cycle, price, quota, used in plans:
+        conn.execute(
+            "INSERT INTO service_hostings (id, account, requisition_id, name, plan, cycle, price, "
+            "next_run_at, quota_runs, used_runs, status, created_at) VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, 'running', ?)",
+            (hid, "yixiu", name, plan, cycle, price,
+             (now + timedelta(days=2)).strftime("%m-%d %H:%M"), quota, used, _now()),
+        )
+        for k in range(used):
+            st = now - timedelta(days=6 * (used - k))
+            warn = (hid.endswith("inquiry") and k == used - 1)
+            conn.execute(
+                "INSERT INTO service_hosting_runs (id, hosting_id, started_at, finished_at, status, "
+                "duration, cost, artifacts, reviewed, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("seed-%s-%d" % (hid, k), hid, st.strftime("%Y-%m-%d %H:%M"), st.strftime("%Y-%m-%d %H:%M"),
+                 "warning" if warn else "success",
+                 "%d 分 %d 秒" % (2 + k, 12 + k * 9), round(0.62 + k * 0.14, 2),
+                 json.dumps(_service_artifacts(name, st), ensure_ascii=False),
+                 0 if warn else 1,
+                 "数据源偶发超时，已自动重试成功" if warn else ""),
+            )
+    conn.commit()
