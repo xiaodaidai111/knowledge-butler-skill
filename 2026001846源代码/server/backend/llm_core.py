@@ -41,16 +41,19 @@ class ModelInfo(BaseModel):
 
 class ModelManager:
     MODELS = {
-        "qwen-plus": ModelInfo(
-            name="qwen-plus", provider="qwen", version="dashscope", max_tokens=8192, supports_functions=True
+        "deepseek-chat": ModelInfo(
+            name="deepseek-chat", provider="deepseek", version="1.0", max_tokens=8192, supports_functions=True
+        ),
+        "deepseek-reasoner": ModelInfo(
+            name="deepseek-reasoner", provider="deepseek", version="1.0", max_tokens=8000, supports_functions=False
         ),
         "deepseek-chat": ModelInfo(
-            name="deepseek-chat", provider="deepseek", version="1.0", max_tokens=4000, supports_functions=True
+            name="deepseek-chat", provider="deepseek", version="1.0", max_tokens=8000, supports_functions=True
         )
     }
     
     def __init__(self):
-        self._current_model: Optional[str] = ai_agent.settings.chat_model or "qwen-plus"
+        self._current_model: Optional[str] = ai_agent.settings.chat_model or "deepseek-chat"
     
     def get_current_model(self) -> Optional[str]:
         return self._current_model
@@ -88,7 +91,7 @@ class _AIChatAdapter:
 
 
 class LLMConfig(BaseModel):
-    model_name: str = Field(default_factory=lambda: model_manager.get_current_model() or "qwen-plus", description="模型名称")
+    model_name: str = Field(default_factory=lambda: model_manager.get_current_model() or "deepseek-chat", description="模型名称")
     temperature: float = Field(default=0.7, description="温度参数")
     api_key: Optional[str] = Field(default=None, description="API密钥")
     base_url: str = Field(default_factory=lambda: ai_agent.settings.base_url, description="API基础URL")

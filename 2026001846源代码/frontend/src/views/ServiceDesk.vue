@@ -50,22 +50,6 @@
         </span>
       </div>
 
-      <section v-if="!report" class="sd-quick">
-        <header>
-          <div>
-            <p class="sd-eyebrow">常见场景</p>
-            <b>不确定怎么填？先挑一个接近的</b>
-            <small>点一下自动带入选中的岗位、频次与数据源，带进去之后还能改。</small>
-          </div>
-        </header>
-        <div class="sd-quick-chips">
-          <button v-for="q in QUICK_SCENES" :key="q.name" type="button" @click="applyTemplate(q)">
-            <b>{{ q.name }}</b>
-            <small>{{ q.hint }}</small>
-          </button>
-        </div>
-      </section>
-
       <div v-if="!report" class="sd-form">
         <div class="sd-form-head">
           <span class="sd-step-no" aria-hidden="true">{{ step + 1 }}</span>
@@ -197,33 +181,6 @@
 
         <ul class="sd-risks"><li v-for="r in report.risks" :key="r">{{ r }}</li></ul>
       </div>
-
-      <section class="sd-explain">
-        <header>
-          <p class="sd-eyebrow">怎么算的</p>
-          <b>体检按这 4 个维度打分</b>
-          <small>分数不是拍脑袋给的：四项按权重合成可行性评分，再折算净收益与回本周期。</small>
-        </header>
-        <div class="sd-explain-grid">
-          <article v-for="d in DIM_DOCS" :key="d.label">
-            <b>{{ d.label }}</b>
-            <p>{{ d.text }}</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="sd-faq">
-        <header>
-          <p class="sd-eyebrow">常见问题</p>
-          <b>体检前后容易搞混的几件事</b>
-        </header>
-        <div class="sd-faq-list">
-          <article v-for="f in DIAGNOSE_FAQ" :key="f.q">
-            <b>{{ f.q }}</b>
-            <p>{{ f.a }}</p>
-          </article>
-        </div>
-      </section>
     </section>
 
     <!-- ===================== 需求体检 · 自由描述 ===================== -->
@@ -242,11 +199,24 @@
         </div>
       </header>
 
+      <div class="sd-facts">
+        <small>已了解</small>
+        <span :class="{ on: chatProfile.task }">重复事项</span>
+        <span :class="{ on: chatProfile.frequency }">频次</span>
+        <span :class="{ on: chatProfile.duration }">耗时</span>
+        <span :class="{ on: chatProfile.sources.length }">数据源</span>
+        <em v-if="chatProfile.task">{{ chatProfile.task }}</em>
+      </div>
+
       <div ref="threadRef" class="sd-thread">
         <div v-for="(m, i) in messages" :key="i" :class="['sd-msg', m.role]">
           <img v-if="m.role === 'assistant'" class="sd-ava" :src="AVATAR" alt="观微" />
           <div class="sd-bubble">
             <p>{{ m.text }}</p>
+
+            <div v-if="m.chips && m.chips.length && i === messages.length - 1" class="sd-replies">
+              <button v-for="c in m.chips" :key="c" type="button" :disabled="busy" @click="send(c)">{{ c }}</button>
+            </div>
 
             <div v-if="m.card" class="sd-diag">
               <ul class="sd-diag-tasks">
@@ -274,9 +244,6 @@
         </div>
       </div>
 
-      <div class="sd-quick">
-        <button v-for="q in quickAsks" :key="q" type="button" @click="send(q)">{{ q }}</button>
-      </div>
 
       <form class="sd-input" @submit.prevent="send()">
         <input v-model="draft" placeholder="例如：我每天要手动看同行价格，还要整理客户咨询…" />
@@ -462,14 +429,16 @@
             <header>
               <b>{{ p.name }}</b>
               <em v-if="p.custom">我的</em>
+              <em v-else-if="p.optimized" class="sd-prompt-optimized">已优化</em>
               <em v-else-if="p.group" class="sd-prompt-group">{{ p.group }}</em>
             </header>
             <p class="sd-prompt-desc">{{ p.desc }}</p>
             <code class="sd-prompt-text">{{ p.prompt }}</code>
             <div class="sd-prompt-actions">
               <button class="primary" type="button" @click="copyPromptText(p)">复制提示词</button>
-              <button v-if="!p.custom" type="button" :disabled="!options.roles.length" @click="applyTemplate(p)">去体检</button>
-              <button v-else type="button" class="danger" @click="deletePrompt(p)">删除</button>
+              <button type="button" class="optimize" @click="openOptimize(p)">优化</button>
+              <button v-if="p.optimized" type="button" @click="resetOptimize(p)">恢复默认</button>
+              <button v-if="p.custom" type="button" class="danger" @click="deletePrompt(p)">删除</button>
             </div>
           </article>
         </div>
@@ -479,6 +448,28 @@
     
     <!-- 提示放在组件根级：引导 / 托管 / 教程三个面板都能看到反馈 -->
     <p v-if="toast" class="sd-toast">{{ toast }}</p>
+      <!-- 提示词优化弹窗 -->
+    <div v-if="optimizeTarget" class="sd-modal" @click.self="optimizeTarget = null">
+      <div class="sd-modal-box">
+        <header>
+          <div>
+            <p class="sd-eyebrow">优化提示词</p>
+            <b>{{ optimizeTarget.name }}</b>
+            <small>{{ optimizeTarget.desc }}</small>
+          </div>
+          <button class="sd-modal-close" type="button" @click="optimizeTarget = null" aria-label="关闭">✕</button>
+        </header>
+        <textarea v-model="optimizeText" placeholder="在原提示词基础上补充你的业务细节，例如公司名、固定口径、必须遵守的约束…"></textarea>
+        <div class="sd-modal-foot">
+          <small>{{ optimizeText.length }} 字 · 保存后这张卡片就用你的版本</small>
+          <div>
+            <button type="button" @click="optimizeText = optimizeTarget.prompt">还原</button>
+            <button type="button" @click="optimizeTarget = null">取消</button>
+            <button class="primary" type="button" :disabled="!optimizeText.trim()" @click="saveOptimize">保存</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -522,11 +513,6 @@ const tools = [
 ]
 
 
-const quickAsks = [
-  '我每天最耗时的是整理客户咨询',
-  '我要盯着同行的价格和活动',
-  '每周还要写选题和经营周报'
-]
 
 const messages = ref([
   {
@@ -600,6 +586,76 @@ const scrollThread = async () => {
   if (threadRef.value) threadRef.value.scrollTop = threadRef.value.scrollHeight
 }
 
+// ---- 多轮问答：先问清频次 / 耗时 / 数据源，再给建议与方案 ----
+const chatStage = ref('')
+const chatProfile = reactive({ task: '', frequency: '', duration: '', sources: [] })
+
+const matchOption = (text, list, extra = []) => {
+  const t = String(text || '')
+  const hit = list.find((o) => t.includes(o.label))
+  if (hit) return hit.key
+  for (const rule of extra) {
+    if (rule.re.test(t)) return rule.key
+  }
+  return ''
+}
+
+const FREQ_RULES = [
+  { key: 'daily_multi', re: /每天\s*(好几|几|多)次|一天\s*(好几|几)次|多次/ },
+  { key: 'daily', re: /每天|每日|天天/ },
+  { key: 'weekly_multi', re: /每周\s*(好几|几)次|一周\s*(好几|几)次/ },
+  { key: 'weekly', re: /每周|每星期|一周一次/ },
+  { key: 'monthly', re: /每月|每个月/ }
+]
+const DURATION_RULES = [
+  { key: 't15', re: /15\s*分钟|十几分钟|十分钟|几分钟/ },
+  { key: 't120', re: /1\s*小时以上|一个多小时|两三个小时|半天/ },
+  { key: 't60', re: /半小时|30\s*分钟|一小时|1\s*小时/ },
+  { key: 't30', re: /20\s*分钟|一二十分钟/ }
+]
+
+const applyAnswer = (text) => {
+  const stage = chatStage.value
+  const t = String(text || '')
+  if (stage === 'frequency') {
+    chatProfile.frequency = matchOption(t, options.value.frequency, FREQ_RULES) || chatProfile.frequency
+  } else if (stage === 'duration') {
+    chatProfile.duration = matchOption(t, options.value.duration, DURATION_RULES) || chatProfile.duration
+  } else if (stage === 'sources') {
+    options.value.dataSources.forEach((o) => {
+      if (t.includes(o.label) && !chatProfile.sources.includes(o.key)) chatProfile.sources.push(o.key)
+    })
+  }
+  chatStage.value = ''
+}
+
+const nextQuestion = () => {
+  const freq = options.value.frequency
+  const dur = options.value.duration
+  const src = options.value.dataSources
+  if (!chatProfile.frequency && freq.length) {
+    return { key: 'frequency', text: '这件事多久做一次？频次直接决定自动化值不值得做。',
+             chips: freq.map((f) => f.label) }
+  }
+  if (!chatProfile.duration && dur.length) {
+    return { key: 'duration', text: '每次大概要花多久？频次乘上耗时，就是每周真正被占掉的工时。',
+             chips: dur.map((d) => d.label) }
+  }
+  if (!chatProfile.sources.length && src.length) {
+    return { key: 'sources', text: '需要读取哪些数据？可多选 —— 缺数据源是托管失败最常见的原因。',
+             chips: src.map((x) => x.label) }
+  }
+  return null
+}
+
+const resetChat = () => {
+  chatStage.value = ''
+  chatProfile.task = ''
+  chatProfile.frequency = ''
+  chatProfile.duration = ''
+  chatProfile.sources = []
+}
+
 const send = async (text) => {
   const content = String(text || draft.value || '').trim()
   if (!content || busy.value) return
@@ -608,17 +664,44 @@ const send = async (text) => {
   busy.value = true
   await scrollThread()
   try {
-    const data = await yixiuApi.serviceDiagnose({ account: props.account, messages: messages.value })
+    applyAnswer(content)
+
+    // 第一轮先记下「重复事项」；后续每轮记录一个字段
+    if (!chatProfile.task) chatProfile.task = content
+
+    const pending = nextQuestion()
+    const userTurns = messages.value.filter((m) => m.role === 'user').length
+    if (pending && userTurns < 4) {
+      chatStage.value = pending.key
+      messages.value.push({ role: 'assistant', text: pending.text, chips: pending.chips })
+      return
+    }
+
+    const data = await yixiuApi.serviceDiagnose({
+      account: props.account,
+      messages: messages.value,
+      intake: {
+        ...intake,
+        tasks: chatProfile.task ? [chatProfile.task] : intake.tasks,
+        frequency: chatProfile.frequency || intake.frequency,
+        duration: chatProfile.duration || intake.duration,
+        sources: chatProfile.sources.length ? chatProfile.sources : intake.sources
+      }
+    })
     const report = data.report || {}
     if (report.ready) {
       const top = (report.positions || [])[0] || null
+      const verdict = report.verdict || ''
+      const head = verdict.includes('不托管')
+        ? `先说结论：${verdict}。${report.advice || ''}`
+        : `我的建议是：${verdict}。${report.advice || ''}`
       messages.value.push({
         role: 'assistant',
-        text: `识别到 ${report.tasks.length} 类可自动化任务，按优先级排列如下。点「开通托管」即可按这个方案开始运行。`,
+        text: `${head} 下面是按可行性排出来的方案，你可以先看再决定。`,
         card: { tasks: report.tasks, position: top, savingHours: report.savingHours, priceRange: report.priceRange }
       })
     } else {
-      messages.value.push({ role: 'assistant', text: '信息还不够。说说具体是哪些事、多久做一次、现在用什么工具？' })
+      messages.value.push({ role: 'assistant', text: '这轮信息还不够，请再补充一句：你反复在做的是什么？大概多久一次？' })
     }
   } catch (error) {
     flash('诊断服务不可用，请确认后端已启动')
@@ -780,31 +863,8 @@ const HOW_TO = [
   { t: '拿体检报告', d: '得到可行性评分、净收益与落地路径' }
 ]
 
-// 常见场景：点击后直接复用 applyTemplate 带入问卷
-const QUICK_SCENES = [
-  { name: '竞品价格监控', hint: '运营 · 每周', role: '运营', task: '竞品价格与活动监控', frequency: 'weekly', duration: 't30', sources: ['web', 'sheet'] },
-  { name: '客户咨询整理', hint: '客服 · 每天', role: '客服', task: '客户咨询与聊天记录整理', frequency: 'daily', duration: 't30', sources: ['chat', 'sheet'] },
-  { name: '经营日报生成', hint: '运营 · 每天', role: '运营', task: '经营数据汇总与日报生成', frequency: 'daily', duration: 't60', sources: ['sheet', 'api'] },
-  { name: '会议纪要跟踪', hint: '行政 · 每天多次', role: '行政', task: '会议纪要与待办跟踪', frequency: 'daily_multi', duration: 't30', sources: ['file', 'chat'] },
-  { name: '简历初筛', hint: '人力 · 每天', role: '人力', task: '简历筛选与候选人初评', frequency: 'daily', duration: 't30', sources: ['file', 'mail'] },
-  { name: '发票报销核对', hint: '财务 · 每周几次', role: '财务', task: '发票与报销单核对', frequency: 'weekly_multi', duration: 't60', sources: ['file', 'sheet'] },
-  { name: '工单聚类分析', hint: '客服 · 每天', role: '客服', task: '工单聚类与根因初判', frequency: 'daily', duration: 't60', sources: ['api', 'chat'] },
-  { name: '社媒口碑分析', hint: '市场 · 每周几次', role: '市场', task: '用户评价汇总与情感分析', frequency: 'weekly_multi', duration: 't30', sources: ['web', 'api'] }
-]
 
-const DIM_DOCS = [
-  { label: '执行频次', text: '每周实际发生多少次。频次越高，自动化的固定成本被摊得越薄。' },
-  { label: '规则化程度', text: '流程是否固定、判断标准是否明确。规则越稳定，Agent 越不容易跑偏。' },
-  { label: '数据可得性', text: '需要的数据能不能被授权读取。缺数据源是托管失败最常见的原因。' },
-  { label: '单次耗时', text: '人工完整做一次要多久。耗时越长，每次自动化省下的时间越多。' }
-]
 
-const DIAGNOSE_FAQ = [
-  { q: '体检结果和实际差很多？', a: '评分依赖你填的频次与耗时。请按最近一个月的真实情况填，而不是按最忙或最闲的那一周。' },
-  { q: '勾了好几项，为什么只推荐一个岗位？', a: '体检按可行性排序，只对得分最高的几项出具方案，避免一次开太多、每项都做不深。' },
-  { q: '提示数据源没准备好怎么办？', a: '前置条件里会标出缺的是哪一项。多数情况是授权没开，补齐之后重新体检即可。' },
-  { q: '净收益是负的还会推荐吗？', a: '不会。净收益为负时结论直接写「建议先不托管」，并说明差在哪里、先把什么补上。' }
-]
 
 // ---- 教程 · 应用 ----
 
@@ -867,6 +927,53 @@ const readCustomPrompts = () => {
   }
 }
 const customPrompts = ref(readCustomPrompts())
+const OPTIMIZE_KEY = 'yixiu-service-prompt-overrides'
+const readOverrides = () => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(OPTIMIZE_KEY) || '{}')
+    return raw && typeof raw === 'object' ? raw : {}
+  } catch (error) {
+    return {}
+  }
+}
+const promptOverrides = ref(readOverrides())
+const optimizeTarget = ref(null)
+const optimizeText = ref('')
+
+const persistOverrides = (next) => {
+  try { localStorage.setItem(OPTIMIZE_KEY, JSON.stringify(next)) } catch (error) { /* 忽略配额错误 */ }
+}
+
+const openOptimize = (item) => {
+  optimizeTarget.value = item
+  optimizeText.value = item.prompt
+}
+
+const saveOptimize = () => {
+  const target = optimizeTarget.value
+  const text = optimizeText.value.trim()
+  if (!target || !text) return
+  if (target.custom) {
+    const next = customPrompts.value.map((p) => (p.name === target.name ? { ...p, prompt: text } : p))
+    customPrompts.value = next
+    try { localStorage.setItem(CUSTOM_PROMPT_KEY, JSON.stringify(next)) } catch (error) { /* 忽略 */ }
+  } else {
+    const next = { ...promptOverrides.value, [target.name]: text }
+    promptOverrides.value = next
+    persistOverrides(next)
+  }
+  optimizeTarget.value = null
+  flash(`已保存「${target.name}」的优化版本`)
+}
+
+const resetOptimize = (item) => {
+  const next = { ...promptOverrides.value }
+  delete next[item.name]
+  promptOverrides.value = next
+  persistOverrides(next)
+  flash(`已恢复「${item.name}」的默认提示词`)
+}
+
 const promptGroup = ref('全部')
 const promptGroupList = computed(() => {
   const groups = [...new Set(allPrompts.value.filter((p) => !p.custom && p.group).map((p) => p.group))]
@@ -884,10 +991,15 @@ const visiblePrompts = computed(() => {
 
 const showPromptForm = ref(false)
 const promptForm = reactive({ title: '', text: '' })
-const allPrompts = computed(() => [
-  ...PROMPTS,
-  ...customPrompts.value.map((item) => ({ ...item, custom: true }))
-])
+const allPrompts = computed(() => {
+  const overrides = promptOverrides.value
+  return [
+    ...PROMPTS.map((item) => (overrides[item.name]
+      ? { ...item, prompt: overrides[item.name], optimized: true }
+      : item)),
+    ...customPrompts.value.map((item) => ({ ...item, custom: true }))
+  ]
+})
 
 const savePrompt = () => {
   if (!promptForm.title || !promptForm.text) return
@@ -1091,9 +1203,6 @@ watch(panel, (v) => { if (v === 'hosting') loadHostings() })
 .sd-diag-actions button.primary { border: 0; background: linear-gradient(135deg, #c8872e, #e0a94a); color: #fff; }
 .sd-diag-actions button:disabled { opacity: .55; cursor: not-allowed; }
 
-.sd-quick { display: flex; flex-wrap: wrap; gap: 7px; padding-top: 10px; border-top: 1px solid #f2ede2; }
-.sd-quick button { padding: 6px 12px; border: 1px dashed #e0d0ab; border-radius: 999px; background: #fdf8ec; color: #8a6a20; font-size: 11.5px; cursor: pointer; }
-.sd-quick button:hover { background: #f8efd8; }
 
 .sd-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
 .sd-input input { height: 50px; padding: 0 16px; border: 1px solid #eadfc6; border-radius: 12px; background: #fffdf8; color: #3d2f14; font-size: 13.5px; outline: 0; }
@@ -1440,30 +1549,7 @@ watch(panel, (v) => { if (v === 'hosting') loadHostings() })
 .sd-howto b { color: #1d3238; font-size: 13px; }
 .sd-howto small { color: #7b9096; font-size: 11.5px; line-height: 1.5; }
 
-.sd-quick { display: grid; gap: 11px; margin-bottom: 14px; padding: 15px 17px; border: 1px solid #e7eef0; border-radius: 14px; background: #fbfdfd; }
-.sd-quick header b { display: block; margin: 2px 0 3px; color: #1d3238; font-size: 15px; }
-.sd-quick header small { color: #7b9096; font-size: 11.5px; }
-.sd-quick-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
-.sd-quick-chips button {
-  display: grid; gap: 2px; padding: 10px 13px; border: 1px solid #e2ecee; border-radius: 11px;
-  background: #fff; text-align: left; font: inherit; cursor: pointer;
-  transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease;
-}
-.sd-quick-chips button:hover { border-color: rgba(22,118,111,.42); transform: translateY(-1px); box-shadow: 0 8px 18px rgba(24,60,68,.06); }
-.sd-quick-chips button b { color: #1d3238; font-size: 12.5px; }
-.sd-quick-chips button small { color: #8fa2a8; font-size: 11px; }
 
-.sd-explain, .sd-faq { display: grid; gap: 12px; margin-top: 20px; padding: 18px 20px; border: 1px solid #e7eef0; border-radius: 14px; background: #fff; }
-.sd-explain header b, .sd-faq header b { display: block; margin: 2px 0 4px; color: #1d3238; font-size: 16px; }
-.sd-explain header small { color: #7b9096; font-size: 12px; }
-.sd-explain-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
-.sd-explain-grid article { padding: 13px 15px; border: 1px solid #eaf1f2; border-radius: 12px; background: #fbfdfd; }
-.sd-explain-grid b { display: block; margin-bottom: 5px; color: #1f5a55; font-size: 12.5px; }
-.sd-explain-grid p { margin: 0; color: #607a7e; font-size: 12px; line-height: 1.7; }
-.sd-faq-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
-.sd-faq-list article { padding: 13px 15px; border: 1px solid #eaf1f2; border-radius: 12px; background: #fbfdfd; }
-.sd-faq-list b { display: block; margin-bottom: 5px; color: #1d3238; font-size: 12.5px; }
-.sd-faq-list p { margin: 0; color: #607a7e; font-size: 12px; line-height: 1.7; }
 
 /* 顶部模式切换收紧 */
 .sd-modes button { padding: 11px 15px; }
@@ -1565,4 +1651,137 @@ watch(panel, (v) => { if (v === 'hosting') loadHostings() })
 .sd-prompt-actions button:hover { border-color: rgba(22,118,111,.4); color: var(--teal-dark, #0f5854); }
 .sd-prompt-actions button.primary { background: linear-gradient(135deg, #1c837a, #12655f); border: 0; }
 .sd-prompt.custom { border-color: #d9e8e6; background: linear-gradient(180deg, #fbfdfd, #ffffff); }
+
+/* ---- 提示词优化：弹窗与标记 ---- */
+.sd-prompt > header em.sd-prompt-optimized {
+  padding: 2px 8px; border-radius: 999px;
+  background: #e9f4f2; color: #16766f; font-size: 10.5px; font-style: normal; font-weight: 800;
+}
+.sd-prompt-actions button.optimize { border-color: rgba(22,118,111,.34); color: var(--teal-dark, #0f5854); }
+
+.sd-modal {
+  position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px;
+  background: rgba(20, 38, 40, .38); backdrop-filter: blur(2px);
+}
+.sd-modal-box {
+  width: min(640px, 100%); max-height: 82vh; overflow: auto;
+  display: grid; gap: 14px; padding: 20px 22px;
+  border-radius: 16px; background: #fff; box-shadow: 0 30px 70px rgba(15, 40, 44, .3);
+}
+.sd-modal-box > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.sd-modal-box > header b { display: block; margin: 2px 0 4px; color: #1d3238; font-size: 16px; }
+.sd-modal-box > header small { color: #7b9096; font-size: 12px; line-height: 1.6; }
+.sd-modal-close {
+  flex: none; width: 30px; height: 30px; display: grid; place-items: center;
+  border: 1px solid #e2ecee; border-radius: 9px; background: #fff; color: #6d8489;
+  font-size: 13px; cursor: pointer; transition: border-color .16s, color .16s;
+}
+.sd-modal-close:hover { border-color: rgba(22,118,111,.4); color: var(--teal-dark, #0f5854); }
+.sd-modal-box textarea {
+  width: 100%; min-height: 220px; padding: 14px 15px; resize: vertical;
+  border: 1px solid #dfeae8; border-radius: 12px; background: #fbfdfd;
+  color: #33494e; font: inherit; font-size: 13px; line-height: 1.85; outline: 0;
+}
+.sd-modal-box textarea:focus { border-color: #75aaa5; background: #fff; box-shadow: 0 0 0 3px rgba(22,118,111,.1); }
+.sd-modal-foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.sd-modal-foot > small { color: #8fa2a8; font-size: 11.5px; }
+.sd-modal-foot > div { display: flex; gap: 8px; }
+.sd-modal-foot button {
+  min-height: 36px; padding: 0 16px; border: 1px solid #e2ecee; border-radius: 9px;
+  background: #fff; color: #4d656c; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer;
+}
+.sd-modal-foot button:hover { border-color: rgba(22,118,111,.4); color: var(--teal-dark, #0f5854); }
+.sd-modal-foot button.primary { border: 0; background: linear-gradient(135deg, #1c837a, #12655f); color: #fff; }
+.sd-modal-foot button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ---- 自由描述：多轮对话布局收紧 ---- */
+.sd-chat { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 12px; }
+.sd-thread { max-width: 960px; width: 100%; margin: 0 auto; }
+
+.sd-facts {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  max-width: 960px; width: 100%; margin: 0 auto;
+  padding: 10px 14px; border: 1px solid #e7eef0; border-radius: 12px; background: #fbfdfd;
+}
+.sd-facts > small { color: #93a3a7; font-size: 11.5px; font-weight: 800; }
+.sd-facts > span {
+  padding: 4px 11px; border-radius: 999px; border: 1px solid #e6ecec;
+  background: #fff; color: #9aacb0; font-size: 11.5px; font-weight: 800;
+}
+.sd-facts > span.on { border-color: transparent; background: #e9f4f2; color: #16766f; }
+.sd-facts > em {
+  margin-left: auto; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #5a7076; font-size: 11.5px; font-style: normal;
+}
+
+.sd-replies { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.sd-replies button {
+  padding: 7px 14px; border: 1px solid #dcebe8; border-radius: 999px;
+  background: #fff; color: #1f6b64; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer;
+  transition: border-color .16s ease, background .16s ease, transform .16s ease;
+}
+.sd-replies button:hover { border-color: rgba(22,118,111,.5); background: #f2faf8; transform: translateY(-1px); }
+.sd-replies button:disabled { opacity: .5; cursor: not-allowed; }
+
+.sd-msg { max-width: 100%; }
+.sd-bubble { max-width: 660px; }
+.sd-input { max-width: 960px; width: 100%; margin: 0 auto; }
+
+/* ---- 分步引导：放大字号、按钮与间距，比例更均衡 ---- */
+.sd-guided { display: grid; gap: 18px; max-width: 1180px; margin: 0 auto; }
+
+.sd-guide-hero { padding: 22px 26px; border-left: 5px solid #1c837a; }
+.sd-guide-hero b { font-size: 20px; letter-spacing: -.01em; }
+.sd-guide-hero small { font-size: 14px; }
+
+.sd-howto { gap: 14px; margin-top: 0; }
+.sd-howto span { grid-template-columns: 32px minmax(0, 1fr); gap: 4px 12px; padding: 15px 18px; border-radius: 14px; }
+.sd-howto em { width: 32px; height: 32px; font-size: 14px; }
+.sd-howto b { font-size: 15px; }
+.sd-howto small { font-size: 13px; }
+
+.sd-steps { gap: 10px; }
+.sd-steps span { gap: 8px; padding: 9px 18px; font-size: 13.5px; }
+.sd-steps span em { width: 22px; height: 22px; font-size: 12px; }
+
+.sd-form { gap: 20px; padding: 28px 30px; border-radius: 18px; }
+.sd-form-head { grid-template-columns: 56px minmax(0, 1fr); gap: 18px; }
+.sd-step-no { width: 56px; height: 56px; border-radius: 16px; font-size: 24px; }
+.sd-form-headcopy { gap: 8px; }
+.sd-form-headcopy h3 { font-size: 23px; }
+.sd-hint { font-size: 14px; }
+.sd-why { font-size: 13.5px; line-height: 1.75; }
+
+.sd-chips { gap: 12px; }
+.sd-chips.wide { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.sd-chips button {
+  padding: 15px 20px; border-radius: 14px; font-size: 15px; font-weight: 700; gap: 4px;
+  transition: border-color .16s ease, background .16s ease, transform .16s ease, box-shadow .16s ease;
+}
+.sd-chips button:hover { border-color: rgba(22,118,111,.45); transform: translateY(-1px); box-shadow: 0 8px 18px rgba(24,60,68,.06); }
+.sd-chips button em { font-size: 12.5px; }
+.sd-chips button.on { border-color: #1c837a; background: #f2faf8; color: #12655f; }
+.sd-note { font-size: 13.5px; }
+.sd-note input { padding: 13px 16px; font-size: 14px; }
+
+.sd-form-foot { padding-top: 8px; }
+.sd-form-foot button {
+  min-width: 132px; min-height: 50px; padding: 0 28px; border-radius: 13px; font-size: 15px;
+}
+.sd-form-foot button.primary { box-shadow: 0 10px 22px rgba(18,101,95,.22); }
+.sd-progress { font-size: 14px; }
+
+/* 报告区同步放大 */
+.sd-report { display: grid; gap: 18px; }
+.sd-verdict { padding: 24px 28px; border-radius: 16px; }
+.sd-verdict h3 { font-size: 24px; }
+.sd-verdict p { font-size: 14px; line-height: 1.8; }
+.sd-verdict button { min-height: 44px; padding: 0 22px; font-size: 14px; border-radius: 11px; }
+.sd-report-card { padding: 24px 26px; border-radius: 16px; }
+.sd-report-card header b { font-size: 19px; }
+.sd-report-card header small { font-size: 13.5px; }
+.sd-dims span small, .sd-dims span em { font-size: 13px; }
+.sd-roi span small { font-size: 12.5px; }
+.sd-roi span b { font-size: 19px; }
+.sd-report-actions button { min-height: 46px; padding: 0 24px; font-size: 14px; border-radius: 12px; }
 </style>

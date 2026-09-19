@@ -46,7 +46,7 @@ class AIModelSettings:
 
 
 def load_ai_settings() -> AIModelSettings:
-    provider = _env_first("AI_PROVIDER", default="qwen").lower()
+    provider = _env_first("AI_PROVIDER", default="deepseek").lower()
 
     if provider in {"qwen", "dashscope", "aliyun"}:
         api_key = _env_first("DASHSCOPE_API_KEY_TUANTUAN", "DASHSCOPE_API_KEY", "QWEN_API_KEY")
@@ -67,8 +67,8 @@ def load_ai_settings() -> AIModelSettings:
             provider="deepseek",
             api_key=_env_first("DEEPSEEK_API_KEY"),
             base_url=_env_first("DEEPSEEK_BASE_URL", default="https://api.deepseek.com").rstrip("/"),
-            chat_model=_env_first("DEEPSEEK_CHAT_MODEL", "DEEPSEEK_MODEL_NAME", default="deepseek-v4-flash"),
-            vision_model=_env_first("QWEN_VISION_MODEL", default="qwen-vl-plus"),
+            chat_model=_env_first("DEEPSEEK_CHAT_MODEL", "DEEPSEEK_MODEL_NAME", default="deepseek-chat"),
+            vision_model=_env_first("DEEPSEEK_VISION_MODEL", "QWEN_VISION_MODEL", default="deepseek-v4-flash-vision-exp"),
             embedding_model=_env_first("EMBEDDING_MODEL", default="text-embedding-v4"),
             image_model=_env_first("QWEN_IMAGE_MODEL", default="qwen-image-2.0"),
             timeout=int(_env_first("AI_TIMEOUT", "DEEPSEEK_TIMEOUT", default="45")),
