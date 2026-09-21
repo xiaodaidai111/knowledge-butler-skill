@@ -656,18 +656,7 @@ class AiosRagPipelineTest(AiosSecurityTest):
         from services.file_parser import parse_file
         self.assertEqual(parse_file(Path(self.tmp.name) / "nope.pdf"), [])
 
-    def test_rag_service_search_similar_returns_list(self):
-        """search_similar 即使 LightRAG 未就绪也回退到本地匹配"""
-        from services.rag_service import search_similar
-        hits = search_similar("配电柜 过热", limit=3)
-        # 不报错、返回列表
-        self.assertIsInstance(hits, list)
-        # 上限限制
-        self.assertLessEqual(len(hits), 3)
 
-    def test_rag_service_search_similar_empty_query(self):
-        from services.rag_service import search_similar
-        self.assertEqual(search_similar(""), [])
 
     def test_knowledge_similar_endpoint(self):
         """GET /knowledge/similar 返回向量相似度检索结果"""
@@ -730,7 +719,7 @@ class AiosRagPipelineTest(AiosSecurityTest):
 
 
 class AiosRealToolsTest(AiosSecurityTest):
-    """真实工具类测试：FileParseTool / RagQueryTool / SopGenerateTool / TaskUpdateTool"""
+    """真实工具类测试：FileParseTool / SopGenerateTool / TaskUpdateTool"""
 
     def test_file_parse_tool_requires_file_id_or_path(self):
         from miniclaw.builtins.system_tools import FileParseTool
@@ -753,23 +742,9 @@ class AiosRealToolsTest(AiosSecurityTest):
             tool = FileParseTool()
             result = tool.execute(file_path=str(txt_path), source="test.txt")
         self.assertTrue(result.success)
-        self.assertIn("切片入库", result.output)
+        self.assertIn("已解析", result.output)
 
-    def test_rag_query_tool_requires_query(self):
-        from miniclaw.builtins.system_tools import RagQueryTool
-        tool = RagQueryTool()
-        result = tool.execute()
-        self.assertFalse(result.success)
 
-    def test_rag_query_tool_returns_hits(self):
-        """RagQueryTool 走 /knowledge/similar 接口"""
-        from miniclaw.builtins.system_tools import RagQueryTool
-        # 需要在 Flask app 上下文里跑，因为它调用 HTTP 接口
-        # 改为直接测 search_similar 函数
-        from services.rag_service import search_similar
-        hits = search_similar("配电柜", limit=2)
-        self.assertIsInstance(hits, list)
-        self.assertLessEqual(len(hits), 2)
 
     def test_sop_generate_tool_returns_steps(self):
         from miniclaw.builtins.system_tools import SopGenerateTool
@@ -801,7 +776,7 @@ class AiosRealToolsTest(AiosSecurityTest):
         api = _FakeApi()
         system_tools.register(api)
         names = {t.name for t in api.registered}
-        for expected in ("file_parse", "vision_analyze", "rag_query", "sop_generate", "task_update"):
+        for expected in ("file_parse", "vision_analyze", "sop_generate", "task_update"):
             self.assertIn(expected, names)
 
 

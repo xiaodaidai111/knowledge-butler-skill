@@ -106,7 +106,6 @@ def create_unified_app():
         ('routes.takeaway_health', 'takeaway_health_bp', '', 'takeaway health service'),
         ('routes.yixiu', 'yixiu_bp', '/api/yixiu', 'yixiu web orchestration service'),
         ('routes.maintenance_tasks', 'maintenance_tasks_bp', '/api/maintenance-tasks', 'maintenance tasks service'),
-        ('routes.rag', 'rag_bp', '/api/rag', 'LightRAG knowledge graph service'),
     ]
 
     for import_path, blueprint_name, url_prefix, service_name in registrations:
@@ -163,7 +162,6 @@ def create_unified_app():
                     'recipe-recommendation': '/api/recipe-recommendation - 兼容服务',
                     'openclaw': '/openclaw - 智能助手服务',
                     'speech': '/api/speech/transcribe - 语音识别服务',
-                    'rag': '/api/rag - LightRAG 知识图谱检索服务',
                     'yixiu': '/api/yixiu - 一休项目协作与多智能体编排服务',
                 },
                 'status': 'running',

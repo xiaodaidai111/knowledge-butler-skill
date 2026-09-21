@@ -40,7 +40,11 @@ print("=== ACR 与 AIOS 接线自检 ===")
 # ---- 1. 计划层：每步都声明了 consumes，plan 带初始信封 ----
 plan = _aios_plan("修复支付回调重复触发导致订单重复处理的问题", "repair")
 steps = plan.get("steps", [])
-check("计划含 12 步", len(steps) == 12, len(steps))
+# 规划器由大模型自主决定步数（失败才回退 12 步模板），因此不写死步数，
+# 只校验真正的不变量：非空、步数有界、每步 key 来自 RELAY_CONSUMES。
+check("计划非空且步数有界", 1 <= len(steps) <= 24, len(steps))
+check("每步 key 均来自 RELAY_CONSUMES", all(s.get("key") in RELAY_CONSUMES for s in steps),
+      [s.get("key") for s in steps if s.get("key") not in RELAY_CONSUMES])
 check("每步都声明 consumes", all(isinstance(s.get("consumes"), list) and s["consumes"] for s in steps),
       [s["key"] for s in steps if not s.get("consumes")])
 check("consumes 取自 RELAY_CONSUMES", all(list(s["consumes"]) == list(RELAY_CONSUMES.get(s["key"], [])) for s in steps))

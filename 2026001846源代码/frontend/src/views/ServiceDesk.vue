@@ -4,14 +4,11 @@
       <div>
         <p class="sd-eyebrow">Service Desk</p>
         <h2>服务台</h2>
-        <p class="sd-sub">需求体检 → 开通托管 → 周期交付，把一次性任务变成长周期服务</p>
+        <p class="sd-sub">问清频次与数据源，给出可行性评分、落地方案与验收标准</p>
       </div>
       <div class="sd-tabs">
         <button type="button" :class="{ active: panel === 'diagnose' }" @click="panel = 'diagnose'">需求体检</button>
         <button type="button" :class="{ active: panel === 'learn' }" @click="panel = 'learn'">提示词库</button>
-        <button type="button" :class="{ active: panel === 'hosting' }" @click="panel = 'hosting'">
-          托管运行<em v-if="kpi.warnings">{{ kpi.warnings }}</em>
-        </button>
       </div>
     </header>
 
@@ -29,84 +26,172 @@
 
     <!-- ===================== 需求体检 · 分步引导 ===================== -->
     <section v-if="panel === 'diagnose' && mode === 'guided'" class="sd-guided">
-      <div class="sd-guide-hero">
-        <div>
-          <b>用 5 个问题，算出这件事值不值得交给 Agent</b>
-          <small>频次 × 耗时 × 规则化程度 × 数据可得性 → 可行性评分、净收益与回本周期</small>
+      <!-- 左：步骤轨 + 填写提示 -->
+      <aside class="sd-quiz-side">
+        <p class="sd-quiz-state"><i></i>需求体检进行中</p>
+        <h2 class="sd-quiz-name">{{ currentProjectName }}<br />需求切片</h2>
+
+        <ol class="sd-quiz-nav">
+          <li
+            v-for="(s, i) in STEPS"
+            :key="s.key"
+            :class="{ on: i === step, done: i < step }"
+            @click="goStep(i)"
+          >
+            <em>{{ String(i + 1).padStart(2, '0') }}</em>
+            <span>{{ s.label }}</span>
+            <i></i>
+          </li>
+        </ol>
+
+        <div class="sd-quiz-tip">
+          <b>填写提示</b>
+          <p>{{ STEPS[step].why }}</p>
         </div>
-      </div>
+      </aside>
 
-      <div class="sd-howto">
-        <span v-for="(h, i) in HOW_TO" :key="h.t">
-          <em>{{ i + 1 }}</em>
-          <b>{{ h.t }}</b>
-          <small>{{ h.d }}</small>
-        </span>
-      </div>
+      <!-- 右：进度 + 当前题目 -->
+      <div class="sd-quiz-main">
+        <template v-if="!report">
+          <header class="sd-quiz-bar">
+            <span>{{ String(step + 1).padStart(2, '0') }} / {{ String(STEPS.length).padStart(2, '0') }}</span>
+            <div class="sd-quiz-progress"><i :style="{ width: quizProgress + '%' }"></i></div>
+            <button type="button" @click="mode = 'freeform'">暂存并返回</button>
+          </header>
 
-      <div class="sd-steps">
-        <span v-for="(s, i) in STEPS" :key="s.key" :class="{ on: i === step, done: i < step }">
-          <em>{{ i + 1 }}</em><small>{{ s.label }}</small>
-        </span>
-      </div>
+          <article class="sd-quiz-card">
+            <header>
+              <p class="sd-quiz-eyebrow">需求体检</p>
+              <small>{{ STEPS[step].label }}</small>
+            </header>
 
-      <div v-if="!report" class="sd-form">
-        <div class="sd-form-head">
-          <span class="sd-step-no" aria-hidden="true">{{ step + 1 }}</span>
-          <div class="sd-form-headcopy">
-            <h3>{{ STEPS[step].title }}</h3>
-            <p class="sd-hint">{{ STEPS[step].hint }}</p>
-            <p class="sd-why"><b>为什么问这个</b>{{ STEPS[step].why }}</p>
-          </div>
-        </div>
-        <p v-if="!optionsLoading && !options.roles.length" class="sd-hint sd-hint-warn">
-          体检选项未加载。若后端刚更新过代码，请重启后端再刷新本页。
-        </p>
+            <h3 class="sd-quiz-question">{{ STEPS[step].title }}</h3>
+            <p class="sd-quiz-hint">{{ STEPS[step].hint }}</p>
 
-        <div v-if="STEPS[step].key === 'role'" class="sd-chips">
-          <button v-for="r in options.roles" :key="r" type="button"
-                  :class="{ on: intake.role === r }" @click="intake.role = r">{{ r }}</button>
-        </div>
+            <p v-if="!optionsLoading && !options.roles.length" class="sd-hint sd-hint-warn">
+              体检选项未加载。若后端刚更新过代码，请重启后端再刷新本页。
+            </p>
 
-        <div v-else-if="STEPS[step].key === 'tasks'" class="sd-chips wide">
-          <button v-for="t in options.tasks" :key="t.task" type="button"
-                  :class="{ on: intake.tasks.includes(t.task) }" @click="toggleIn(intake.tasks, t.task)">
-            {{ t.task }}<em>{{ t.position }}</em>
-          </button>
-        </div>
+            <!-- 频次 / 耗时：量表式 -->
+            <div v-if="scaleOptions.length" class="sd-scale">
+              <button
+                v-for="(o, i) in scaleOptions"
+                :key="o.key"
+                type="button"
+                :class="{ on: scalePicked === o.key }"
+                @click="pickScale(o.key)"
+              >
+                <i></i>
+                <span>{{ o.label }}</span>
+              </button>
+            </div>
 
-        <div v-else-if="STEPS[step].key === 'frequency'" class="sd-chips">
-          <button v-for="f in options.frequency" :key="f.key" type="button"
-                  :class="{ on: intake.frequency === f.key }" @click="intake.frequency = f.key">{{ f.label }}</button>
-        </div>
+            <!-- 角色：单选 -->
+            <div v-else-if="STEPS[step].key === 'role'" class="sd-free">
+              <div class="sd-chips">
+                <button v-for="r in options.roles" :key="r" type="button"
+                        :class="{ on: intake.role === r }" @click="intake.role = r">{{ r }}</button>
+              </div>
+              <label class="sd-free-label">
+                <b>用自己的话描述一下（可选）</b>
+                <small>例如：我负责华东区售后，日常一半时间在回客户消息、一半在写周报</small>
+                <textarea v-model="intake.roleNote" rows="2"
+                          placeholder="写得越具体，推荐越准"></textarea>
+              </label>
+            </div>
 
-        <div v-else-if="STEPS[step].key === 'duration'" class="sd-chips">
-          <button v-for="d in options.duration" :key="d.key" type="button"
-                  :class="{ on: intake.duration === d.key }" @click="intake.duration = d.key">{{ d.label }}</button>
-        </div>
+            <!-- 重复事项：多选 -->
+            <div v-else-if="STEPS[step].key === 'tasks'" class="sd-free">
+              <div class="sd-chips wide">
+                <button v-for="t in options.tasks" :key="t.task" type="button"
+                        :class="{ on: intake.tasks.includes(t.task) }" @click="toggleIn(intake.tasks, t.task)">
+                  {{ t.task }}<em>{{ t.position }}</em>
+                </button>
+              </div>
+              <label class="sd-free-label">
+                <b>具体说说这些事怎么做的（可选）</b>
+                <small>例如：先把聊天记录导出成表格，按问题类型分成五类，再手工挑出要跟进的</small>
+                <textarea v-model="intake.taskNote" rows="3"
+                          placeholder="做这件事的完整步骤、卡在哪一步、有没有固定判断标准"></textarea>
+              </label>
+            </div>
 
-        <div v-else class="sd-chips wide">
-          <button v-for="s in options.dataSources" :key="s.key" type="button"
-                  :class="{ on: intake.sources.includes(s.key) }" @click="toggleIn(intake.sources, s.key)">
-            {{ s.label }}
-          </button>
-          <label class="sd-note">补充说明（可选）
-            <input v-model="intake.note" placeholder="例如：现在用飞书表格手工汇总，每周还要发给 3 个同事复核" />
-          </label>
-        </div>
+            <!-- 数据来源：多选 + 补充说明 -->
+            <div v-else class="sd-chips wide">
+              <button v-for="s in options.dataSources" :key="s.key" type="button"
+                      :class="{ on: intake.sources.includes(s.key) }" @click="toggleIn(intake.sources, s.key)">
+                {{ s.label }}
+              </button>
+              <label class="sd-free-label">
+                <b>数据现在放在哪、怎么拿（可选）</b>
+                <small>例如：聊天记录在企微后台能导出；价格靠人工看网页截图；表格在飞书</small>
+                <textarea v-model="intake.note" rows="3"
+                          placeholder="说清数据的存放位置和获取方式，能显著提高判断准确度"></textarea>
+              </label>
+            </div>
 
-        <div class="sd-form-foot">
-          <button v-if="step > 0" type="button" @click="step--">上一步</button>
-          <span class="sd-progress">{{ step + 1 }} / {{ STEPS.length }}</span>
-          <button v-if="step < STEPS.length - 1" class="primary" type="button"
-                  :disabled="!canNext" @click="step++">下一步</button>
-          <button v-else class="primary" type="button" :disabled="busy || !canNext" @click="submitIntake">
-            {{ busy ? '体检中…' : '生成体检报告' }}
-          </button>
-        </div>
-      </div>
+            <footer class="sd-quiz-foot">
+              <button type="button" :disabled="step === 0" @click="step--">← 上一题</button>
+              <small v-if="scaleOptions.length">{{ scaleOptions.length }} 项，按 <b>1—{{ scaleOptions.length }}</b> 可快速选择</small>
+              <small v-else>{{ STEPS[step].key === 'tasks' || STEPS[step].key === 'sources' ? '可多选，选完点下一步' : '单选，选完点下一步' }}</small>
+              <button v-if="step < STEPS.length - 1" class="primary" type="button"
+                      :disabled="!canNext" @click="step++">下一题 →</button>
+              <button v-else class="primary" type="button" :disabled="busy || !canNext" @click="submitIntake">
+                {{ busy ? '体检中…' : '生成体检报告 →' }}
+              </button>
+            </footer>
+          </article>
+        </template>
 
       <div v-else class="sd-report">
+        <!-- AI 针对性建议：哪些任务能交给 Agent -->
+        <section v-if="report.ai && report.ai.replaceable && report.ai.replaceable.length" class="sd-ai">
+          <header class="sd-ai-head">
+            <div>
+              <p class="sd-eyebrow">观微的建议</p>
+              <h3>{{ report.ai.headline || '哪些活可以交给 Agent' }}</h3>
+            </div>
+            <span class="sd-ai-badge">由 AI 依据你填写的内容生成</span>
+          </header>
+
+          <div class="sd-ai-grid">
+            <article
+              v-for="(item, i) in report.ai.replaceable"
+              :key="item.task"
+              class="sd-ai-card"
+              :class="`conf-${item.confidence === '高' ? 'high' : item.confidence === '中' ? 'mid' : 'low'}`"
+            >
+              <header>
+                <span class="sd-ai-no">{{ String(i + 1).padStart(2, '0') }}</span>
+                <b>{{ item.task }}</b>
+                <em>{{ item.confidence }}可行</em>
+              </header>
+              <dl>
+                <dt v-if="item.agent">建议岗位</dt>
+                <dd v-if="item.agent">{{ item.agent }}</dd>
+                <dt>判断依据</dt>
+                <dd>{{ item.why }}</dd>
+                <dt>第一步</dt>
+                <dd>{{ item.how }}</dd>
+              </dl>
+            </article>
+          </div>
+
+          <div class="sd-ai-split">
+            <div v-if="report.ai.keepHuman && report.ai.keepHuman.length" class="sd-ai-keep">
+              <b>必须留人工的环节</b>
+              <ul><li v-for="x in report.ai.keepHuman" :key="x">{{ x }}</li></ul>
+            </div>
+            <div v-if="report.ai.watch && report.ai.watch.length" class="sd-ai-watch">
+              <b>需要注意的前提</b>
+              <ul><li v-for="x in report.ai.watch" :key="x">{{ x }}</li></ul>
+            </div>
+          </div>
+
+          <p v-if="report.ai.advice" class="sd-ai-advice">{{ report.ai.advice }}</p>
+        </section>
+
+        <p class="sd-report-label">规则引擎测算</p>
         <div class="sd-verdict" :class="verdictTone">
           <div>
             <p class="sd-eyebrow">体检结论</p>
@@ -136,16 +221,6 @@
               </span>
             </div>
 
-            <div class="sd-roi">
-              <span><small>每周省</small><b>{{ d.automation.savedHoursPerWeek }}h</b></span>
-              <span><small>月节省</small><b>¥{{ d.automation.monthlySaving }}</b></span>
-              <span><small>托管费</small><b>¥{{ d.automation.monthlyCost }}</b></span>
-              <span :class="{ neg: d.automation.netBenefit <= 0 }">
-                <small>净收益</small><b>¥{{ d.automation.netBenefit }}</b>
-              </span>
-              <span><small>回本</small><b>{{ d.automation.paybackDays }} 天</b></span>
-            </div>
-
             <details>
               <summary>落地路径（3 周）</summary>
               <ol class="sd-plan">
@@ -171,15 +246,13 @@
             </details>
 
             <div class="sd-report-actions">
-              <button class="primary" type="button" :disabled="busy" @click="openHosting({ position: report.positions[i], tasks: report.tasks })">
-                开通托管
-              </button>
               <button type="button" @click="copyReport(d)">复制这项方案</button>
             </div>
           </article>
         </div>
 
         <ul class="sd-risks"><li v-for="r in report.risks" :key="r">{{ r }}</li></ul>
+      </div>
       </div>
     </section>
 
@@ -212,7 +285,7 @@
         <div v-for="(m, i) in messages" :key="i" :class="['sd-msg', m.role]">
           <img v-if="m.role === 'assistant'" class="sd-ava" :src="AVATAR" alt="观微" />
           <div class="sd-bubble">
-            <p>{{ m.text }}</p>
+            <div class="md-body" v-html="renderMarkdown(m.text)"></div>
 
             <div v-if="m.chips && m.chips.length && i === messages.length - 1" class="sd-replies">
               <button v-for="c in m.chips" :key="c" type="button" :disabled="busy" @click="send(c)">{{ c }}</button>
@@ -232,7 +305,6 @@
                 <span><small>预计节省</small><b>{{ m.card.savingHours }}h/周</b></span>
               </div>
               <div class="sd-diag-actions">
-                <button class="primary" type="button" :disabled="busy" @click="openHosting(m.card)">开通托管</button>
                 <button type="button" @click="copyPlan(m.card)">复制方案</button>
               </div>
             </div>
@@ -250,148 +322,6 @@
         <button type="submit" :disabled="busy || !draft.trim()">{{ busy ? '诊断中' : '发送' }}</button>
       </form>
     </section>
-
-    <!-- ===================== 托管运行 ===================== -->
-    <div v-else-if="panel === 'hosting'" class="sd-hosting">
-      <div class="sd-kpis">
-        <span><b>{{ kpi.hosting }}</b><small>托管中</small></span>
-        <span><b>{{ kpi.runs }}</b><small>累计运行</small></span>
-        <span><b>{{ kpi.successRate }}%</b><small>成功率</small></span>
-        <span><b>¥{{ kpi.cost }}</b><small>累计成本</small></span>
-        <span :class="{ warn: kpi.warnings > 0 }"><b>{{ kpi.warnings }}</b><small>待处理异常</small></span>
-        <button type="button" class="sd-kpi-btn" @click="showCreate = !showCreate">
-          {{ showCreate ? '收起' : '+ 新建托管' }}
-        </button>
-      </div>
-
-      <!-- 把体检结论带进托管面板：原来「体检 → 开通托管」之后就断在这里，
-           看不到当初算出来的收益，也没法对照。 -->
-      <div v-if="report && report.ready" class="sd-host-brief">
-        <div class="sd-host-brief-copy">
-          <p class="sd-eyebrow">体检结论</p>
-          <h3>{{ report.verdict }}</h3>
-          <small>{{ report.advice }}</small>
-        </div>
-        <div class="sd-host-brief-metrics">
-          <span><small>每周可省</small><b>{{ report.savingHours }}h</b></span>
-          <span><small>每月节省</small><b>¥{{ topAutomation.monthlySaving || 0 }}</b></span>
-          <span><small>托管费</small><b>¥{{ topAutomation.monthlyCost || 0 }}</b></span>
-          <span :class="{ neg: (topAutomation.netBenefit || 0) <= 0 }">
-            <small>净收益</small><b>¥{{ topAutomation.netBenefit || 0 }}</b>
-          </span>
-          <span><small>回本</small><b>{{ topAutomation.paybackDays || '—' }} 天</b></span>
-        </div>
-        <button type="button" @click="panel = 'diagnose'">重新体检</button>
-      </div>
-
-      <form v-if="showCreate" class="sd-create" @submit.prevent="createHosting()">
-        <label>服务名称<input v-model="createForm.name" placeholder="如：竞品价格周报" /></label>
-        <label>套餐
-          <select v-model="createForm.plan">
-            <option>基础版</option><option>专业版</option><option>企业版</option>
-          </select>
-        </label>
-        <label>运行周期<input v-model="createForm.cycle" placeholder="如：每周一 09:00" /></label>
-        <label>参考价<input v-model="createForm.price" placeholder="如：¥499/月" /></label>
-        <button class="primary" type="submit" :disabled="busy || !createForm.name.trim()">开通</button>
-      </form>
-
-      <div class="sd-host-grid">
-        <section class="sd-card sd-host-list">
-          <header><b>托管服务</b><small>{{ hostings.length }} 个</small></header>
-
-          <article v-for="h in hostings" :key="h.id" class="sd-host" :class="{ open: expanded === h.id }">
-            <div class="sd-host-head" @click="expanded = expanded === h.id ? '' : h.id">
-              <span class="sd-host-mark" :class="`tone-${hostTone(h.name)}`" aria-hidden="true">{{ hostMark(h.name) }}</span>
-              <div class="sd-host-info">
-                <b>{{ h.name }}</b>
-                <small>{{ h.plan }} · {{ h.cycle }}</small>
-                <div class="sd-quota"><i :style="{ width: quotaWidth(h) }" :class="{ full: h.usedRuns >= h.quotaRuns }"></i></div>
-                <small class="sd-quota-text">本月 {{ h.usedRuns }}/{{ h.quotaRuns }} 次 · 成功率 {{ h.successRate }}%</small>
-              </div>
-              <div class="sd-host-right">
-                <em :class="{ paused: h.status === 'paused' }">{{ h.status === 'paused' ? '已暂停' : '运行中' }}</em>
-                <small>下次 {{ h.nextRunAt }}</small>
-                <small>{{ relativeDays(h.nextRunAt) }}</small>
-              </div>
-            </div>
-
-            <div v-if="expanded === h.id" class="sd-runs">
-              <div class="sd-run-actions">
-                <button type="button" class="primary" :disabled="busy" @click="runNow(h)">
-                  {{ busy ? '运行中…' : '立即运行一次' }}
-                </button>
-                <button type="button" :disabled="busy" @click="toggleStatus(h)">
-                  {{ h.status === 'paused' ? '恢复运行' : '暂停服务' }}
-                </button>
-                <small>运行产物自动归档，可在下方记录中查看</small>
-              </div>
-              <table v-if="h.runs.length">
-                <thead><tr><th>运行时间</th><th>状态</th><th>耗时</th><th>成本</th><th>产物</th></tr></thead>
-                <tbody>
-                  <tr v-for="r in h.runs" :key="r.id">
-                    <td>{{ r.startedAt }}</td>
-                    <td><em :class="r.status">{{ r.status === 'success' ? '成功' : '告警' }}</em></td>
-                    <td>{{ r.duration }}</td>
-                    <td>¥{{ r.cost }}</td>
-                    <td>
-                      <span v-for="a in r.artifacts" :key="a" class="sd-artifact">
-                        <i :class="artifactKind(a)">{{ artifactExt(a) }}</i>{{ a }}
-                      </span>
-                      <small v-if="r.note" class="sd-note">{{ r.note }}</small>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-              <p v-else class="sd-empty small">尚无运行记录，点击「立即运行一次」试试</p>
-            </div>
-          </article>
-
-          <div v-if="!hostings.length" class="sd-empty">
-            <p>还没有托管服务</p>
-            <button type="button" @click="panel = 'diagnose'">去做需求体检</button>
-          </div>
-        </section>
-
-        <section class="sd-card sd-board">
-          <header><b>运行看板</b></header>
-
-          <div class="sd-board-block">
-            <h4>成功率趋势</h4>
-            <div class="sd-bars">
-              <span v-for="(v, i) in trend" :key="i" :class="{ low: v < 90 }">
-                <i :style="{ height: v + '%' }"></i>
-              </span>
-            </div>
-            <div class="sd-bar-axis">
-              <em v-for="(v, i) in trend" :key="i" :class="{ low: v < 90 }">{{ v }}%</em>
-            </div>
-            <small class="sd-axis">最近 {{ trend.length }} 次运行</small>
-          </div>
-
-          <div class="sd-board-block">
-            <h4>待处理异常</h4>
-            <p v-if="!warningList.length" class="sd-empty small">暂无异常</p>
-            <div v-for="w in warningList" :key="w.id" class="sd-warn">
-              <b>⚠</b>
-              <div>
-                <span>{{ w.text }}</span>
-                <button type="button" @click="gotoHosting(w.hostingId)">查看</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="sd-board-block">
-            <h4>验收证据链（Eval）</h4>
-            <ul class="sd-evi-list">
-              <li><b>✓</b>规则校验通过 <em>{{ kpi.runs }} 次</em></li>
-              <li><b>✓</b>产物已归档，可回溯原始记录</li>
-              <li><b>✓</b>人工复核记录可追溯</li>
-            </ul>
-          </div>
-        </section>
-      </div>
-    </div>
 
     <!-- ===================== 教程 · 应用 ===================== -->
     <div v-else-if="panel === 'learn'" class="sd-learn">
@@ -446,7 +376,7 @@
     </div>
 
     
-    <!-- 提示放在组件根级：引导 / 托管 / 教程三个面板都能看到反馈 -->
+    <!-- 提示放在组件根级：体检 / 提示词两个面板都能看到反馈 -->
     <p v-if="toast" class="sd-toast">{{ toast }}</p>
       <!-- 提示词优化弹窗 -->
     <div v-if="optimizeTarget" class="sd-modal" @click.self="optimizeTarget = null">
@@ -474,8 +404,9 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch , onBeforeUnmount } from 'vue'
 import { yixiuApi } from '../api/yixiuWeb.js'
+import { renderMarkdown } from '../utils/markdown.js'
 
 const props = defineProps({
   account: { type: String, default: '' },
@@ -488,17 +419,11 @@ const props = defineProps({
 
 const emit = defineEmits(['open-skills'])
 
-const panel = ref(props.initialPanel === 'hosting' ? 'hosting' : 'diagnose')
+const panel = ref('diagnose')
 const draft = ref('')
 const busy = ref(false)
 const toast = ref('')
-const expanded = ref('')
-const showCreate = ref(false)
 const threadRef = ref(null)
-
-const hostings = ref([])
-const kpi = ref({ hosting: 0, runs: 0, successRate: 100, cost: 0, warnings: 0 })
-const createForm = reactive({ name: '', plan: '基础版', cycle: '每周一 09:00', price: '¥499/月' })
 
 const AVATAR = '/static/service-desk/avatar-guanwei.png'
 // 必须用变量绑定（:src）而不是字面量 src="/static/..."：字面量会被 Vite 当成资源导入，
@@ -522,60 +447,6 @@ const messages = ref([
 ])
 
 // 服务首字图标：确定性地按名称取字与配色，不用重复的占位图
-const HOST_TONES = ['teal', 'blue', 'amber', 'violet', 'green', 'coral']
-const hostMark = (name) => String(name || '?').replace(/^AI\s*/i, '').trim().slice(0, 1) || '·'
-const hostTone = (name) => HOST_TONES[[...String(name || '')].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % HOST_TONES.length]
-
-
-const artifactExt = (name) => {
-  const m = String(name || '').match(/\.([a-z0-9]+)$/i)
-  return m ? m[1].toUpperCase() : 'FILE'
-}
-
-const artifactKind = (name) => {
-  const e = artifactExt(name).toLowerCase()
-  if (e === 'xlsx' || e === 'xls' || e === 'csv') return 'xls'
-  if (e === 'pdf') return 'pdf'
-  if (e === 'md' || e === 'txt') return 'txt'
-  return 'file'
-}
-
-const relativeDays = (text) => {
-  const m = String(text || '').match(/(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/)
-  if (!m) return ''
-  const now = new Date()
-  let target = new Date(now.getFullYear(), Number(m[1]) - 1, Number(m[2]), Number(m[3]), Number(m[4]))
-  if (target < now) target = new Date(target.getTime() + 365 * 86400000)
-  const days = Math.round((target - now) / 86400000)
-  if (days <= 0) return '今天'
-  if (days === 1) return '明天'
-  return `${days} 天后`
-}
-
-const trend = computed(() => {
-  const all = []
-  hostings.value.forEach((h) => h.runs.forEach((r) => all.push(r)))
-  all.sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt)))
-  const tail = all.slice(-10)
-  if (!tail.length) return [100]
-  return tail.map((r) => (r.status === 'success' ? 100 : 72))
-})
-
-const warningList = computed(() => {
-  const out = []
-  hostings.value.forEach((h) => {
-    if (h.usedRuns >= h.quotaRuns) {
-      out.push({ id: h.id + '-q', hostingId: h.id, text: `${h.name}：本月运行额度已用尽（${h.usedRuns}/${h.quotaRuns}）` })
-    }
-    h.runs.filter((r) => r.status !== 'success').forEach((r) => {
-      out.push({ id: r.id, hostingId: h.id, text: `${h.name}：${r.startedAt} ${r.note || '本次运行告警'}` })
-    })
-  })
-  return out
-})
-
-const quotaWidth = (h) => `${Math.min(100, Math.round(((h.usedRuns || 0) / (h.quotaRuns || 1)) * 100))}%`
-
 const flash = (text) => {
   toast.value = text
   window.setTimeout(() => { if (toast.value === text) toast.value = '' }, 3200)
@@ -642,7 +513,7 @@ const nextQuestion = () => {
              chips: dur.map((d) => d.label) }
   }
   if (!chatProfile.sources.length && src.length) {
-    return { key: 'sources', text: '需要读取哪些数据？可多选 —— 缺数据源是托管失败最常见的原因。',
+    return { key: 'sources', text: '需要读取哪些数据？可多选 —— 缺数据源是可行性评分上不去最常见的原因。',
              chips: src.map((x) => x.label) }
   }
   return null
@@ -692,7 +563,7 @@ const send = async (text) => {
     if (report.ready) {
       const top = (report.positions || [])[0] || null
       const verdict = report.verdict || ''
-      const head = verdict.includes('不托管')
+      const head = verdict.includes('不自动化')
         ? `先说结论：${verdict}。${report.advice || ''}`
         : `我的建议是：${verdict}。${report.advice || ''}`
       messages.value.push({
@@ -731,90 +602,6 @@ const copyPlan = async (card) => {
   }
 }
 
-const openHosting = async (card) => {
-  const top = card.position || {}
-  busy.value = true
-  try {
-    await yixiuApi.createHosting({
-      account: props.account,
-      name: top.position || '定制 Agent 托管',
-      plan: '专业版',
-      cycle: top.cycle || '每周一 09:00',
-      price: top.price || '¥999/月'
-    })
-    panel.value = 'hosting'
-    await loadHostings()
-    flash(`已开通托管：${top.position || '定制 Agent'}`)
-  } catch (error) {
-    flash('开通托管失败')
-  } finally {
-    busy.value = false
-  }
-}
-
-const createHosting = async () => {
-  if (!createForm.name.trim()) return
-  busy.value = true
-  try {
-    await yixiuApi.createHosting({ account: props.account, ...createForm })
-    createForm.name = ''
-    showCreate.value = false
-    await loadHostings()
-    flash('已开通托管')
-  } catch (error) {
-    flash('开通托管失败')
-  } finally {
-    busy.value = false
-  }
-}
-
-const toggleStatus = async (h) => {
-  const next = h.status === 'paused' ? 'running' : 'paused'
-  busy.value = true
-  try {
-    await yixiuApi.setHostingStatus(h.id, next)
-    await loadHostings()
-    flash(next === 'paused' ? '已暂停服务' : '已恢复运行')
-  } catch (error) {
-    flash('操作失败')
-  } finally {
-    busy.value = false
-  }
-}
-
-const runNow = async (h) => {
-  busy.value = true
-  try {
-    await yixiuApi.runHosting(h.id)
-    await loadHostings()
-    expanded.value = h.id
-    flash(`${h.name} 本次运行完成`)
-  } catch (error) {
-    flash('运行失败')
-  } finally {
-    busy.value = false
-  }
-}
-
-const gotoHosting = (id) => {
-  expanded.value = id
-  nextTick(() => {
-    const el = document.querySelector('.sd-host.open')
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  })
-}
-
-const loadHostings = async () => {
-  try {
-    const data = await yixiuApi.hostings(props.account)
-    hostings.value = data.items || []
-    kpi.value = data.kpi || kpi.value
-    if (!expanded.value && hostings.value.length) expanded.value = hostings.value[0].id
-  } catch (error) {
-    flash('托管数据加载失败')
-  }
-}
-
 // ---- 需求体检：分步引导 ----
 // 设计意图：自由描述只能靠关键词猜频次与耗时，误差大；引导问卷用用户填的真实值
 // 替换基线参数，可行性评分与 ROI 才站得住。两种模式并存，默认走引导。
@@ -823,7 +610,7 @@ const step = ref(0)
 const report = ref(null)
 const options = ref({ roles: [], dataSources: [], frequency: [], duration: [], tasks: [], hourlyRate: 80 })
 const optionsLoading = ref(true)
-const intake = reactive({ role: '', tasks: [], frequency: '', duration: '', sources: [], note: '' })
+const intake = reactive({ role: '', tasks: [], frequency: '', duration: '', sources: [], roleNote: '', taskNote: '', note: '' })
 
 const STEPS = [
   { key: 'role', label: '角色', title: '你在团队里主要负责什么？',
@@ -852,9 +639,6 @@ const DIMS = [
 
 // 服务台首页只展示前 5 条，完整榜单在能力中心 · Skill 工厂
 const topSkills = computed(() => (props.skills || []).slice(0, 5))
-
-// 体检报告里首选方案的收益数据，带到托管面板顶部做对照
-const topAutomation = computed(() => (report.value?.details?.[0]?.automation) || {})
 
 // ---- 需求体检：用法说明、常见场景、评分口径、常见问题 ----
 const HOW_TO = [
@@ -1046,6 +830,43 @@ const applyTemplate = (app) => {
   flash(`已套用「${app.name}」，直接生成体检报告即可`)
 }
 
+// ---- 需求体检：新问卷布局 ----
+const currentProjectName = computed(() => intake.role || '你的团队')
+const quizProgress = computed(() => Math.round(((step.value + 1) / STEPS.length) * 100))
+
+// 频次 / 耗时用「量表式」选择，其余用选项按钮
+const scaleOptions = computed(() => {
+  const key = STEPS[step.value] && STEPS[step.value].key
+  if (key === 'frequency') return options.value.frequency
+  if (key === 'duration') return options.value.duration
+  return []
+})
+const scalePicked = computed(() => {
+  const key = STEPS[step.value] && STEPS[step.value].key
+  if (key === 'frequency') return intake.frequency
+  if (key === 'duration') return intake.duration
+  return ''
+})
+const pickScale = (key) => {
+  const k = STEPS[step.value] && STEPS[step.value].key
+  if (k === 'frequency') intake.frequency = key
+  else if (k === 'duration') intake.duration = key
+}
+// 只能回看已答过的步骤，避免跳步导致信息不全
+const goStep = (index) => {
+  if (index <= step.value) step.value = index
+}
+// 数字键 1—N 快速作答
+const onQuizKeydown = (event) => {
+  if (panel.value !== 'diagnose' || mode.value !== 'guided' || report.value) return
+  const tag = event.target && event.target.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+  const list = scaleOptions.value
+  const n = Number(event.key)
+  if (!list.length || !n || n < 1 || n > list.length) return
+  pickScale(list[n - 1].key)
+}
+
 const canNext = computed(() => {
   const key = STEPS[step.value].key
   if (key === 'role') return Boolean(intake.role)
@@ -1068,7 +889,7 @@ const ringStyle = (score) => ({
 const verdictTone = computed(() => {
   const v = String(report.value?.verdict || '')
   if (v.includes('建议开通')) return 'good'
-  if (v.includes('不托管') || v.includes('标准化')) return 'warn'
+  if (v.includes('不自动化') || v.includes('标准化')) return 'warn'
   return 'mid'
 })
 
@@ -1109,7 +930,6 @@ const copyReport = async (d) => {
     `推荐岗位：${d.position}`,
     `可行性评分：${d.feasibility}/100（频次 ${dims.frequency}｜规则化 ${dims.regularity}｜数据可得性 ${dims.data}｜单次耗时 ${dims.timeCost}）`,
     `每周节省：${a.savedHoursPerWeek} 小时｜每月节省：¥${a.monthlySaving}`,
-    `托管费：¥${a.monthlyCost}/月｜净收益：¥${a.netBenefit}/月｜回本：${a.paybackDays} 天`,
     '',
     '落地路径：',
     ...(d.rollout || []).flatMap((w) => [`${w.week} ${w.title}`, ...(w.items || []).map((it) => `  · ${it}`)]),
@@ -1125,12 +945,19 @@ const copyReport = async (d) => {
   }
 }
 
-onMounted(() => { loadHostings(); loadOptions() })
-watch(panel, (v) => { if (v === 'hosting') loadHostings() })
+onMounted(() => {
+  window.addEventListener('keydown', onQuizKeydown)
+  loadOptions()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onQuizKeydown)
+})
+
 </script>
 
 <style scoped>
-.service-desk { display: grid; gap: 16px; align-content: start; }
+.service-desk { display: grid; gap: 16px; align-content: start; grid-template-columns: minmax(0, 1fr); }
 /* 四个子元素：页头 / 模式切换 / 正文 / Skill 推荐榜。推荐榜只占自身高度，
    正文用 1fr 吸收剩余空间，避免推荐榜把体检流程挤扁。 */
 .service-desk.sd-chat-mode { grid-template-rows: auto auto minmax(0, 1fr) auto; height: 100%; min-height: 0; align-content: stretch; }
@@ -1214,104 +1041,6 @@ watch(panel, (v) => { if (v === 'hosting') loadHostings() })
   border-radius: 10px; background: #16766f; color: #fff; font-size: 12px; font-weight: 700;
   box-shadow: 0 10px 28px rgba(22,118,111,.28); }
 
-/* ---------- 托管运行 ---------- */
-.sd-card { display: grid; gap: 14px; align-content: start; padding: 18px; border: 1px solid #e7e3da; border-radius: 16px; background: #fff; box-shadow: 0 10px 30px rgba(143,120,73,.06); }
-.sd-card > header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.sd-card > header b { color: #3d2f14; font-size: 14px; }
-.sd-card > header small { color: #9a9080; font-size: 11.5px; }
-
-.sd-hosting { display: grid; gap: 16px; }
-.sd-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) auto; gap: 12px; align-items: stretch; }
-.sd-kpis > span { display: grid; gap: 3px; padding: 14px 16px; border: 1px solid #e7e3da; border-radius: 14px; background: #fff; }
-.sd-kpis b { color: #3d2f14; font-size: 20px; }
-.sd-kpis small { color: #9a9080; font-size: 11.5px; }
-.sd-kpis > span.warn b { color: #b44c43; }
-.sd-kpi-btn { padding: 0 18px; border: 1px solid #d2a94f; border-radius: 14px; background: #fffdf8; color: #a06a1c; font-size: 12.5px; font-weight: 800; cursor: pointer; }
-.sd-kpi-btn:hover { background: #fdf4e2; }
-
-/* 托管面板顶部的体检结论卡：把「体检 → 开通托管」这条链路接上，
-   否则开通后看不到当初算出来的收益，也无法对照 */
-.sd-host-brief { display: grid; grid-template-columns: minmax(0, 1.5fr) auto auto; gap: 16px; align-items: center;
-  padding: 16px 18px; border: 1px solid #e7e3da; border-radius: 16px; background: #fff;
-  box-shadow: 0 10px 30px rgba(143,120,73,.06); }
-.sd-host-brief-copy h3 { margin: 2px 0 4px; color: #3a3226; font-size: 17px; }
-.sd-host-brief-copy small { color: #8d8577; font-size: 11.5px; line-height: 1.6; }
-.sd-host-brief-metrics { display: flex; flex-wrap: wrap; gap: 8px; }
-.sd-host-brief-metrics span { display: grid; gap: 2px; padding: 8px 12px; border-radius: 10px; background: #f8fafb; }
-.sd-host-brief-metrics small { color: #8d8577; font-size: 10.5px; }
-.sd-host-brief-metrics b { color: #2f474e; font-size: 14px; }
-.sd-host-brief-metrics span.neg b { color: #b0641c; }
-.sd-host-brief > button { padding: 8px 14px; border: 1px solid #e7e3da; border-radius: 9px; background: #fff;
-  color: #4a4237; font: inherit; font-size: 11.5px; font-weight: 800; cursor: pointer; }
-.sd-host-brief > button:hover { border-color: #c8872e; color: #a8681c; }
-@media (max-width: 1100px) {
-  .sd-host-brief { grid-template-columns: minmax(0, 1fr); }
-}
-
-.sd-create { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, .8fr) minmax(0, 1fr) minmax(0, .8fr) auto; gap: 12px; align-items: end; padding: 16px 18px; border: 1px solid #ece0c8; border-radius: 14px; background: #fdfaf3; }.sd-create label { display: grid; gap: 6px; color: #6b5220; font-size: 11.5px; font-weight: 800; }
-.sd-create input, .sd-create select { height: 42px; padding: 0 12px; border: 1px solid #e6dcc4; border-radius: 10px; background: #fff; color: #3d2f14; font-size: 12.5px; outline: 0; }
-.sd-create input:focus, .sd-create select:focus { border-color: #d2a94f; box-shadow: 0 0 0 3px rgba(200,135,46,.14); }
-.sd-create > button { height: 42px; min-width: 96px; border: 0; border-radius: 10px; background: linear-gradient(135deg, #c8872e, #e0a94a); color: #fff; font-size: 12.5px; font-weight: 800; cursor: pointer; }
-.sd-create > button:disabled { opacity: .5; cursor: not-allowed; }
-
-.sd-host-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); gap: 16px; align-items: start; }
-.sd-host { display: grid; gap: 10px; padding: 12px; border: 1px solid #efe7d6; border-radius: 12px; background: #fffdf8; }
-.sd-host.open { background: #fff; border-color: #e0d0ab; }
-.sd-host-head { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 12px; align-items: center; cursor: pointer; }
-.sd-host-thumb { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; border: 1px solid #efe7d6; }
-.sd-host-info { display: grid; gap: 4px; min-width: 0; }
-.sd-host-info b { color: #3d2f14; font-size: 13px; }
-.sd-host-info small { color: #9a9080; font-size: 11px; }
-.sd-host-right { display: grid; gap: 3px; justify-items: end; text-align: right; }
-.sd-host-right em { padding: 2px 8px; border-radius: 999px; background: #e9f2ec; color: #16766f; font-size: 10.5px; font-style: normal; font-weight: 800; }
-.sd-host-right em.paused { background: #f2ece0; color: #8a7a5c; }
-.sd-host-right small { color: #a89e8c; font-size: 11px; }
-.sd-quota { height: 5px; border-radius: 999px; background: #f2ece0; overflow: hidden; }
-.sd-quota i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #c8872e, #e0a94a); }
-.sd-quota i.full { background: linear-gradient(90deg, #d98b80, #b44c43); }
-.sd-quota-text { color: #a89e8c; }
-
-.sd-runs { display: grid; gap: 10px; padding-top: 8px; border-top: 1px dashed #efe7d6; }
-.sd-run-actions { display: flex; align-items: center; gap: 8px; }
-.sd-run-actions button { min-height: 34px; padding: 0 14px; border: 1px solid #e6dcc4; border-radius: 9px; background: #fff; color: #6b5220; font-size: 11.5px; font-weight: 800; cursor: pointer; }
-.sd-run-actions button.primary { border: 0; background: linear-gradient(135deg, #c8872e, #e0a94a); color: #fff; }
-.sd-run-actions button:disabled { opacity: .55; cursor: not-allowed; }
-.sd-run-actions small { color: #a89e8c; font-size: 10.5px; }
-.sd-runs table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
-.sd-runs th, .sd-runs td { padding: 8px; text-align: left; border-bottom: 1px solid #f2eee4; vertical-align: top; white-space: nowrap; }
-.sd-runs th:nth-child(5), .sd-runs td:nth-child(5) { white-space: normal; }
-.sd-runs th { color: #9a9080; font-weight: 800; }
-.sd-runs td { color: #5c5342; }
-.sd-runs em { padding: 2px 7px; border-radius: 999px; font-style: normal; font-weight: 800; font-size: 10.5px; }
-.sd-runs em.success { background: #e9f2ec; color: #16766f; }
-.sd-runs em.warning { background: #fdf1d8; color: #a06a1c; }
-.sd-artifact { display: inline-flex; align-items: center; gap: 5px; margin: 0 5px 4px 0; padding: 3px 8px 3px 4px; border: 1px solid #f0ece2; border-radius: 7px; background: #faf8f3; color: #6b5c3c; font-size: 10.5px; }
-.sd-artifact i { padding: 1px 4px; border-radius: 4px; font-size: 8.5px; font-style: normal; font-weight: 900; }
-.sd-artifact i.xls { background: #e3f1e7; color: #2f7d4f; }
-.sd-artifact i.pdf { background: #fbe8e4; color: #b44c43; }
-.sd-artifact i.txt { background: #eaf0f6; color: #3979b8; }
-.sd-artifact i.file { background: #f0ece2; color: #7d7259; }
-.sd-note { display: block; color: #b07a2a; font-size: 10.5px; }
-
-.sd-board { display: grid; gap: 16px; }
-.sd-board-block { display: grid; gap: 8px; }
-.sd-board-block h4 { margin: 0; color: #8a7a5c; font-size: 11.5px; font-weight: 900; }
-.sd-bars { display: flex; align-items: flex-end; gap: 4px; height: 76px; padding: 6px; border-radius: 10px; background: #faf8f3; }
-.sd-bars i { flex: 1; min-height: 8px; border-radius: 3px 3px 0 0; background: linear-gradient(180deg, #7bb8a4, #16766f); }
-.sd-bars i.low { background: linear-gradient(180deg, #e8b95e, #c8872e); }
-.sd-axis { color: #a89e8c; font-size: 10.5px; }
-.sd-warn { display: flex; gap: 8px; padding: 9px 11px; border-radius: 10px; background: #fdf1d8; color: #8a6520; font-size: 11.5px; line-height: 1.5; }
-.sd-warn > div { display: grid; gap: 5px; }
-.sd-warn button { justify-self: start; padding: 2px 9px; border: 1px solid #e0c48a; border-radius: 7px; background: #fff; color: #a06a1c; font-size: 10.5px; font-weight: 800; cursor: pointer; }
-.sd-evi-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.sd-evi-list li { display: flex; align-items: center; gap: 8px; padding: 8px 11px; border-radius: 9px; background: #f2f7f3; color: #2c6b5f; font-size: 11.5px; }
-.sd-evi-list em { margin-left: auto; color: #7fa99f; font-style: normal; font-size: 10.5px; }
-
-.sd-empty { display: grid; gap: 10px; justify-items: center; margin: 0; padding: 22px 16px; border: 1px dashed #e4dcc8; border-radius: 12px; color: #a89e8c; font-size: 12px; text-align: center; }
-.sd-empty p { margin: 0; }
-.sd-empty.small { padding: 10px; font-size: 11.5px; }
-.sd-empty button { min-height: 34px; padding: 0 16px; border: 0; border-radius: 9px; background: linear-gradient(135deg, #c8872e, #e0a94a); color: #fff; font-size: 12px; font-weight: 800; cursor: pointer; }
-
 /* ---------- 体检模式切换 ---------- */
 .sd-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .sd-modes button { display: grid; gap: 3px; padding: 12px 14px; border: 1px solid #e7e3da; border-radius: 14px;
@@ -1394,11 +1123,6 @@ watch(panel, (v) => { if (v === 'hosting') loadHostings() })
 .sd-dims i b { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #7fb3a8, #16766f); }
 .sd-dims em { color: #4a4237; font-size: 11.5px; font-style: normal; font-weight: 800; text-align: right; }
 
-.sd-roi { display: flex; flex-wrap: wrap; gap: 8px; }
-.sd-roi span { flex: 1 1 92px; display: grid; gap: 2px; padding: 9px 11px; border-radius: 10px; background: #f8fafb; }
-.sd-roi small { color: #8d8577; font-size: 10px; }
-.sd-roi b { color: #2f474e; font-size: 13.5px; }
-.sd-roi span.neg b { color: #b0641c; }
 
 .sd-report-card details { border-top: 1px solid #f0ece4; padding-top: 8px; }
 .sd-report-card summary { color: #6d6559; font-size: 12px; font-weight: 800; cursor: pointer; }
@@ -1417,13 +1141,7 @@ watch(panel, (v) => { if (v === 'hosting') loadHostings() })
 .sd-risks { display: grid; gap: 5px; margin: 0; padding: 14px 18px 14px 34px; border: 1px dashed #e4dcc8;
   border-radius: 14px; color: #8d8577; font-size: 11.5px; line-height: 1.6; }
 
-@media (max-width: 1400px) {
-  .sd-create { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .sd-create > button { grid-column: 2 / 3; }
-}
 @media (max-width: 1100px) {
-  .sd-host-grid { grid-template-columns: minmax(0, 1fr); }
-  .sd-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sd-diag-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 /* ---------- 教程 · 应用 ---------- */
@@ -1445,35 +1163,7 @@ watch(panel, (v) => { if (v === 'hosting') loadHostings() })
 .sd-app button:disabled { opacity: .55; cursor: not-allowed; }
 
 /* ---------- Skill 推荐榜（服务台首页） ---------- */
-.sd-rank { display: grid; gap: 10px; padding: 16px 18px; border: 1px solid #e7e3da; border-radius: 16px;
-  background: #fff; box-shadow: 0 10px 30px rgba(143,120,73,.06); }
-.sd-rank > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
-.sd-rank > header h3 { margin: 2px 0 4px; color: #3a3226; font-size: 16px; }
-.sd-rank > header small { color: #8d8577; font-size: 11.5px; line-height: 1.6; }
-.sd-rank > header button { flex: none; padding: 7px 13px; border: 1px solid #e7e3da; border-radius: 9px; background: #fff;
-  color: #4a4237; font: inherit; font-size: 11.5px; font-weight: 800; cursor: pointer; }
-.sd-rank-list { display: grid; gap: 4px; }
-.sd-rank-list a { display: grid; grid-template-columns: 30px minmax(0, 1.6fr) 92px minmax(120px, .8fr) 16px;
-  align-items: center; gap: 12px; padding: 8px 10px; border-radius: 10px; background: #fbfaf7;
-  color: inherit; text-decoration: none; }
-.sd-rank-list a:hover { background: #f6f2ea; }
-.sd-rank-list em { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px;
-  background: #f1ece2; color: #8d8577; font-size: 11px; font-style: normal; font-weight: 900; }
-.sd-rank-list em.hot { background: #eef5f4; color: #16766f; }
-.sd-rank-list em.warm { background: #fff4e6; color: #a8681c; }
-.sd-rank-main { display: grid; gap: 1px; min-width: 0; }
-.sd-rank-main b { color: #3a3226; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sd-rank-main small { color: #a89e8c; font-size: 10.5px; }
-.sd-rank-stars { display: inline-flex; align-items: center; gap: 4px; color: #4a4237; font-size: 11.5px; font-weight: 800; }
-.sd-rank-stars i { color: #c8a45c; font-style: normal; }
-.sd-rank-match { display: grid; gap: 4px; }
-.sd-rank-match b { color: #16766f; font-size: 11px; }
-.sd-rank-match i { display: block; height: 5px; border-radius: 999px; background: #eef2f1; overflow: hidden; }
-.sd-rank-match i u { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #7fb3a8, #16766f); }
-.sd-rank-arrow { color: #c0b8a8; font-size: 12px; text-align: right; }
 @media (max-width: 1000px) {
-  .sd-rank-list a { grid-template-columns: 30px minmax(0, 1fr) 84px 16px; }
-  .sd-rank-match { display: none; }
 }
 
 @media (max-width: 900px) {
@@ -1559,42 +1249,6 @@ watch(panel, (v) => { if (v === 'hosting') loadHostings() })
 @media (max-width: 900px) {
   .sd-howto { grid-template-columns: minmax(0, 1fr); }
 }
-
-/* ---- 托管运行：首字图标 + 卡片打磨 ---- */
-.sd-host-mark {
-  flex: none; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px;
-  font-size: 17px; font-weight: 800; letter-spacing: 0; border: 1px solid transparent;
-}
-.sd-host-mark.tone-teal { background: #e9f4f2; color: #16766f; border-color: #d5eae6; }
-.sd-host-mark.tone-blue { background: #eaf1f8; color: #3979b8; border-color: #dbe7f2; }
-.sd-host-mark.tone-amber { background: #fdf3e2; color: #b0741f; border-color: #f2e2c6; }
-.sd-host-mark.tone-violet { background: #f1eefa; color: #6b53a8; border-color: #e3ddf4; }
-.sd-host-mark.tone-green { background: #e9f4ec; color: #2f7d4f; border-color: #d9e8dc; }
-.sd-host-mark.tone-coral { background: #fbeeea; color: #c2563f; border-color: #f2dbd4; }
-
-.sd-host-head { gap: 13px; }
-.sd-host-info > b { font-size: 14px; }
-.sd-host-right em { padding: 3px 10px; border-radius: 999px; font-size: 11px; }
-
-/* 趋势柱：带数值标签 */
-.sd-bars { display: flex; align-items: flex-end; gap: 8px; height: 96px; }
-.sd-bars span { flex: 1; display: grid; align-content: end; justify-items: center; gap: 5px; height: 100%; }
-.sd-bars span i { width: 100%; border-radius: 7px 7px 3px 3px; background: linear-gradient(180deg, #2f9a90, #1c837a); }
-.sd-bars span.low i { background: linear-gradient(180deg, #e0a94a, #c8872e); }
-.sd-bars span em { color: #8fa2a8; font-size: 10.5px; font-style: normal; font-weight: 700; }
-.sd-bars span.low em { color: #b0741f; }
-
-/* 趋势柱修正：柱体撑满各自轨道，标签单独一行 */
-.sd-bars { display: flex; align-items: flex-end; gap: 8px; height: 88px; }
-.sd-bars span { flex: 1; height: 100%; display: flex; align-items: flex-end; }
-.sd-bars span i {
-  width: 100%; flex: none; border-radius: 7px 7px 3px 3px;
-  background: linear-gradient(180deg, #2f9a90, #1c837a);
-}
-.sd-bars span.low i { background: linear-gradient(180deg, #e0a94a, #c8872e); }
-.sd-bar-axis { display: flex; gap: 8px; margin-top: 6px; }
-.sd-bar-axis em { flex: 1; text-align: center; color: #8fa2a8; font-size: 10.5px; font-style: normal; font-weight: 700; }
-.sd-bar-axis em.low { color: #b0741f; }
 
 /* ---- 服务台：不用装饰图，改用数字徽标与色块 ---- */
 .sd-guide-hero { padding: 18px 20px; border-left: 4px solid #1c837a; border-radius: 12px; background: linear-gradient(135deg, #f4faf9, #f7fbfb); }
@@ -1781,7 +1435,365 @@ watch(panel, (v) => { if (v === 'hosting') loadHostings() })
 .sd-report-card header b { font-size: 19px; }
 .sd-report-card header small { font-size: 13.5px; }
 .sd-dims span small, .sd-dims span em { font-size: 13px; }
-.sd-roi span small { font-size: 12.5px; }
-.sd-roi span b { font-size: 19px; }
 .sd-report-actions button { min-height: 46px; padding: 0 24px; font-size: 14px; border-radius: 12px; }
+
+/* ---- AI 回复的 Markdown 排版 ---- */
+.md-body { font-size: 13px; line-height: 1.8; word-break: break-word; }
+.md-body > *:first-child { margin-top: 0; }
+.md-body > *:last-child { margin-bottom: 0; }
+.md-body .md-p { margin: 0 0 8px; }
+.md-body .md-h {
+  margin: 12px 0 6px; font-weight: 800; line-height: 1.4;
+  color: #1d3238;
+}
+.md-body h3.md-h { font-size: 14.5px; }
+.md-body h4.md-h { font-size: 13.5px; }
+.md-body h5.md-h, .md-body h6.md-h { font-size: 13px; }
+.md-body .md-ul, .md-body .md-ol { margin: 4px 0 8px; padding-left: 20px; }
+.md-body .md-ul { list-style: disc; }
+.md-body .md-ol { list-style: decimal; }
+.md-body li { margin: 2px 0; }
+.md-body code {
+  padding: 1px 5px; border-radius: 5px; background: rgba(31,90,85,.08);
+  color: #1f5a55; font-family: ui-monospace, Consolas, monospace; font-size: 11.5px;
+}
+.md-body .md-pre {
+  margin: 8px 0; padding: 10px 12px; overflow: auto;
+  border: 1px solid #e6ecec; border-radius: 9px; background: #f7faf9;
+}
+.md-body .md-pre code { padding: 0; background: none; color: #33494e; line-height: 1.7; }
+.md-body .md-quote {
+  margin: 8px 0; padding: 6px 12px; border-left: 3px solid #cfe0dd;
+  background: rgba(31,90,85,.04); color: #5a7076;
+}
+.md-body .md-hr { margin: 12px 0; border: 0; border-top: 1px solid #e6ecec; }
+.md-body .md-table-wrap { margin: 8px 0; overflow-x: auto; }
+.md-body .md-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.md-body .md-table th, .md-body .md-table td {
+  padding: 7px 10px; border: 1px solid #e6ecec; text-align: left; vertical-align: top;
+}
+.md-body .md-table th { background: #f4f9f8; color: #1f5a55; font-weight: 800; white-space: nowrap; }
+.md-body .md-table tr:nth-child(even) td { background: #fbfdfd; }
+.md-body a { color: var(--teal-dark, #0f5854); text-decoration: underline; }
+
+/* ================= 需求体检：问卷式布局 ================= */
+.sd-guided {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 34px;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 8px 4px 40px;
+  align-items: start;
+}
+
+/* 左栏：状态 + 步骤轨 + 提示 */
+.sd-quiz-side { display: grid; gap: 0; align-content: start; position: sticky; top: 8px; }
+.sd-quiz-state {
+  display: flex; align-items: center; gap: 8px; margin: 0 0 18px;
+  color: #b3543f; font-size: 12.5px; font-weight: 800; letter-spacing: .02em;
+}
+.sd-quiz-state i { width: 7px; height: 7px; border-radius: 50%; background: #d4735c; box-shadow: 0 0 0 4px rgba(212,115,92,.14); }
+.sd-quiz-name {
+  margin: 0 0 30px; color: #1d3238; font-size: 30px; font-weight: 600;
+  line-height: 1.28; letter-spacing: -.01em;
+}
+.sd-quiz-nav { list-style: none; margin: 0 0 40px; padding: 0; border-top: 1px solid #eceee9; }
+.sd-quiz-nav li {
+  display: grid; grid-template-columns: 34px minmax(0, 1fr) 14px;
+  align-items: center; gap: 10px;
+  padding: 15px 2px; border-bottom: 1px solid #eceee9;
+  color: #9aa8a4; font-size: 13.5px; cursor: default;
+  transition: color .18s ease;
+}
+.sd-quiz-nav li em { font-style: normal; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; }
+.sd-quiz-nav li span { font-weight: 600; }
+.sd-quiz-nav li > i {
+  width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid #d3d9d5; justify-self: end;
+}
+.sd-quiz-nav li.done { color: #6d8489; cursor: pointer; }
+.sd-quiz-nav li.done > i { border-color: #1c837a; background: #1c837a; }
+.sd-quiz-nav li.on { color: #1d3238; font-weight: 800; cursor: pointer; }
+.sd-quiz-nav li.on em { color: #b3543f; }
+.sd-quiz-nav li.on > i { border-color: #d4735c; background: #d4735c; box-shadow: 0 0 0 4px rgba(212,115,92,.14); }
+.sd-quiz-tip b { display: block; margin-bottom: 8px; color: #b3543f; font-size: 12.5px; }
+.sd-quiz-tip p { margin: 0; color: #8d9a96; font-size: 12.5px; line-height: 1.85; }
+
+/* 右栏：进度条 + 题目大卡 */
+.sd-quiz-main { display: grid; gap: 20px; align-content: start; min-width: 0; }
+.sd-quiz-bar {
+  display: grid; grid-template-columns: 60px minmax(0, 1fr) auto;
+  align-items: center; gap: 18px;
+  color: #8d9a96; font-size: 12.5px; font-weight: 700;
+}
+.sd-quiz-bar > span { letter-spacing: .04em; }
+.sd-quiz-progress { height: 3px; border-radius: 999px; background: #e9ebe6; overflow: hidden; }
+.sd-quiz-progress i {
+  display: block; height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, #d4735c, #c2553c);
+  transition: width .3s ease;
+}
+.sd-quiz-bar button {
+  padding: 0; border: 0; background: none; color: #8d9a96;
+  font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer;
+}
+.sd-quiz-bar button:hover { color: #1c837a; }
+
+.sd-quiz-card {
+  padding: 38px 46px 26px;
+  border: 1px solid #eceee9; border-radius: 6px; background: #fff;
+  box-shadow: 0 18px 50px rgba(31,55,63,.05);
+}
+.sd-quiz-card > header {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 14px;
+  margin-bottom: 32px;
+}
+.sd-quiz-eyebrow { margin: 0; color: #b3543f; font-size: 12.5px; font-weight: 800; letter-spacing: .02em; }
+.sd-quiz-card > header small { color: #a9b4b0; font-size: 12.5px; }
+.sd-quiz-question {
+  margin: 0 0 16px; color: #1d3238;
+  font-size: 30px; font-weight: 500; line-height: 1.45; letter-spacing: -.01em;
+}
+.sd-quiz-hint { margin: 0 0 40px; color: #9aa8a4; font-size: 13.5px; line-height: 1.75; }
+
+/* 量表式选项 */
+.sd-scale { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 34px; }
+.sd-scale button {
+  flex: 1; display: grid; justify-items: center; gap: 12px;
+  padding: 4px 2px 0; border: 0; background: none; font: inherit; cursor: pointer;
+}
+.sd-scale button > i {
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 1.5px solid #cfd7d3; background: #fff;
+  transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+.sd-scale button > span { color: #8d9a96; font-size: 12.5px; line-height: 1.4; text-align: center; }
+.sd-scale button:hover > i { border-color: #1c837a; transform: translateY(-1px); }
+.sd-scale button.on > i {
+  border-color: #1c837a; background: #1c837a;
+  box-shadow: 0 0 0 5px rgba(28,131,122,.12);
+}
+.sd-scale button.on > span { color: #12655f; font-weight: 800; }
+
+.sd-quiz-foot {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center; gap: 16px;
+  margin-top: 6px; padding-top: 22px; border-top: 1px solid #f0f2ee;
+}
+.sd-quiz-foot > small { text-align: center; color: #a9b4b0; font-size: 12px; }
+.sd-quiz-foot > small b { color: #6d8489; }
+.sd-quiz-foot button {
+  min-height: 46px; padding: 0 26px; border-radius: 4px;
+  border: 1px solid #dfe4e0; background: #fff; color: #4d656c;
+  font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+  transition: border-color .18s ease, color .18s ease, background .18s ease;
+}
+.sd-quiz-foot button:hover:not(:disabled) { border-color: #1c837a; color: #12655f; }
+.sd-quiz-foot button:disabled { opacity: .45; cursor: not-allowed; }
+.sd-quiz-foot button.primary {
+  border: 0; background: linear-gradient(135deg, #1c837a, #12655f); color: #fff;
+  box-shadow: 0 10px 22px rgba(18,101,95,.18);
+}
+
+.sd-quiz-card .sd-chips { margin-bottom: 30px; }
+
+/* 1024 才转单列太晚：1100 时左轨吃掉 300px + 34px 间距，
+   右栏只剩约 211px，装不下答题卡约 314px 的最小宽度，整块顶出容器。
+   提前到 1280 收起为单列。 */
+@media (max-width: 1280px) {
+  .sd-guided { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+  .sd-quiz-side { position: static; }
+  .sd-quiz-name { font-size: 24px; margin-bottom: 20px; }
+  .sd-quiz-nav { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); margin-bottom: 22px; }
+  .sd-quiz-card { padding: 26px 22px 20px; }
+  .sd-quiz-question { font-size: 22px; }
+  .sd-scale { flex-wrap: wrap; }
+  .sd-scale button { flex: 1 1 28%; }
+  .sd-quiz-foot { grid-template-columns: minmax(0, 1fr) auto; }
+  .sd-quiz-foot > small { display: none; }
+}
+
+/* ================= 问卷占满宽度 ================= */
+.sd-guided {
+  max-width: none;
+  margin: 0;
+  padding: 8px 4px 32px;
+  gap: 40px;
+}
+.sd-quiz-card { padding: 42px 54px 28px; }
+.sd-quiz-question { font-size: 32px; }
+.sd-quiz-name { font-size: 32px; }
+
+/* ================= 自由描述：整体放大 ================= */
+.sd-chat { gap: 16px; padding: 22px 26px 24px; }
+.sd-chat-head { gap: 16px; padding-bottom: 16px; }
+.sd-chat-head b { font-size: 17px; }
+.sd-chat-head small { font-size: 13.5px; line-height: 1.6; }
+
+/* 头像 */
+.sd-ava { flex: 0 0 44px; width: 44px; height: 44px; border-radius: 14px; }
+.sd-ava.big { flex: 0 0 60px; width: 60px; height: 60px; border-radius: 18px; }
+
+/* 气泡与正文 */
+.sd-thread { gap: 20px; max-width: none; margin: 0; }
+.sd-msg { gap: 14px; max-width: 100%; }
+.sd-bubble { max-width: min(860px, 78%); border-radius: 18px; }
+.sd-msg p,
+.sd-msg .md-body { font-size: 16px; line-height: 1.85; }
+.sd-msg p { padding: 16px 20px; }
+.sd-msg .md-body { padding: 16px 20px; }
+.sd-msg .md-body .md-p { margin-bottom: 12px; }
+.sd-msg .md-body .md-h { font-size: 17px; margin: 16px 0 8px; }
+.sd-msg .md-body h3.md-h { font-size: 17px; }
+.sd-msg .md-body h4.md-h { font-size: 16px; }
+.sd-msg .md-body code { font-size: 14px; }
+.sd-msg .md-body .md-table { font-size: 14.5px; }
+.sd-msg .md-body .md-table th, .sd-msg .md-body .md-table td { padding: 10px 13px; }
+
+/* 快捷回答 */
+.sd-replies { gap: 9px; margin-top: 14px; }
+.sd-replies button { padding: 10px 18px; font-size: 14px; border-radius: 12px; }
+
+/* 已了解信息条 */
+.sd-facts { max-width: none; margin: 0; padding: 13px 18px; gap: 10px; }
+.sd-facts > small, .sd-facts > span, .sd-facts > em { font-size: 13px; }
+.sd-facts > span { padding: 6px 14px; }
+
+/* 输入区 */
+.sd-input { max-width: none; margin: 0; gap: 12px; }
+.sd-input input { height: 58px; padding: 0 20px; font-size: 16px; border-radius: 14px; }
+.sd-input button { min-width: 118px; font-size: 16px; border-radius: 14px; }
+
+/* 打字中提示 */
+.sd-msg p.typing { font-size: 15px; }
+
+/* ================= 高度撑满 + 比例均衡 ================= */
+/* 服务台整体吃满可用高度，两种模式都拉伸 */
+.service-desk { height: 100%; min-height: 0; align-content: stretch; }
+
+/* 问卷：主区撑满，卡片变高，底部按钮贴底 */
+.sd-guided { min-height: 100%; align-content: start; }
+.sd-quiz-side { min-height: 100%; }
+.sd-quiz-main { min-height: 100%; grid-template-rows: auto minmax(0, 1fr); }
+.sd-quiz-card {
+  display: flex; flex-direction: column;
+  min-height: 520px;
+}
+.sd-quiz-card .sd-quiz-foot { margin-top: auto; }
+.sd-quiz-card .sd-chips,
+.sd-quiz-card .sd-scale { margin-bottom: 34px; }
+
+/* 自由描述：对话区吃满剩余高度，气泡随容器变宽 */
+.sd-chat { min-height: 720px; }
+.sd-thread { min-height: 0; }
+.sd-bubble { max-width: min(76%, 1020px); }
+
+/* 长回复滚动更舒展 */
+.sd-msg .md-body .md-table-wrap { max-width: 100%; }
+
+/* ================= 报告：AI 建议区 ================= */
+.sd-report { display: grid; gap: 16px; }
+.sd-report-label {
+  margin: 6px 0 -6px; color: #a9b4b0; font-size: 12px; font-weight: 800; letter-spacing: .04em;
+}
+
+.sd-ai {
+  display: grid; gap: 20px;
+  padding: 28px 32px;
+  border: 1px solid #d9e8e5; border-radius: 16px;
+  background: linear-gradient(180deg, #f8fcfb 0%, #ffffff 100%);
+}
+.sd-ai-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.sd-ai-head h3 { margin: 4px 0 0; color: #1d3238; font-size: 21px; line-height: 1.45; }
+.sd-ai-badge {
+  flex: none; padding: 6px 13px; border-radius: 999px;
+  background: #e9f4f2; color: #12655f; font-size: 11.5px; font-weight: 800; white-space: nowrap;
+}
+
+.sd-ai-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+.sd-ai-card {
+  display: grid; gap: 12px; padding: 18px 20px;
+  border: 1px solid #e6edef; border-left: 4px solid #1c837a; border-radius: 12px; background: #fff;
+}
+.sd-ai-card.conf-mid { border-left-color: #d7a33d; }
+.sd-ai-card.conf-low { border-left-color: #c3ccd0; }
+.sd-ai-card > header { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.sd-ai-no {
+  width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px;
+  background: #eef4f4; color: #607a7e; font-size: 11.5px; font-weight: 800;
+}
+.sd-ai-card > header b { color: #1d3238; font-size: 15px; line-height: 1.4; }
+.sd-ai-card > header em {
+  padding: 3px 10px; border-radius: 999px; background: #e9f4f2; color: #12655f;
+  font-size: 11px; font-style: normal; font-weight: 800; white-space: nowrap;
+}
+.sd-ai-card.conf-mid > header em { background: #fdf3e2; color: #a06a1c; }
+.sd-ai-card.conf-low > header em { background: #f1f4f5; color: #6d8489; }
+.sd-ai-card dl { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 7px 12px; margin: 0; }
+.sd-ai-card dt { color: #93a3a7; font-size: 12px; font-weight: 800; }
+.sd-ai-card dd { margin: 0; color: #4d656c; font-size: 13px; line-height: 1.75; }
+
+.sd-ai-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.sd-ai-keep, .sd-ai-watch { padding: 16px 20px; border-radius: 12px; border: 1px solid #f0e3d5; background: #fffaf3; }
+.sd-ai-watch { border-color: #e8eef0; background: #fbfdfd; }
+.sd-ai-keep b, .sd-ai-watch b { display: block; margin-bottom: 9px; color: #a06a1c; font-size: 12.5px; }
+.sd-ai-watch b { color: #4d656c; }
+.sd-ai-keep ul, .sd-ai-watch ul { margin: 0; padding-left: 18px; }
+.sd-ai-keep li, .sd-ai-watch li { color: #5a7076; font-size: 12.5px; line-height: 1.8; margin: 3px 0; }
+
+.sd-ai-advice {
+  margin: 0; padding: 16px 20px; border-radius: 12px;
+  border-left: 4px solid #1c837a; background: #f2faf8;
+  color: #1f5a55; font-size: 14px; line-height: 1.85;
+}
+
+/* 问卷自由填写 */
+.sd-free { display: grid; gap: 18px; margin-bottom: 30px; }
+.sd-free-label { display: grid; gap: 6px; }
+.sd-free-label b { color: #4d656c; font-size: 13px; font-weight: 800; }
+.sd-free-label small { color: #a9b4b0; font-size: 12px; line-height: 1.6; }
+.sd-free-label textarea {
+  width: 100%; padding: 13px 15px; resize: vertical;
+  border: 1px solid #e2e8e6; border-radius: 10px; background: #fbfdfd;
+  color: #33494e; font: inherit; font-size: 14px; line-height: 1.75; outline: 0;
+}
+.sd-free-label textarea:focus { border-color: #1c837a; background: #fff; box-shadow: 0 0 0 3px rgba(28,131,122,.1); }
+.sd-free .sd-chips { margin-bottom: 0; }
+
+/* ================= 模式切换：紧凑胶囊 ================= */
+.sd-modes {
+  grid-template-columns: repeat(2, auto);
+  justify-content: start;
+  gap: 8px;
+}
+.sd-modes button {
+  display: flex; align-items: baseline; gap: 9px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  box-shadow: none;
+}
+.sd-modes button b { font-size: 13px; white-space: nowrap; }
+.sd-modes button small { font-size: 11.5px; line-height: 1.4; white-space: nowrap; }
+.sd-modes button.active { box-shadow: 0 6px 16px rgba(200,135,46,.16); }
+
+/* 窄屏放不下就换行、去掉不换行限制。
+   760 以下的断点不够：1100 附近两枚胶囊的 nowrap 文案把它顶到 611px，
+   超出 553px 的容器（服务台在 1100 下横向溢出 53px）。
+   把「允许换行」提前到 1400，780 以下再退回单列。 */
+@media (max-width: 1400px) {
+  .sd-modes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sd-modes button { flex-wrap: wrap; }
+  .sd-modes button small { white-space: normal; }
+}
+@media (max-width: 780px) {
+  .sd-modes { grid-template-columns: minmax(0, 1fr); }
+  .sd-modes button { border-radius: 12px; }
+  .sd-modes button small { white-space: normal; }
+}
+
+/* 修复：服务台为撑满高度用了 align-content:stretch，
+   会把「页头」和「模式切换」这两行一起拉高，导致胶囊按钮被拉长且文字贴顶。 */
+.sd-hero { align-self: start; }
+.sd-modes { align-self: start; align-content: start; }
+.sd-modes button { align-content: center; }
 </style>

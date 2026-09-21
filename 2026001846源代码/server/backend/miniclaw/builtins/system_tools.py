@@ -27,12 +27,12 @@ BACKEND_BASE_URL = os.getenv("MINICLAW_BACKEND_URL", "http://127.0.0.1:5000").rs
 
 # 六大 agent 定义（与前端 yixiuMock / routes.yixiu.AGENTS 对齐）
 AGENTS_STATE = [
-    {"id": "tiangong", "name": "天工", "role": "综合智能中枢", "duty": "统筹检索、作业、知识、协作和核查智能体，汇总系统状态与风险。", "status": "online", "ip": "10.10.1.10"},
-    {"id": "guanwei", "name": "观微", "role": "智能检索器灵", "duty": "发现设备故障线索，解析故障现象、型号、图片和维修文档。", "status": "online", "ip": "10.10.1.21"},
-    {"id": "zhiju", "name": "执矩", "role": "检修作业器灵", "duty": "编排标准作业步骤，推进工单流转并提醒高风险安全确认。", "status": "online", "ip": "10.10.1.22"},
-    {"id": "bowen", "name": "博闻", "role": "知识管理器灵", "duty": "整理技术资料、维护知识网络、沉淀历史检修案例。", "status": "online", "ip": "10.10.1.23"},
-    {"id": "heming", "name": "和鸣", "role": "协作调度器灵", "duty": "管理联系人、协调现场人员、发起专家支援与任务沟通。", "status": "online", "ip": "10.10.1.24"},
-    {"id": "mingjian", "name": "明鉴", "role": "复检核查器灵", "duty": "执行复检评估、安全检查、质量核验和任务验收。", "status": "online", "ip": "10.10.1.25"},
+    {"id": "tiangong", "name": "天工", "role": "路由调度中枢", "duty": "读取 Agent Registry 与 Skill 库，按任务类型、上下文与历史成功率选出合适的智能体或组合，并汇总项目状态与风险。", "status": "online", "ip": "10.10.1.10"},
+    {"id": "guanwei", "name": "观微", "role": "上下文引擎", "duty": "为任务组装 Context Pack，召回需求、代码、文档、历史 Memory 与相关 Skill，并标注信息缺口。", "status": "online", "ip": "10.10.1.21"},
+    {"id": "zhiju", "name": "执矩", "role": "任务执行引擎", "duty": "推进任务流转、编排执行步骤、管理项目进度与交付物，并记录可回溯的执行轨迹。", "status": "online", "ip": "10.10.1.22"},
+    {"id": "bowen", "name": "博闻", "role": "团队记忆引擎", "duty": "沉淀团队记忆、维护知识网络、检索历史经验与决策记录，保证结论可引用可追溯。", "status": "online", "ip": "10.10.1.23"},
+    {"id": "heming", "name": "和鸣", "role": "记忆演化引擎", "duty": "从任务记录、Bug、PR 与聊天中提炼可复用经验，生成 Skill 候选与文档资产，并协调人员协作。", "status": "online", "ip": "10.10.1.24"},
+    {"id": "mingjian", "name": "明鉴", "role": "评测核查引擎", "duty": "验证 Skill 与任务产出是否有效，比较版本质量、成本与成功率，把守发布质量门禁。", "status": "online", "ip": "10.10.1.25"},
 ]
 
 
@@ -99,12 +99,12 @@ class SystemOverviewTool(BaseTool):
 
 class MaintenanceTaskTool(BaseTool):
     name = "maintenance_task"
-    description = "查询或创建检修任务。action='list' 按状态筛选任务（status 可选 pending/in_progress/completed/all）；action='get' 按 id 获取任务详情；action='create' 创建新任务。"
+    description = ("查询一休的任务（项目）：action='list' 列出任务，可用 status 过滤"
+                   "（pending/in_progress/review/completed/all）；action='get' 按 task_id 取详情。")
     parameters = [
-        ToolParameter(name="action", type="string", description="操作类型: list / get / create", required=True),
-        ToolParameter(name="status", type="string", description="任务状态筛选，list 时可用：pending/in_progress/completed/all", required=False, default="all"),
-        ToolParameter(name="task_id", type="string", description="任务ID，get 时必填", required=False),
-        ToolParameter(name="data", type="object", description="创建任务的字段，create 时必填", required=False),
+        ToolParameter(name="action", type="string", description="操作类型: list / get", required=True),
+        ToolParameter(name="status", type="string", description="状态过滤，list 时可用：pending/in_progress/review/completed/all", required=False, default="all"),
+        ToolParameter(name="task_id", type="string", description="任务 ID，get 时必填", required=False),
     ]
 
     def execute(self, **kwargs) -> ToolResult:
@@ -112,74 +112,29 @@ class MaintenanceTaskTool(BaseTool):
         if action == "list":
             status = (kwargs.get("status") or "all").strip()
             params = {"status": status} if status and status != "all" else {}
-            result = _safe_http(_http_get, "/api/maintenance-tasks/", params=params)
-            if result.success:
-                return result
-            # HTTP 鉴权失败(401)时，天工作为系统内部智能体直接读数据库获取任务
-            return self._list_from_db(status)
+            return _safe_http(_http_get, "/api/yixiu/tasks", params=params)
         if action == "get":
-            task_id = kwargs.get("task_id")
+            task_id = str(kwargs.get("task_id") or "").strip()
             if not task_id:
                 return ToolResult(success=False, output="", error="get 操作需要 task_id")
-            return _safe_http(_http_get, f"/api/maintenance-tasks/{task_id}")
-        if action == "create":
-            data = kwargs.get("data") or {}
-            return _safe_http(_http_post, "/api/maintenance-tasks/", payload=data)
+            result = _safe_http(_http_get, "/api/yixiu/tasks")
+            if not result.success:
+                return result
+            raw = result.metadata.get("raw", {}) if isinstance(result.metadata, dict) else {}
+            items = ((raw.get("data") or {}).get("tasks") or []) if isinstance(raw, dict) else []
+            hit = next((t for t in items if str(t.get("id")) == task_id), None)
+            if not hit:
+                return ToolResult(success=False, output="", error=f"未找到任务: {task_id}")
+            lines = [
+                f"任务 {hit.get('workOrderNo') or hit.get('id')}",
+                f"名称：{hit.get('equipment_name') or hit.get('title') or '-'}",
+                f"状态：{hit.get('status')} | 进度：{hit.get('progress')}%",
+                f"负责人：{hit.get('assignee_name') or '未指派'}",
+                f"当前阶段：{hit.get('current_step') or '-'}",
+                f"进展：{hit.get('projectProgressSummary') or hit.get('description') or '-'}",
+            ]
+            return ToolResult(success=True, output="\n".join(lines), metadata={"task": hit})
         return ToolResult(success=False, output="", error=f"不支持的操作: {action}")
-
-    @staticmethod
-    def _cell(row: Any, key: str) -> str:
-        try:
-            value = row[key]
-        except Exception:  # noqa: BLE001
-            return ""
-        return "" if value is None else str(value)
-
-    def _list_from_db(self, status: str) -> ToolResult:
-        """HTTP 接口需鉴权时的回退方案：直接读取检修任务表。"""
-        try:
-            from utils import get_db_connection
-        except Exception as exc:  # noqa: BLE001
-            return ToolResult(success=False, output="", error=f"任务接口需登录且无法读取数据库: {exc}")
-        try:
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                where = "WHERE 1=1"
-                params: List[Any] = []
-                if status and status != "all":
-                    where += " AND mr.status = %s"
-                    params.append(status)
-                cursor.execute(
-                    f"""SELECT mr.id, mr.title, mr.severity, mr.status, mr.description,
-                               mr.fault_code, mr.created_at, u.name AS assignee_name,
-                               e.name AS equipment_name, e.model AS equipment_model
-                        FROM maintenance_records mr
-                        LEFT JOIN users u ON u.id = mr.user_id
-                        LEFT JOIN equipment e ON e.id = mr.equipment_id
-                        {where}
-                        ORDER BY mr.created_at DESC
-                        LIMIT 20""",
-                    params,
-                )
-                rows = cursor.fetchall()
-        except Exception as exc:  # noqa: BLE001
-            return ToolResult(success=False, output="", error=f"读取任务数据库失败: {exc}")
-        if not rows:
-            return ToolResult(success=True, output=f"检修任务列表为空(status={status})", metadata={"tasks": []})
-        lines = []
-        for r in rows:
-            lines.append(
-                f"- [{self._cell(r, 'id')}] {self._cell(r, 'title')} | "
-                f"{self._cell(r, 'equipment_name') or '未知设备'} ({self._cell(r, 'equipment_model')}) | "
-                f"严重度:{self._cell(r, 'severity')} | 状态:{self._cell(r, 'status')} | "
-                f"负责人:{self._cell(r, 'assignee_name') or '未分配'} | 创建:{self._cell(r, 'created_at')}"
-            )
-        return ToolResult(
-            success=True,
-            output=f"检修任务列表({len(rows)}条):\n" + "\n".join(lines),
-            metadata={"tasks": [dict(r) for r in rows]},
-        )
-
 
 class KnowledgeSearchTool(BaseTool):
     name = "knowledge_search"
@@ -609,7 +564,6 @@ class FileParseTool(BaseTool):
 
     def execute(self, **kwargs) -> ToolResult:
         from services.file_parser import parse_file
-        from services.rag_service import insert_chunks
         file_path = kwargs.get("file_path")
         source = kwargs.get("source") or ""
         if not file_path:
@@ -638,9 +592,9 @@ class FileParseTool(BaseTool):
             chunks = parse_file(file_path)
             if not chunks:
                 return ToolResult(success=False, output="", error="文件无可提取文本")
-            ingestion = insert_chunks(chunks, source=source or "file_parse_tool")
-            summary = f"文件已切片入库：{ingestion.get('inserted', 0)}/{ingestion.get('total', 0)} 块成功"
-            return ToolResult(success=True, output=summary, metadata={"chunks": len(chunks), "ingestion": ingestion})
+            preview = "\n".join(str(c)[:120] for c in chunks[:5])
+            summary = f"文件已解析：{len(chunks)} 段可读文本"
+            return ToolResult(success=True, output=summary, metadata={"chunks": len(chunks), "preview": preview})
         except Exception as exc:  # noqa: BLE001
             return ToolResult(success=False, output="", error=f"解析失败: {exc}")
 
@@ -679,36 +633,6 @@ class VisionAnalyzeTool(BaseTool):
                 summary = analysis.get("summary") or analysis.get("equipment") or "无可识别内容"
                 return ToolResult(success=True, output=f"图片识别结果：{summary}", metadata={"analysis": analysis, "file": match})
         return ToolResult(success=False, output="", error=f"未找到文件或无分析结果: {file_id}")
-
-
-class RagQueryTool(BaseTool):
-    name = "rag_query"
-    description = "向量相似度检索（RAG）：基于 LightRAG hybrid 模式检索知识图谱，返回 top 命中块。适合观微做故障判断依据召回。"
-    parameters = [
-        ToolParameter(name="query", type="string", description="自然语言查询，如'CG-125 发动机异响原因'", required=True),
-        ToolParameter(name="limit", type="integer", description="返回命中数上限", required=False, default=5),
-        ToolParameter(name="mode", type="string", description="检索模式: naive/local/global/hybrid/mix", required=False, default="hybrid"),
-    ]
-
-    def execute(self, **kwargs) -> ToolResult:
-        query = (kwargs.get("query") or "").strip()
-        if not query:
-            return ToolResult(success=False, output="", error="query 不能为空")
-        limit = int(kwargs.get("limit", 5))
-        mode = (kwargs.get("mode") or "hybrid").strip()
-        result = _safe_http(_http_get, "/api/yixiu/knowledge/similar", params={"query": query, "limit": limit, "mode": mode})
-        if result.success and result.metadata.get("raw"):
-            raw = result.metadata["raw"]
-            data = raw.get("data", raw) if isinstance(raw, dict) else {}
-            hits = data.get("hits", []) if isinstance(data, dict) else []
-            if not hits:
-                return ToolResult(success=True, output=f"未检索到与「{query}」相关的知识块", metadata={"raw": raw})
-            lines = [f"RAG 检索命中 {len(hits)} 块："]
-            for idx, hit in enumerate(hits, 1):
-                text = (hit.get("text") or "")[:120]
-                lines.append(f"{idx}. [{hit.get('source', 'unknown')}] {text}")
-            return ToolResult(success=True, output="\n".join(lines), metadata={"raw": raw, "hits": hits})
-        return result
 
 
 class SopGenerateTool(BaseTool):
@@ -796,6 +720,5 @@ def register(api):
     # 真实能力工具：让 AIOS 执行链路的 mock 分支可被 Tool 调用替换
     api.register_tool(FileParseTool())
     api.register_tool(VisionAnalyzeTool())
-    api.register_tool(RagQueryTool())
     api.register_tool(SopGenerateTool())
     api.register_tool(TaskUpdateTool())

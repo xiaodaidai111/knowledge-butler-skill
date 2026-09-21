@@ -98,7 +98,7 @@ AGENT_TOOL_ALLOWLISTS: dict[str, list[str]] = {
         "agent_dispatch", "agent_status", "agent_invoke", "system_overview",
         "maintenance_task", "knowledge_search", "knowledge_graph", "database_status",
     ],
-    "guanwei": ["knowledge_search", "rag_query", "file_parse", "vision_analyze"],
+    "guanwei": ["knowledge_search", "file_parse", "vision_analyze"],
     "zhiju": ["sop_generate", "safety_check", "task_update"],
     "bowen": ["knowledge_link", "knowledge_candidate_create", "version_read"],
     "heming": ["contacts_read", "conversation_message_draft", "support_request_draft"],
@@ -121,7 +121,7 @@ AIOS_ACTION_REGISTRY: dict[str, dict[str, Any]] = {
         "description": "检索需求、代码、资料、历史 Memory、相关 Skill 与 Eval 依据。",
     },
     "diagnose_fault": {
-        "capability": "rag_query",
+        "capability": "knowledge_search",
         "agent": "guanwei",
         "kind": "read",
         "requires_approval": False,

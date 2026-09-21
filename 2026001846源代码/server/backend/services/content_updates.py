@@ -85,13 +85,13 @@ DEFAULT_ITEMS = [
         "image": "/static/yixiu-carousel-intern-s2.webp",
     },
     {
-        "id": "curated-gemini-live",
-        "title": "Gemini Live：面向实时多模态交互的模型能力更新",
-        "summary": "面向低延迟对话、视觉理解与复杂多步推理的实时模型能力持续更新，可作为多模态 Agent 的能力参考。",
-        "source": "Google AI",
-        "date": "2026-09-16",
-        "link": "https://blog.google/technology/ai/",
-        "image": "/static/yixiu-carousel-gemini-live.webp",
+        "id": "curated-huawei-360",
+        "title": "360 与昇腾 AI 联合打造解决方案，为 AI Agent 全面提速",
+        "summary": "在华为全联接大会 2026 上，360 与昇腾 AI 联合打造面向 AI Agent 的解决方案，围绕 Agent 的构建与运行效率做联合优化。",
+        "source": "MSN 科技",
+        "date": "2026-09-19",
+        "link": "https://www.msn.cn/zh-cn/%E6%8A%80%E6%9C%AF/%E6%8A%80%E6%9C%AF%E5%85%AC%E5%8F%B8/%E5%8D%8E%E4%B8%BA%E5%85%A8%E8%81%94%E6%8E%A5%E5%A4%A7%E4%BC%9A2026-360%E4%B8%8E%E6%98%87%E8%85%BEai%E8%81%94%E5%90%88%E6%89%93%E9%80%A0%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88-%E4%B8%BAai-agent%E5%85%A8%E9%9D%A2%E6%8F%90%E9%80%9F/ar-AA2cxJKG",
+        "image": "/static/yixiu-carousel-huawei-360.webp",
     },
 ]
 

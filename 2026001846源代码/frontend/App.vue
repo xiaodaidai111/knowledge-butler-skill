@@ -39,7 +39,11 @@
           <label v-if="authMode === 'login'" class="remember-row"><input v-model="authForm.remember" type="checkbox" />保持登录状态</label>
           <label v-else class="remember-row"><input v-model="authForm.agreed" type="checkbox" />我已阅读并同意平台使用规范</label>
           <button class="auth-submit" type="submit">{{ authMode === 'login' ? '进入工作台' : '完成注册并登录' }}</button>
-          <div v-if="authMode === 'login' && demoAccountEnabled" class="demo-account"><span>本机演示账号</span><b>账号：yixiu</b><b>密码：Yixiu2026!</b></div>
+          <div v-if="authMode === 'login' && demoAccountEnabled" class="demo-account">
+            <span>演示账号 · 可一键直接进入</span>
+            <b>账号：yixiu</b><b>密码：Yixiu2026!</b>
+            <button class="demo-login" type="button" @click="loginAsDemo">一键登录演示账号</button>
+          </div>
         </form>
       </div>
     </section>
@@ -2351,7 +2355,7 @@
               </section>
               <button class="aios-report-open" type="button" @click="selectedAiosReport = message.report">查看完整报告</button>
             </details>
-            <template v-else>{{ message.text }}</template>
+            <template v-else><div class="md-body" v-html="renderMarkdown(message.text)"></div></template>
           </div>
           <button class="quick-card" type="button" @click="runOperatorPrimary">
             <span>
@@ -2452,7 +2456,7 @@
                 </figcaption>
               </figure>
             </div>
-            {{ message.text }}
+            <div class="md-body" v-html="renderMarkdown(message.text)"></div>
           </div>
         </div>
         <div class="floating-agent-prompts">
@@ -3091,6 +3095,7 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { yixiuApi } from './src/api/yixiuWeb.js'
+import { renderMarkdown } from './src/utils/markdown.js'
 import { createOverviewFromMock, mockAgents, mockUser, mockSkills } from './src/data/yixiuMock.js'
 
 const EChart = defineAsyncComponent(() => import('./src/components/EChart.vue'))
@@ -3101,7 +3106,7 @@ const navItems = [
   { key: 'knowledge', label: '能力中心', title: 'Agent、Skill 与团队资产', icon: 'network' },
   { key: 'tasks', label: '任务执行', title: '项目进展与人机协作', icon: 'wrench' },
   { key: 'search', label: '上下文中心', title: '任务上下文包生成', icon: 'search' },
-  { key: 'service', label: '服务台', title: '需求体检与托管运行', icon: 'shield' },
+  { key: 'service', label: '服务台', title: '需求体检与自动化评估', icon: 'shield' },
   { key: 'profile', label: '个人空间', title: '个人能力、成本与核查', icon: 'user' }
 ]
 
@@ -3178,12 +3183,12 @@ const defaultNewsSlides = [
     image: '/static/yixiu-carousel-intern-s2.webp'
   },
   {
-    title: '谷歌推出 Gemini 3.8 Live 与 3.8 Live Extended Thinking',
-    summary: '两款实时对话模型分别面向规模部署与高复杂度多步推理，可近实时处理视觉输入，并在对话中自动检测切换 97 种语言。',
-    source: 'IT之家',
-    date: '2026-09-16',
-    link: 'https://www.ithome.com/1/002/824.htm',
-    image: '/static/yixiu-carousel-gemini-live.webp'
+    title: '360 与昇腾 AI 联合打造解决方案，为 AI Agent 全面提速',
+    summary: '在华为全联接大会 2026 上，360 与昇腾 AI 联合打造面向 AI Agent 的解决方案，围绕 Agent 的构建与运行效率做联合优化。',
+    source: 'MSN · 科技',
+    date: '2026-09-19',
+    link: 'https://www.msn.cn/zh-cn/%E6%8A%80%E6%9C%AF/%E6%8A%80%E6%9C%AF%E5%85%AC%E5%8F%B8/%E5%8D%8E%E4%B8%BA%E5%85%A8%E8%81%94%E6%8E%A5%E5%A4%A7%E4%BC%9A2026-360%E4%B8%8E%E6%98%87%E8%85%BEai%E8%81%94%E5%90%88%E6%89%93%E9%80%A0%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88-%E4%B8%BAai-agent%E5%85%A8%E9%9D%A2%E6%8F%90%E9%80%9F/ar-AA2cxJKG',
+    image: '/static/yixiu-carousel-huawei-360.webp'
   }
 ]
 const newsSlides = ref([...defaultNewsSlides])
@@ -6406,9 +6411,9 @@ const profileRecentItems = computed(() => {
     { title: 'Agent 数据备份完成', desc: 'Claude Code · 迁移前快照已生成', icon: 'shield', page: 'knowledge', panel: 'files', meta: '昨天 22:08' },
     { title: 'Skill 候选生成：任务上下文包组装', desc: '来自 7 次稳定执行轨迹，稳定度 91%', icon: 'check', page: 'knowledge', panel: 'recheck', meta: '昨天 18:30' },
     { title: 'Context Pack 生成', desc: '权限改造任务 · 证据 14 条', icon: 'search', page: 'search', panel: 'external', meta: '昨天 15:12' }
-    // 只展示 5 条：6 条会把「最近动态」顶到 429px，整行其他两张卡跟着被拉高。
-    // 面板标题右侧本来就有「全部记录」，需要时点进去看。
-  ].slice(0, 5)
+    // 只展示 4 条：它是第一行里最高的一块，条数直接决定整行高度，
+    // 也决定「常用功能」按钮被拉伸到什么程度。面板标题右侧有「全部记录」。
+  ].slice(0, 4)
 })
 const profileGrowthScore = computed(() => 3200
   + myTasks.value.length * 70
@@ -6840,6 +6845,13 @@ const login = async () => {
     await finishAuthentication(localAccount, '', authForm.remember)
     toast('团队服务未连接，当前为本机演示模式；消息与交接不会同步到其他浏览器')
   }
+}
+// 演示环境：一键填入并登录。现场演示时手输账号密码最容易卡住，给一个直接进的入口。
+const loginAsDemo = async () => {
+  authForm.account = 'yixiu'
+  authForm.password = 'Yixiu2026!'
+  authForm.remember = true
+  await login()
 }
 const register = async () => {
   const accountName = authForm.account.trim()
@@ -9523,10 +9535,26 @@ const sendOperatorPrompt = async (prompt) => {
         return
       }
       
-      // 只调用 /miniclaw/chat，让天工在 ReAct 循环中自主决定：
-      // 1. 先调什么工具了解系统（system_overview / maintenance_task / knowledge_search 等）
-      // 2. 基于了解到的真实数据，决定是否输出 [UI_PLAN] 遥控界面
+      // 并行两路，各司其职：
+      // 1. /miniclaw/chat        —— ReAct 循环，调真实工具查数据，产出带事实的回答
+      // 2. /miniclaw/ui_operate  —— 让天工按当前任务自主规划页面操作步骤，供界面遥控执行
+      // 说明：ReAct 路径本身不会输出 [UI_PLAN]，所以界面遥控必须单独取计划。
+      const uiPlanPromise = fetch(`${host}/miniclaw/ui_operate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: value })
+      }).then(async (response) => {
+        if (!response.ok) return null
+        const payload = await response.json().catch(() => null)
+        const plan = payload?.data?.plan
+        return Array.isArray(plan) && plan.length
+          ? { plan, summary: payload.data.summary || '' }
+          : null
+      }).catch(() => null)
+
       let chatPayload
+
+
       try {
         chatPayload = await fetch(`${host}/miniclaw/chat`, {
           method: 'POST',
@@ -9555,6 +9583,12 @@ const sendOperatorPrompt = async (prompt) => {
       
       // 从天工回复中解析 [UI_PLAN]（天工自己决定是否需要）
       let uiPlan = null
+      const planned = await uiPlanPromise
+      let planSummary = ''
+      if (planned) {
+        uiPlan = planned.plan
+        planSummary = planned.summary || ''
+      }
       const planMatch = reply.match(/\[UI_PLAN\]([\s\S]*?)\[\/UI_PLAN\]/)
       if (planMatch) {
         const raw = planMatch[1].trim()
@@ -9588,6 +9622,9 @@ const sendOperatorPrompt = async (prompt) => {
       else operatorMessages.value.push(finalMsg)
       
       if (uiPlan && uiPlan.length) {
+        if (planSummary && !finalMsg.text.includes(planSummary.slice(0, 24))) {
+          finalMsg.text = `${finalMsg.text}\n\n${planSummary}`
+        }
         toast(`天工自主探索后规划了 ${uiCount} 步操作，正在执行…`)
       } else {
         toast(`天工完成 ${toolCalls} 次工具调用`)
@@ -10164,7 +10201,14 @@ const buildExecutionTrace = (uiPlan = [], data = {}) => {
     return {
       type: stage,
       stage,
-      label: meta.label,
+      stageLabel: meta.label,
+      label: (() => {
+        const act = tgActionLabel(s)
+        const who = TG_AGENT_NAMES[s.agent] || s.agentName || ''
+        if (!who || act.includes(who)) return act
+        // 切换类步骤说明「切到哪个页面」，其余步骤补上负责的智能体
+        return s.action === 'navigate' ? act : `${act} · ${who}`
+      })(),
       status: s.status || s.state || 'done',
       agent: s.agent,
       agentName: s.agentName || s.agent?.name || TG_AGENT_NAMES[s.agent] || '',
@@ -10318,15 +10362,17 @@ const tgSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const tgActionLabel = (step) => {
   const action = step?.action
   const stage = traceStageFor({ args: step })
-  const base = EXECUTION_STAGE_META[stage]?.label || '执行操作'
-  if (action === 'navigate') return `上下文定位`
-  if (action === 'transfer_attachment') return '问题解析'
+  const base = EXECUTION_STAGE_META[stage]?.label || '执行步骤'
+  if (action === 'navigate') return step?.page ? `切换到「${step.page}」` : '切换页面'
+  if (action === 'type') return '输入指令'
+  if (action === 'click_send') return '点击发送'
+  if (action === 'wait') return `等待 ${step?.seconds || 3} 秒`
+  if (action === 'transfer_attachment') return '转交图片'
   if (action === 'filter' || action === 'openPanel' || action === 'orchestrate_task') return '作业编排'
-  if (action === 'approve' || action === 'wait' || action === 'prepare_recheck') return '校验确认'
+  if (action === 'approve' || action === 'prepare_recheck') return '校验确认'
   if (action === 'report' || action === 'finalize_report' || action === 'finish') return '结果生成'
   return base
 }
-
 const tgActionDetail = (step) => {
   const action = step?.action
   const inputText = step?.input?.query || step?.input?.keyword || step?.keyword || step?.text || ''
@@ -10451,74 +10497,9 @@ const tgVisibleMessageFor = (step = {}) => {
   return `天工，请记录当前步骤结果：${tgActionLabel(step)}。`
 }
 
-const expandTgVisiblePlan = (steps = []) => {
-  const expanded = []
-  const messagedAgents = new Set()
-  steps.forEach((step) => {
-    expanded.push(step)
-    const agentId = step.agent || ''
-    const shouldAskAgent = agentId && agentId !== 'tiangong' && agentProfileMap[agentId] && !messagedAgents.has(agentId)
-    if (shouldAskAgent && ['search', 'filter', 'openPanel', 'openKnowledgeGraph', 'knowledge_search', 'openChat'].includes(step.action)) {
-      const text = tgVisibleMessageFor(step)
-      expanded.push({
-        ...step,
-        action: 'agent_type',
-        page: step.page || TG_AGENT_NAMES[agentId] || '智能体协作',
-        target: `${TG_AGENT_NAMES[agentId] || step.agentName || '智能体'}输入框`,
-        text,
-        reason: `展示天工使用键盘向${TG_AGENT_NAMES[agentId] || step.agentName || '智能体'}输入协作指令`,
-        expected: '问题写入智能体输入框'
-      })
-      expanded.push({
-        ...step,
-        action: 'agent_send',
-        page: step.page || TG_AGENT_NAMES[agentId] || '智能体协作',
-        target: `${TG_AGENT_NAMES[agentId] || step.agentName || '智能体'}发送按钮`,
-        text,
-        reason: `展示天工点击发送给${TG_AGENT_NAMES[agentId] || step.agentName || '智能体'}`,
-        expected: `${TG_AGENT_NAMES[agentId] || step.agentName || '智能体'}返回业务建议`
-      })
-      messagedAgents.add(agentId)
-    }
-  })
-  const hasBowenInteraction = expanded.some((step) => step.agent === 'bowen' && ['agent_type', 'agent_send'].includes(step.action))
-  const hasKnowledgeStep = expanded.some((step) => step.agent === 'bowen' || ['openKnowledgeGraph', 'knowledge_search'].includes(step.action))
-  if (hasKnowledgeStep && !hasBowenInteraction) {
-    const keyword = steps.map((step) => step.input?.query || step.input?.keyword || step.text || '').find(Boolean) || searchForm.query || '当前项目任务'
-    const text = `博闻，请基于「${keyword}」检索知识库资料、知识图谱节点和可沉淀经验；不知道的车型、型号、受损程度请留空，只根据已知图片和检索结果回答。`
-    expanded.push({
-      action: 'openKnowledgeGraph',
-      page: '知识库',
-      agent: 'bowen',
-      agentName: '博闻',
-      target: '知识库悬浮智能体',
-      input: { query: keyword },
-      reason: '打开博闻所在的知识库页面并准备悬浮智能体交互。',
-      expected: '知识库页面已打开，博闻悬浮智能体可交互。'
-    })
-    expanded.push({
-      action: 'agent_type',
-      page: '知识库',
-      agent: 'bowen',
-      agentName: '博闻',
-      target: '博闻悬浮输入框',
-      text,
-      reason: '点开博闻悬浮智能体并输入知识检索指令。',
-      expected: '问题写入博闻悬浮输入框。'
-    })
-    expanded.push({
-      action: 'agent_send',
-      page: '知识库',
-      agent: 'bowen',
-      agentName: '博闻',
-      target: '博闻悬浮发送按钮',
-      text,
-      reason: '发送给博闻，展示真实智能体交互。',
-      expected: '博闻返回知识资料和沉淀建议。'
-    })
-  }
-  return expanded
-}
+// 步骤完全来自天工按当前任务生成的 UI 计划，不做任何写死扩充，
+// 计划里有多少步就执行多少步（此前会机械地补 agent_type/agent_send 和固定的知识库环节）。
+const expandTgVisiblePlan = (steps = []) => (Array.isArray(steps) ? steps.filter(Boolean) : [])
 
 const tgApplyStepState = async (step = {}) => {
   const page = tgPageKey(step)
@@ -13787,7 +13768,7 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .profile-focus-shell .profile-preference-panel .profile-panel-head { margin-bottom: 8px; }
 .profile-focus-shell .profile-preference-list { grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .profile-focus-shell .profile-preference-list button {
-  min-height: 34px;
+  min-height: 30px;
   grid-template-columns: 20px minmax(0, 1fr) auto;
   padding: 0 12px;
   border: 1px solid #edf2f4;
@@ -13796,9 +13777,13 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 }
 /* 个人空间整体压矮：三块列表的行高统一收紧，卡片等高、内容等比填满。
    之前 39/76/45 的搭配让「账号与安全」撑到 429、协作画像卡撑到 383，整页偏高。 */
-.profile-focus-shell .profile-setting-list button { min-height: 34px; }
+.profile-focus-shell .profile-setting-list button { min-height: 32px; }
 .profile-focus-shell .profile-tool-grid { height: calc(100% - 42px); grid-template-rows: repeat(2, minmax(0, 1fr)); align-content: stretch; padding: 4px 10px 0; gap: 12px; }
 .profile-focus-shell .profile-tool-grid button { min-height: 0; height: 100%; }
+/* 撑高后按钮内是「图标一行 + 文字一行」，两行各自被拉伸居中，
+   图标浮在上半格、文字沉在下半格，中间空出一大截。让两行靠拢即可消掉。 */
+.profile-focus-shell .profile-tool-grid button,
+.profile-focus-shell .profile-growth-benefits span { align-content: center; }
 .profile-focus-shell .profile-timeline button { min-height: 44px; }
 .operator-panel.op-theme-tiangong { --op-accent: #2563EB; --op-accent-dark: #1a4cc0; --op-soft: #fafbfd; --op-tint: linear-gradient(178deg, #fcfdfe 0%, #f8fafe 50%, #f2f5fc 100%); }
 .operator-panel.op-theme-guanwei { --op-accent: #6B8E23; --op-accent-dark: #4f6b1a; --op-soft: #fcfcf7; --op-tint: linear-gradient(178deg, #fdfdf8 0%, #fbfcf4 50%, #f7f9ef 100%); }
@@ -13993,6 +13978,11 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .demo-account { display: grid; grid-template-columns: 1fr auto; gap: 6px 14px; padding: 13px 15px; border: 1px dashed #e0d0ab; border-radius: 11px; background: #fdf8ec; color: #6b5220; font-size: 11px; }
 .demo-account span { grid-column: 1 / -1; color: #c8872e; font-weight: 900; }
 .demo-account b { font-weight: 700; }
+/* 一键登录：现场演示不必手输账号密码 */
+.demo-account .demo-login { grid-column: 1 / -1; margin-top: 3px; min-height: 40px; border: 0; border-radius: 10px;
+  background: linear-gradient(135deg, #c8872e, #e0a94a); color: #fff; font: inherit; font-size: 12.5px; font-weight: 900;
+  cursor: pointer; box-shadow: 0 8px 18px rgba(184,124,32,.22); transition: transform .15s ease, box-shadow .15s ease; }
+.demo-account .demo-login:hover { transform: translateY(-1px); box-shadow: 0 12px 22px rgba(184,124,32,.28); }
 
 /* 个人资料编辑。 */
 .profile-editor-card { width: min(780px, 94vw); overflow: hidden; padding: 0; border: 1px solid #d4e2e2; background: #fff; }
@@ -15782,14 +15772,14 @@ button { transition: background-color .18s, border-color .18s, color .18s, trans
 .tg-run-overlay { position: fixed; left: 50%; top: 16px; z-index: 99990; width: min(840px, calc(100vw - 40px)); transform: translateX(-50%); pointer-events: none; }
 .tg-run-card { overflow: hidden; border: 1px solid rgba(193,208,204,.86); border-radius: 20px; background: linear-gradient(180deg, rgba(255,255,253,.98), rgba(248,250,247,.96)); box-shadow: 0 20px 46px rgba(36,62,63,.16), 0 1px 0 rgba(255,255,255,.96) inset; backdrop-filter: blur(18px); animation: tg-run-in .26s ease-out; pointer-events: auto; }
 @keyframes tg-run-in { from { opacity: 0; transform: translate3d(0,-12px,0) scale(.98); } to { opacity: 1; transform: translate3d(0,0,0) scale(1); } }
-.tg-run-card header { position: relative; display: grid; grid-template-columns: 54px minmax(0,1fr) auto; align-items: center; gap: 13px; padding: 14px 52px 10px 16px; }
+.tg-run-card header { position: relative; display: grid; grid-template-columns: 54px minmax(0,1fr) auto; align-items: center; gap: 13px; padding: 14px 62px 10px 16px; }
 .tg-run-mark { position: relative; width: 54px; height: 54px; display: grid; place-items: center; border-radius: 50%; background: linear-gradient(145deg, #fffdf8, #edf4ef); border: 1px solid rgba(198,214,207,.95); box-shadow: 0 12px 24px rgba(35,95,99,.14), 0 0 0 6px rgba(238,244,239,.78); }
 .tg-run-mark img { width: 46px; height: 46px; border-radius: 50%; object-fit: cover; display: block; background: #f4f8f6; }
 .tg-run-mark i { position: absolute; right: 2px; bottom: 4px; width: 12px; height: 12px; border-radius: 50%; background: #6aa876; border: 2px solid #fff; box-shadow: 0 0 0 3px rgba(106,168,118,.16); }
 .tg-run-card small { display: block; margin-bottom: 3px; color: #758887; font-size: 11px; font-weight: 800; }
 .tg-run-card b { display: block; overflow: hidden; color: #17393b; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .tg-run-card em { min-width: 54px; padding: 6px 10px; border-radius: 999px; background: #f5efe4; color: #8a662d; font-size: 12px; font-style: normal; font-weight: 900; text-align: center; }
-.tg-run-stop { position: absolute; right: 14px; top: 14px; width: 30px; height: 30px; border: 1px solid #dfd8cb; border-radius: 999px; background: rgba(255,255,255,.92); color: #8a5a36; font-size: 22px; line-height: 1; cursor: pointer; box-shadow: 0 8px 18px rgba(54,62,62,.12); transition: transform .18s ease, background .18s ease, color .18s ease; }
+
 .tg-run-stop:hover { transform: translateY(-1px); background: #fff6eb; color: #b04d2d; }
 .tg-run-progress { height: 5px; margin: 0 16px; overflow: hidden; border-radius: 999px; background: #e8eeee; }
 .tg-run-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #205f61, #b88a44); transition: width .32s ease; }
@@ -20274,6 +20264,59 @@ button:disabled { cursor: not-allowed; opacity: .48; }
     gap: 9px;
   }
 }
+
+/* ---- AI 回复的 Markdown 排版 ---- */
+.md-body { font-size: 13px; line-height: 1.8; word-break: break-word; }
+.md-body > *:first-child { margin-top: 0; }
+.md-body > *:last-child { margin-bottom: 0; }
+.md-body .md-p { margin: 0 0 8px; }
+.md-body .md-h {
+  margin: 12px 0 6px; font-weight: 800; line-height: 1.4;
+  color: #1d3238;
+}
+.md-body h3.md-h { font-size: 14.5px; }
+.md-body h4.md-h { font-size: 13.5px; }
+.md-body h5.md-h, .md-body h6.md-h { font-size: 13px; }
+.md-body .md-ul, .md-body .md-ol { margin: 4px 0 8px; padding-left: 20px; }
+.md-body .md-ul { list-style: disc; }
+.md-body .md-ol { list-style: decimal; }
+.md-body li { margin: 2px 0; }
+.md-body code {
+  padding: 1px 5px; border-radius: 5px; background: rgba(31,90,85,.08);
+  color: #1f5a55; font-family: ui-monospace, Consolas, monospace; font-size: 11.5px;
+}
+.md-body .md-pre {
+  margin: 8px 0; padding: 10px 12px; overflow: auto;
+  border: 1px solid #e6ecec; border-radius: 9px; background: #f7faf9;
+}
+.md-body .md-pre code { padding: 0; background: none; color: #33494e; line-height: 1.7; }
+.md-body .md-quote {
+  margin: 8px 0; padding: 6px 12px; border-left: 3px solid #cfe0dd;
+  background: rgba(31,90,85,.04); color: #5a7076;
+}
+.md-body .md-hr { margin: 12px 0; border: 0; border-top: 1px solid #e6ecec; }
+.md-body .md-table-wrap { margin: 8px 0; overflow-x: auto; }
+.md-body .md-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.md-body .md-table th, .md-body .md-table td {
+  padding: 7px 10px; border: 1px solid #e6ecec; text-align: left; vertical-align: top;
+}
+.md-body .md-table th { background: #f4f9f8; color: #1f5a55; font-weight: 800; white-space: nowrap; }
+.md-body .md-table tr:nth-child(even) td { background: #fbfdfd; }
+.md-body a { color: var(--teal-dark, #0f5854); text-decoration: underline; }
+
+/* ---- 天工执行浮层：关闭按钮定位与居中 ---- */
+.tg-run-stop {
+  position: absolute; right: 16px; top: 16px;
+  width: 32px; height: 32px; min-width: 32px; padding: 0;
+  display: grid; place-items: center;
+  border: 1px solid #e2dcd0; border-radius: 50%;
+  background: rgba(255,255,255,.94); color: #8a5a36;
+  font-size: 17px; font-weight: 700; line-height: 1;
+  cursor: pointer; box-shadow: 0 6px 16px rgba(54,62,62,.1);
+  transition: transform .18s ease, background .18s ease, color .18s ease, border-color .18s ease;
+}
+.tg-run-stop:hover { transform: translateY(-1px); background: #fff4ea; border-color: #e8c9b4; color: #b04d2d; }
+.tg-run-stop:active { transform: translateY(0) scale(.96); }
 </style>
 
 

@@ -2106,6 +2106,88 @@ RELAY_CONSUMES = {
 }
 
 
+def _aios_llm_plan(goal: str, mode: str, task: dict, focus_keyword: str, catalog: list) -> list:
+    """让大模型按当前任务自主决定步骤：挑哪些、什么顺序、每步做什么。
+
+    失败（网关未配置 / 调用异常 / 返回不合法）时返回空列表，由调用方回退到模板。
+    """
+    import json as _json
+
+    try:
+        from services.ai_gateway import ai_agent
+    except Exception:  # noqa: BLE001
+        return []
+    if not ai_agent.settings.configured:
+        return []
+
+    options = "\n".join(
+        "- %s | %s | 负责：%s | 产出：%s | 默认动作：%s | 目标页面：%s"
+        % (key, title, agent_id, tool, action, page)
+        for key, agent_id, title, action, page, tool, _ in catalog
+    )
+    project = task.get("equipment_name") or task.get("project_name") or "待确认项目"
+    status = task.get("status") or "未知"
+    progress = task.get("progress")
+    prompt = (
+        "你是天工，一休的路由调度中枢。请根据用户目标与任务现状，自主规划执行步骤。\n\n"
+        "【用户目标】%s\n"
+        "【当前任务】%s｜状态 %s｜进度 %s%%｜当前阶段 %s\n"
+        "【关键词】%s\n"
+        "【任务模式】%s\n\n"
+        "【可用的步骤能力（只能从这里面挑，key 必须原样使用）】\n%s\n\n"
+        "【规划要求】\n"
+        "1. 只挑这个任务真正需要的步骤，不要把所有能力都用一遍。简单任务 3~5 步即可，复杂任务最多 8 步。\n"
+        "2. 顺序由你根据任务本身决定，不必遵循固定流程。\n"
+        "3. 每一步给我一句贴合当前任务的中文标题（不要照抄能力名），以及这一步要传给执行方的一句话输入。\n"
+        "4. 第一步通常需要先确认任务现状；最后一步要能产出可追溯的结论。\n"
+        "5. 需要人工确认的动作（approval 类）请放在合适位置，不要省略。\n\n"
+        "只输出 JSON 数组，不要任何解释或代码块标记：\n"
+        '[{"key":"步骤key","title":"这一步要做什么","input":"传给执行方的话","reason":"为什么需要这一步"}]'
+        % (goal, project, status, progress if progress is not None else "-",
+           task.get("current_step") or "-", focus_keyword, mode, options)
+    )
+
+    try:
+        reply = ai_agent.chat(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            max_tokens=1200,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("AIOS 自主规划调用失败: %s", exc)
+        return []
+
+    text = str(reply or "")
+    first = text.find("[")
+    last = text.rfind("]")
+    if first < 0 or last <= first:
+        return []
+    try:
+        parsed = _json.loads(text[first:last + 1])
+    except Exception:  # noqa: BLE001
+        return []
+    if not isinstance(parsed, list):
+        return []
+
+    valid_keys = {item[0] for item in catalog}
+    picked = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip()
+        if key not in valid_keys or key in [p["key"] for p in picked]:
+            continue
+        picked.append({
+            "key": key,
+            "title": str(item.get("title") or "").strip()[:40],
+            "input": str(item.get("input") or "").strip()[:200],
+            "reason": str(item.get("reason") or "").strip()[:120],
+        })
+        if len(picked) >= 8:
+            break
+    return picked
+
+
 def _aios_plan(goal: str, mode: str = "auto", task_id: str = "") -> dict:
     goal = (goal or "").strip() or "统筹推进当前项目任务，形成 Context、执行、Eval、Memory 与 Skill 闭环。"
     mode = _aios_mode(goal, mode)
@@ -2117,8 +2199,8 @@ def _aios_plan(goal: str, mode: str = "auto", task_id: str = "") -> dict:
     steps = [
         ("sense", "tiangong", "任务确认：读取项目状态并锁定目标", "sense_overview", "工作台", "system_overview", {"goal": goal, "task_id": task.get("id"), "keyword": focus_keyword}),
         ("open_search", "guanwei", "上下文定位：进入组装台并整理任务材料", "retrieve_knowledge", "上下文中心 / 组装台", "navigate+prefill", {"query": focus_keyword, "project": equipment, "task": fault}),
-        ("retrieve", "guanwei", "证据召回：匹配需求、代码、Memory、Skill 与 Eval", "retrieve_knowledge", "上下文中心 / 组装台", "knowledge_search+rag_query", {"query": focus_keyword, "project": equipment, "task": fault}),
-        ("diagnose", "guanwei", "Context Pack：形成结论、引用、缺口和风险", "diagnose_fault", "上下文中心 / 组装台", "rag_query", {"query": focus_keyword, "project": equipment, "task": fault}),
+        ("retrieve", "guanwei", "证据召回：匹配需求、代码、Memory、Skill 与 Eval", "retrieve_knowledge", "上下文中心 / 组装台", "knowledge_search", {"query": focus_keyword, "project": equipment, "task": fault}),
+        ("diagnose", "guanwei", "Context Pack：形成结论、引用、缺口和风险", "diagnose_fault", "上下文中心 / 组装台", "knowledge_search", {"query": focus_keyword, "project": equipment, "task": fault}),
         ("open_task", "zhiju", "任务定位：打开项目任务并匹配执行 Trace", "sense_overview", "任务执行 / 项目管理", "navigate+filter", {"task_id": task.get("id"), "project": equipment, "status": task.get("status")}),
         ("operate", "zhiju", "执行编排：分派人员、Agent 与 Skill", "orchestrate_task", "任务执行 / 项目管理", "task_update+safety_check", {"task_id": task.get("id"), "project": equipment, "task": fault}),
         ("collaborate", "heming", "团队协作：生成沟通与交接草稿", "coordinate_team", "任务执行 / 协作成员", "contacts_read+conversation_message_draft", {"task_id": task.get("id"), "risk": task.get("severity")}),
@@ -2136,18 +2218,27 @@ def _aios_plan(goal: str, mode: str = "auto", task_id: str = "") -> dict:
         "repair": ["sense", "open_search", "retrieve", "diagnose", "open_task", "operate", "review", "collaborate", "open_knowledge", "archive", "memory", "finalize"],
         "project": ["sense", "open_search", "retrieve", "diagnose", "open_task", "operate", "collaborate", "review", "open_knowledge", "archive", "memory", "finalize"],
     }
-    order = priority_orders.get(mode)
-    if order:
-        rank = {key: index for index, key in enumerate(order)}
-        original_rank = {step[0]: index for index, step in enumerate(steps)}
-        steps = sorted(steps, key=lambda step: (rank.get(step[0], 99), original_rank.get(step[0], 99)))
+    # 优先让大模型按任务自主规划；失败或未配置时回退到模板顺序
+    autonomous = _aios_llm_plan(goal, mode, task, focus_keyword, steps)
+    if autonomous:
+        by_key = {step[0]: step for step in steps}
+        steps = [by_key[item["key"]] for item in autonomous]
+        llm_titles = {item["key"]: item for item in autonomous}
+        logger.info("AIOS 自主规划：%d 步（模板为 %d 步）", len(steps), len(by_key))
+    else:
+        llm_titles = {}
+        order = priority_orders.get(mode)
+        if order:
+            rank = {key: index for index, key in enumerate(order)}
+            original_rank = {step[0]: index for index, step in enumerate(steps)}
+            steps = sorted(steps, key=lambda step: (rank.get(step[0], 99), original_rank.get(step[0], 99)))
     plan_steps = []
     for key, agent_id, title, action, page, tool, step_input in steps:
         meta = AIOS_ACTION_REGISTRY.get(action, {})
         plan_steps.append({
             "key": key,
             "agent": _agent_by_id(agent_id),
-            "title": title,
+            "title": (llm_titles.get(key) or {}).get("title") or title,
             "action": action,
             "page": page,
             "ui_action": tool.split("+")[0] if tool else "invokeAgent",
@@ -2157,7 +2248,9 @@ def _aios_plan(goal: str, mode: str = "auto", task_id: str = "") -> dict:
             "requires_approval": bool(meta.get("requires_approval", False)),
             "tool_description": meta.get("description", ""),
             "status": "pending",
-            "input": step_input,
+            "input": ({**step_input, "brief": llm_titles[key]["input"]}
+                      if llm_titles.get(key, {}).get("input") else step_input),
+            "plan_reason": llm_titles.get(key, {}).get("reason", ""),
             # 接力声明：本步从信封里要什么、产出后往里写什么
             "consumes": list(RELAY_CONSUMES.get(key, ("goal", "constraints", "facts"))),
             "expected_output": meta.get("description", ""),
@@ -2211,37 +2304,23 @@ def _aios_execute_action(step: dict, snapshot: dict, commit: bool = True) -> dic
         }
     if action == "retrieve_knowledge":
         query = step.get("input", {}).get("query") or json.dumps(step.get("input", {}), ensure_ascii=False)
-        hits = _knowledge_hits(query, focus, limit=8)
-        # 真实能力：调用 RAG 向量检索补充命中（失败回退到本地匹配）
-        rag_hits = []
-        try:
-            from services.rag_service import search_similar
-            rag_hits = search_similar(query, limit=5, mode="hybrid")
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("RAG 检索失败，回退到本地匹配: %s", exc)
-        merged_refs = hits + [{"title": item.get("text", "")[:60], "type": "rag_chunk", "source": item.get("source", "lightrag"), "score": item.get("score", 1.0)} for item in rag_hits]
+        # 关键词检索：按 query 与聚焦任务的设备/故障字段召回知识库条目
+        merged_refs = _knowledge_hits(query, focus, limit=8)
         grouped: dict[str, int] = {}
         for item in merged_refs:
             key = item.get("type") or item.get("category") or "资料"
             grouped[key] = grouped.get(key, 0) + 1
         return {
-            "summary": f"已围绕「{query}」召回 {len(merged_refs)} 条资料依据（RAG {len(rag_hits)} 条 + 本地 {len(hits)} 条）。",
+            "summary": f"围绕「{query}」召回 {len(merged_refs)} 条引用依据。",
             "query": query,
             "references": merged_refs,
             "grouped": grouped,
-            "rag_hits": rag_hits,
             "usable_for": ["Context Pack", "知识网络节点", "执行方案引用", "Review / Eval 依据"],
         }
     if action == "diagnose_fault":
         sop, safety = _sop_for(focus.get("category"), focus.get("maintenanceLevel"), focus.get("fault_type"))
         query = step.get("input", {}).get("query") or _aios_focus_keyword("", focus)
-        # 真实能力：用 RAG 召回相似案例作为诊断依据
         rag_evidence = []
-        try:
-            from services.rag_service import search_similar
-            rag_evidence = search_similar(query, limit=3, mode="hybrid")
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("诊断 RAG 检索失败: %s", exc)
         diagnosis = {
             "query": query,
             "task": focus.get("fault_type") or step.get("input", {}).get("task"),
@@ -3369,16 +3448,13 @@ def files():
         analysis = {"summary": "文件已保存。"}
         try:
             from services.file_parser import parse_file
-            from services.rag_service import insert_chunks
             chunks = parse_file(path)
             if chunks:
-                ingestion = insert_chunks(chunks, source=original_name)
                 analysis = {
-                    "summary": f"文件已切片入库，共 {ingestion.get('inserted', 0)}/{ingestion.get('total', 0)} 块。",
+                    "summary": f"文件已解析，共 {len(chunks)} 段可读文本。",
                     "chunks": len(chunks),
-                    "ingestion": ingestion,
                 }
-                parse_status = "切片入库成功" if ingestion.get("success") else f"部分入库（失败 {ingestion.get('failed', 0)} 块）"
+                parse_status = "已解析"
             else:
                 parse_status = "无可提取文本"
         except Exception as exc:  # noqa: BLE001
@@ -4012,11 +4088,9 @@ def upload_knowledge_file():
     # 切片入库
     try:
         from services.file_parser import parse_file
-        from services.rag_service import insert_chunks
         chunks = parse_file(path)
         if not chunks:
             return error_response(422, "文件无可提取文本（可能是扫描版 PDF 或空文件）")
-        ingestion = insert_chunks(chunks, source=original_name)
     except Exception as exc:  # noqa: BLE001
         logger.error("知识文件入库失败 %s: %s", original_name, exc)
         return error_response(500, f"知识入库失败: {exc}")
@@ -4024,7 +4098,7 @@ def upload_knowledge_file():
     # 写入知识候选条目，待人工审核
     item_id = f"kb-{uuid.uuid4().hex[:12]}"
     title = form.get("title") or Path(original_name).stem
-    summary = f"由 {original_name} 切片入库，共 {ingestion.get('inserted', 0)}/{ingestion.get('total', 0)} 块"
+    summary = f"来自 {original_name}，共 {len(chunks)} 段可读文本"
     tags = form.get("tags", "知识库导入,文件切片").split(",") if form.get("tags") else ["知识库导入", "文件切片"]
     content_preview = chunks[0][:500] if chunks else ""
     with _db() as conn:
@@ -4033,7 +4107,7 @@ def upload_knowledge_file():
             (
                 item_id, title, form.get("type", "知识库导入"), form.get("category", "资料"),
                 form.get("equipment", ""), form.get("model", ""), summary,
-                f"# {title}\n\n来源文件：{original_name}\n\n## 切片预览\n{content_preview}\n\n## 切片入库统计\n- 总块数：{ingestion.get('total', 0)}\n- 成功：{ingestion.get('inserted', 0)}\n- 失败：{ingestion.get('failed', 0)}\n",
+                f"# {title}\n\n来源文件：{original_name}\n\n## 切片预览\n{content_preview}\n\n## 切片入库统计\n- 总块数：{len(chunks)}\n- 成功：{len(chunks)}\n- 失败：0\n",
                 json.dumps(tags, ensure_ascii=False), original_name, "pending", "", "", _now(), _now(),
             ),
         )
@@ -4049,24 +4123,6 @@ def upload_knowledge_file():
     }, "知识文件已切片入库，等待人工审核")
 
 
-@yixiu_bp.get("/knowledge/similar")
-def knowledge_similar():
-    """向量相似度检索：基于 LightRAG hybrid 模式检索 top 命中块"""
-    query = request.args.get("query", "").strip()
-    if not query:
-        return error_response(400, "检索 query 不能为空")
-    try:
-        limit = int(request.args.get("limit", 5))
-    except ValueError:
-        limit = 5
-    mode = request.args.get("mode", "hybrid")
-    try:
-        from services.rag_service import search_similar
-        hits = search_similar(query, limit=limit, mode=mode)
-    except Exception as exc:  # noqa: BLE001
-        logger.error("相似度检索失败: %s", exc)
-        return error_response(500, f"检索失败: {exc}")
-    return success_response({"query": query, "hits": hits, "total": len(hits), "mode": mode}, "相似度检索成功")
 
 
 @yixiu_bp.post("/knowledge/update")
@@ -5605,6 +5661,111 @@ def _service_prerequisites(rule: dict, sources) -> list:
     return out
 
 
+def _service_ai_advice(text: str, intake: dict, base: dict) -> dict:
+    """让大模型基于本次体检的完整信息，给出「哪些任务可以交给 Agent」的针对性建议。
+
+    规则引擎负责算分与 ROI，这一段负责说人话：指出可替代的任务、判断依据、
+    第一步怎么做，以及哪些环节必须留人工。失败时返回空 dict，由前端隐藏该区块。
+    """
+    import json as _json
+
+    try:
+        from services.ai_gateway import ai_agent
+    except Exception:  # noqa: BLE001
+        return {}
+    if not ai_agent.settings.configured:
+        return {}
+
+    role = str(intake.get("role") or "").strip() or "未填写"
+    picked = "、".join(str(t) for t in (intake.get("tasks") or [])) or "未勾选"
+    role_note = str(intake.get("roleNote") or "").strip() or "无"
+    task_note = str(intake.get("taskNote") or "").strip() or "无"
+    note = str(intake.get("note") or "").strip() or "无"
+    freq_label = next((o["label"] for o in SERVICE_FREQ_OPTIONS
+                       if o["key"] == intake.get("frequency")), "未填写")
+    time_label = next((o["label"] for o in SERVICE_TIME_OPTIONS
+                       if o["key"] == intake.get("duration")), "未填写")
+    src_label = "、".join(next((o["label"] for o in SERVICE_DATA_SOURCES if o["key"] == k), str(k))
+                          for k in (intake.get("sources") or [])) or "未填写"
+
+    rule_tasks = "；".join(
+        "%s（可行性 %s，净收益 ¥%s/月）" % (t.get("task"), t.get("feasibility"),
+                                          (t.get("automation") or {}).get("netBenefit", "-"))
+        for t in (base.get("details") or [])
+    ) or "规则引擎未匹配到明确任务"
+
+    prompt = (
+        "你是需求诊断师观微。用户刚做完一次「需求体检」，请基于下面这份真实填写，"
+        "判断哪些工作可以交给 Agent 托管、哪些必须留人工，并给出可执行的第一步。\n\n"
+        "【岗位】%s\n"
+        "【勾选的重复事项】%s\n"
+        "【频次】%s\n【单次耗时】%s\n【数据来源】%s\n"
+        "【岗位说明】%s\n"
+        "【重复事项说明】%s\n"
+        "【数据情况说明】%s\n"
+        "【用户原话】%s\n"
+        "【规则引擎的结论】%s\n\n"
+        "要求：\n"
+        "1. replaceable 列出 2~4 项最适合交给 Agent 的具体任务，任务名要贴合用户实际在做的活，"
+        "不要照抄上面的能力名。confidence 只能填 高/中/低。\n"
+        "2. why 写清判断依据（频次、规则是否稳定、数据拿不拿得到），一句到两句。\n"
+        "3. how 写这一步落地最先要做什么，要具体到动作。\n"
+        "4. keepHuman 列出必须人工把关的环节，2~3 条。\n"
+        "5. advice 是整体建议，2~3 句，直接说结论：该不该现在交给 Agent、从哪件开始、为什么。\n"
+        "6. watch 列 2~3 条真实风险或前提，不要空话。\n\n"
+        "只输出 JSON，不要解释、不要代码块标记：\n"
+        '{"headline":"一句话结论","replaceable":[{"task":"","agent":"","confidence":"高","why":"","how":""}],'
+        '"keepHuman":[""],"advice":"","watch":[""]}'
+        % (role, picked, freq_label, time_label, src_label, role_note, task_note, note, text[:400], rule_tasks)
+    )
+
+    try:
+        reply = ai_agent.chat(messages=[{"role": "user", "content": prompt}],
+                              temperature=0.3, max_tokens=1600)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("体检 AI 建议生成失败: %s", exc)
+        return {}
+
+    raw = str(reply or "")
+    first, last = raw.find("{"), raw.rfind("}")
+    if first < 0 or last <= first:
+        return {}
+    try:
+        parsed = _json.loads(raw[first:last + 1])
+    except Exception:  # noqa: BLE001
+        logger.warning("体检 AI 建议解析失败")
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+
+    items = []
+    for item in (parsed.get("replaceable") or [])[:4]:
+        if not isinstance(item, dict):
+            continue
+        task = str(item.get("task") or "").strip()
+        if not task:
+            continue
+        conf = str(item.get("confidence") or "中").strip()
+        items.append({
+            "task": task[:40],
+            "agent": str(item.get("agent") or "").strip()[:20],
+            "confidence": conf if conf in {"高", "中", "低"} else "中",
+            "why": str(item.get("why") or "").strip()[:160],
+            "how": str(item.get("how") or "").strip()[:160],
+        })
+
+    def _list(key, limit=4):
+        return [str(x).strip()[:120] for x in (parsed.get(key) or []) if str(x).strip()][:limit]
+
+    return {
+        "headline": str(parsed.get("headline") or "").strip()[:60],
+        "replaceable": items,
+        "keepHuman": _list("keepHuman", 3),
+        "advice": str(parsed.get("advice") or "").strip()[:400],
+        "watch": _list("watch", 3),
+    }
+
+
 def _service_report(text: str, project: str, intake: Optional[dict] = None) -> dict:
     """需求体检报告。
 
@@ -5613,6 +5774,10 @@ def _service_report(text: str, project: str, intake: Optional[dict] = None) -> d
     评分与 ROI 因此更贴近真实情况（这也是引导式体检精度更高的原因）。
     """
     intake = intake if isinstance(intake, dict) else {}
+    # 把问卷里的自由填写并进文本，关键词抽取与 AI 判断都能用上
+    extra = " ".join(str(intake.get(k) or "") for k in ("roleNote", "taskNote", "note")).strip()
+    if extra:
+        text = ("%s %s" % (text, extra)).strip()
     hits = _service_extract(text)
 
     # 把问卷勾选的任务也纳入候选（用户可能勾了但没在文本里提）
@@ -5671,22 +5836,22 @@ def _service_report(text: str, project: str, intake: Optional[dict] = None) -> d
     saved_month = top["automation"]["savedHoursPerMonth"] if top else 0.0
     net = top["automation"]["netBenefit"] if top else 0
 
-    # 结论：净收益为负时明确劝退，而不是无条件推销托管。
-    # 一个只会说「值得买」的体检工具没有可信度。
+    # 结论：净收益为负时明确劝退，而不是无条件推荐。
+    # 一个只会说「值得做」的体检工具没有可信度。
     if top is None:
         verdict, advice = "信息不足", "补充描述你每天或每周重复在做的事，再重新体检。"
     elif top["automation"]["netBenefit"] <= 0:
-        verdict = "建议先不托管"
-        advice = ("按当前频次与单次耗时估算，每月节省约 ¥%d，低于托管费 ¥%d，"
-                  "此时开通并不划算。建议先把流程标准化，或先用不计费的内置能力按需处理。" % (
+        verdict = "建议先不自动化"
+        advice = ("按当前频次与单次耗时估算，每月节省约 ¥%d，低于投入 ¥%d，"
+                  "此时并不划算。建议先把流程标准化，或先用不计费的内置能力按需处理。" % (
                       top["automation"]["monthlySaving"], top["automation"]["monthlyCost"]))
     elif top["feasibility"] >= 75:
-        verdict = "建议开通托管"
-        advice = ("该项频次高、流程规则稳定、数据可得性良好，自动化收益可覆盖托管成本，"
+        verdict = "建议落地自动化"
+        advice = ("该项频次高、流程规则稳定、数据可得性良好，收益可覆盖投入，"
                   "建议按下方落地路径推进。")
     elif top["feasibility"] >= 55:
         verdict = "可试跑验证"
-        advice = "收益与成本接近平衡，建议先按首周试跑数据再决定是否转常规托管。"
+        advice = "收益与成本接近平衡，建议先按首周试跑数据再决定是否转为常规自动化。"
     else:
         verdict = "建议先标准化"
         advice = "该项规则化程度或数据可得性偏低，建议先把流程整理成清单与样例，再交给 Agent。"
@@ -5698,7 +5863,7 @@ def _service_report(text: str, project: str, intake: Optional[dict] = None) -> d
         summary = "信息还不够。说说具体是哪些事、多久做一次、现在用什么工具？"
 
     prices = [p["automation"]["monthlyCost"] for p in positions]
-    return {
+    result = {
         "project": project,
         "summary": summary,
         "verdict": verdict,
@@ -5724,6 +5889,10 @@ def _service_report(text: str, project: str, intake: Optional[dict] = None) -> d
             "sources": list(sources),
         },
     }
+    # AI 针对性建议（哪些任务能交给 Agent、第一步做什么、哪些必须留人工）
+    if hits:
+        result["ai"] = _service_ai_advice(text, intake, result)
+    return result
 
 
 @yixiu_bp.post("/service/diagnose")
